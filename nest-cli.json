@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "server",
+  "compilerOptions": {
+    "deleteOutDir": false,
+    "tsConfigPath": "tsconfig.node.json",
+    "typeCheck": false,
+    "builder": {
+      "type": "swc",
+      "options": {
+        "filenames": ["server", "shared"],
+        "stripLeadingPaths": false
+      }
+    },
+    "assets": [
+      {
+        "include": "capabilities/**/*.json",
+        "outDir": "dist/server",
+        "watchAssets": true
+      }
+    ]
+  }
+}
