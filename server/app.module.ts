@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { PlatformModule } from '@lark-apaas/fullstack-nestjs-core';
 
 import { GlobalExceptionFilter } from './common/filters/exception.filter';
+import { RouterModule } from './modules/router/router.module';
 import { ViewModule } from './modules/view/view.module';
 
 @Module({
@@ -10,7 +11,7 @@ import { ViewModule } from './modules/view/view.module';
     // 平台 Module，提供平台能力
     PlatformModule.forRoot(),
     // ====== @route-section: business-modules START ======
-    // Place all business modules here.Do NOT add fallback modules here.
+    RouterModule,
     // ====== @route-section: business-modules END ======
 
     // ⚠️ @route-order: last

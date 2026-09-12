@@ -66,8 +66,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         error: {
           code: ResponseCode.INTERNAL_ERROR,
           message: '服务器内部错误',
-          stack: (exception as Error).stack,
-          cause: (exception as Error).cause as string,
+          // Internal exception details never leave the server.
           timestamp: Date.now(),
         },
       };

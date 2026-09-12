@@ -1,0 +1,17 @@
+services:
+  router:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?请先配置 .env 中的 ADMIN_TOKEN}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?请先配置 .env 中的 GATEWAY_TOKEN}
+    volumes:
+      - router-data:/app/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  router-data:

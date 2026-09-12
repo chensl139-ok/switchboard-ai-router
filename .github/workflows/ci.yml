@@ -1,0 +1,20 @@
+name: Router checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  realtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: standalone
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: standalone/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: docker build -t switchboard:test .

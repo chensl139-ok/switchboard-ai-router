@@ -62,3 +62,8 @@ pnpm-lock.yaml
 
 # Agent files
 .agent/
+
+.env
+.env.*
+!.env.example
+standalone/data/

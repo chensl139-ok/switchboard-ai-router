@@ -1,0 +1,4 @@
+ALTER POLICY "修改全部数据" ON router_config USING ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ','))) WITH CHECK ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ',')));
+ALTER POLICY "修改全部数据" ON router_event USING ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ','))) WITH CHECK ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ',')));
+ALTER POLICY "修改全部数据" ON router_rate USING ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ','))) WITH CHECK ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ',')));
+ALTER POLICY "修改全部数据" ON router_lease USING ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ','))) WITH CHECK ('router_admin' = ANY(string_to_array(current_setting('app.role_ids', true), ',')));
