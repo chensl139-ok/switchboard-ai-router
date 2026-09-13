@@ -1,5 +1,5 @@
 import {plainText,contentParts} from './protocols.mjs';
-import {usablePrice,priceEstimate} from './pricing.mjs';
+import {usablePrice,priceEstimate,priceAt} from './pricing.mjs';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
@@ -22,7 +22,7 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  if(state.strategy==='economy'){
   if(input.messages.some(m=>contentParts(m.content).some(p=>p.type==='image_url')))throw fail('经济优先尚不估算图片费用，请显式指定模型或选择其他策略');
   const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||2048;
-  const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget)})));
+  const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
   priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
   if(!priced.length)throw fail('没有同币种且价格有效的候选模型，请同步或录入价格；未知价格不会当作免费',503);
   return priced.slice(0,state.routing.maxAttempts);

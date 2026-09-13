@@ -41,3 +41,24 @@ test('HTTP 与 SSE 三种上游协议保留缓存命中用量',async()=>{
   ['anthropic',[{type:'message_start',message:anthropic},{type:'message_delta',usage:{output_tokens:10},delta:{stop_reason:'end_turn'}},{type:'message_stop'}]]
  ]){let usage;await consumeSSE(new Response(events.map(e=>'data: '+(typeof e==='string'?e:JSON.stringify(e))+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}}),protocol,'m',async()=>{},null,u=>usage=u);assert.equal(usage.cachedInputTokens,80);assert.equal(usage.inputTokens,100);}
 });
+
+test('分时价格：时区、跨午夜、边界、重叠及经济路由',async()=>{
+ const {priceAt,priceEstimate}=await import('../pricing.mjs');
+ const base={currency:'USD',inputPerMillion:5,outputPerMillion:5,cachedInputPerMillion:1,expiresAt:'2099-01-01T00:00:00Z'};
+ const peak={kind:'peak',start:'09:00',end:'18:00',inputPerMillion:10,outputPerMillion:10,cachedInputPerMillion:2};
+ const offpeak={kind:'offpeak',start:'23:00',end:'07:00',inputPerMillion:1,outputPerMillion:1,cachedInputPerMillion:0};
+ const price=validatePrice({...base,timeZone:'Asia/Shanghai',periods:[peak,offpeak]});
+ for(const [utc,label,rate] of [['2026-09-13T01:00:00Z','高峰',10],['2026-09-13T10:00:00Z','基础',5],['2026-09-13T15:00:00Z','空闲',1],['2026-09-13T22:59:59Z','空闲',1],['2026-09-13T23:00:00Z','基础',5]]){const now=Date.parse(utc);assert.equal(priceAt(price,now).periodLabel,label);assert.equal(priceEstimate(price,1000000,0,0,now),rate);}
+ assert.throws(()=>validatePrice({...base,periods:[peak,{...offpeak,start:'17:00'}]}),/重叠/);
+ assert.throws(()=>validatePrice({...base,periods:[{...peak,start:'24:00'}]}),/HH:mm/);
+ assert.throws(()=>validatePrice({...base,periods:[{...peak,end:'09:00'}]}),/不能相同/);
+ assert.throws(()=>validatePrice({...base,timeZone:'invalid-zone'}),/时区/);
+ assert.throws(()=>validatePrice({...base,periods:[{...peak,inputPerMillion:-1}]}),/非负/);
+ const unknownCache=validatePrice({...base,periods:[{...peak,cachedInputPerMillion:undefined}]});
+ assert.equal(usageCost({prices:{m:unknownCache}},'m',{known:true,inputTokens:100,outputTokens:10,cachedInputTokens:50},Date.parse('2026-09-13T01:00:00Z')).estimatedCost,null);
+ const providers=[{id:'a',name:'A',enabled:true,secret:'s',model:'m',models:['m'],prices:{m:price}},{id:'b',name:'B',enabled:true,secret:'s',model:'m',models:['m'],prices:{m:validatePrice({...base,inputPerMillion:3,outputPerMillion:3})}}];
+ const state={providers,strategy:'economy',active:'a',logs:[],rules:[],routing:{maxAttempts:3,currency:'USD'}};
+ assert.equal(selectRoutes(state,{messages:[],max_tokens:100},{now:Date.parse('2026-09-13T01:00:00Z')})[0].id,'b');
+ assert.equal(selectRoutes(state,{messages:[],max_tokens:100},{now:Date.parse('2026-09-13T15:00:00Z')})[0].id,'a');
+ assert.equal(priceAt(validatePrice({...base,timeZone:'America/New_York',periods:[{...peak,start:'01:00',end:'02:00'}]}),Date.parse('2026-11-01T06:30:00Z')).periodLabel,'高峰');
+});
