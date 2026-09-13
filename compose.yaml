@@ -7,8 +7,11 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?请运行 npm run setup}
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?请运行 npm run setup}
       DATA_DIR: /app/data
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
       ALLOW_HTTP_UPSTREAM: ${ALLOW_HTTP_UPSTREAM:-false}
+      UPSTREAM_ALLOWED_PRIVATE_HOSTS: ${UPSTREAM_ALLOWED_PRIVATE_HOSTS:-}
+      UPSTREAM_PROXY_FAKE_IP: ${UPSTREAM_PROXY_FAKE_IP:-false}
     volumes:
       - router-data:/app/data
     restart: unless-stopped

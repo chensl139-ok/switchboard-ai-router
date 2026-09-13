@@ -7,6 +7,8 @@ services:
       DATA_DIR: /app/data
       COOKIE_SECURE: "true"
       ALLOW_HTTP_UPSTREAM: ${ALLOW_HTTP_UPSTREAM:-false}
+      UPSTREAM_ALLOWED_PRIVATE_HOSTS: ${UPSTREAM_ALLOWED_PRIVATE_HOSTS:-}
+      UPSTREAM_PROXY_FAKE_IP: ${UPSTREAM_PROXY_FAKE_IP:-false}
       WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
     volumes:
       - router-data:/app/data
