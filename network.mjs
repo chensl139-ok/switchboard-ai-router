@@ -11,7 +11,7 @@ export function publicAddress(address){
 }
 export function safeFetch(value,options={}){
  const url=new URL(value);const host=url.hostname.replace(/^\[|\]$/g,'');
- const officialHosts=['api.siliconflow.cn','api.siliconflow.com','api.deepseek.com','api.openai.com','api.anthropic.com','generativelanguage.googleapis.com','dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','openrouter.ai'];
+ const officialHosts=['s3.siliconflow.cn','api.siliconflow.cn','api.siliconflow.com','api.deepseek.com','api.openai.com','api.anthropic.com','generativelanguage.googleapis.com','dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','openrouter.ai'];
  const proxyAddressAllowed=address=>process.env.UPSTREAM_PROXY_FAKE_IP==='true'&&url.protocol==='https:'&&officialHosts.includes(host)&&/^198\.(18|19)\./.test(address);
  const allowedPrivate=(process.env.UPSTREAM_ALLOWED_PRIVATE_HOSTS||'').split(',').map(s=>s.trim()).includes(host);
  if(url.username||url.password||!['https:','http:'].includes(url.protocol))return Promise.reject(Error('上游 URL 无效'));

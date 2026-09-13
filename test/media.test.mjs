@@ -2,7 +2,7 @@ import {test} from 'node:test';import assert from 'node:assert/strict';import {m
 test('媒体接口：图片格式转换、音频二进制、上传、视频持久化隔离与共用额度',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'router-media-'));const seen=[];let polls=0;
  const options={dir,admin:'a'.repeat(32),gateway:'g'.repeat(32),fetcher:async(url,opts)=>{
-  if(url.startsWith('https://example.com/')){assert.deepEqual(opts.headers,{});return new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/png'}});}
+  if(url.startsWith('https://example.com/')){assert.deepEqual(opts.headers,{});return new Response(new Uint8Array([137,80,78,71,13,10,26,10]),{headers:{'content-type':'application/octet-stream'}});}
   assert.equal(opts.headers.authorization,'Bearer upstream-test');assert.equal(opts.redirect,'error');
   if(url.endsWith('/audio/transcriptions')){const form=await new Response(opts.body,{headers:opts.headers}).formData();assert.equal(form.get('model'),'asr');assert.deepEqual(new Uint8Array(await form.get('file').arrayBuffer()),new Uint8Array([0,128,255]));return Response.json({text:'测试转录'});}
   const b=JSON.parse(opts.body);seen.push({url,b});
@@ -31,7 +31,7 @@ test('媒体接口：图片格式转换、音频二进制、上传、视频持�
   assert.equal((await request('/v1/video/status',{requestId:task},auth)).status,200);
   assert.equal((await request('/v1/audio/speech',{model:'sf::tts',input:'quota'},auth)).status,429);
   const logs=(await (await request('/api/logs',null,session)).json()).items;assert.equal(logs.length,4);assert.equal(logs.find(l=>l.model==='image').estimated_cost,0.2);assert.equal(logs.find(l=>l.model==='tts').estimated_cost,null);
-  const encoded=await request('/v1/images/generations',{model:'sf::image',prompt:'encoded image',size:'512x512',n:2,response_format:'b64_json'},{authorization:'Bearer '+other});assert.equal(encoded.status,200);assert.equal((await encoded.json()).data[0].b64_json,'AQID');
+  const encoded=await request('/v1/images/generations',{model:'sf::image',prompt:'encoded image',size:'512x512',n:2,response_format:'b64_json'},{authorization:'Bearer '+other});assert.equal(encoded.status,200);assert.equal((await encoded.json()).data[0].b64_json,'iVBORw0KGgo=');
   await new Promise(r=>app.close(r));app=createPlatform(options);await new Promise(r=>app.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.address().port;
   assert.equal((await request('/v1/video/status',{requestId:task},auth)).status,200);
   const tenant=await (await request('/api/account/tenants',{name:'Other'},session)).json();await request('/api/account/switch',{tenantId:tenant.id},session);assert.equal((await request('/v1/video/status',{requestId:task},session)).status,404);
