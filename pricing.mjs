@@ -7,7 +7,7 @@ export function validatePrice(input,source='manual'){
  if(input.billingUnit!==undefined&&!['tokens','image','video','audio'].includes(input.billingUnit))throw fail('不支持的计价单位');
  for(const field of ['inputPerMillion','outputPerMillion','cachedInputPerMillion','perRequest','perImage','perVideo','perThousandChars'])if(input[field]!==undefined&&(!Number.isFinite(input[field])||input[field]<0||input[field]>1000000))throw fail('价格须为非负有限数值');
  if(!['image','video','audio'].includes(input.billingUnit)&&(input.inputPerMillion===undefined||input.outputPerMillion===undefined))throw fail('需同时填写输入与输出价格');
- const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||new Date(Date.now()+(source==='openrouter'?7:30)*86400000).toISOString();
+ const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||(source==='openrouter'?new Date(Date.now()+7*86400000).toISOString():'9999-12-31T23:59:59.999Z');
  if(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.now())throw fail('价格有效期需晚于当前时间');
  if(input.billingUnit==='image'){if(input.perImage===undefined)throw fail('需填写每张图片价格');if(input.periods?.length)throw fail('图片计价暂不支持分时价格');return {billingUnit:'image',currency:input.currency,perImage:input.perImage,source,observedAt,expiresAt};}
  if(input.billingUnit==='video'){if(input.perVideo===undefined)throw fail('需填写每个视频价格');if(input.periods?.length)throw fail('视频计价暂不支持分时价格');return {billingUnit:'video',currency:input.currency,perVideo:input.perVideo,source,observedAt,expiresAt};}
