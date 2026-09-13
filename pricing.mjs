@@ -4,10 +4,12 @@ const includesMinute=(start,end,m)=>start<end?m>=start&&m<end:m>=start||m<end;
 const fail=message=>Object.assign(new Error(message),{status:400});
 export function validatePrice(input,source='manual'){
  if(!input||!['USD','CNY'].includes(input.currency))throw fail('价格币种须为 USD 或 CNY');
- for(const field of ['inputPerMillion','outputPerMillion','cachedInputPerMillion','perRequest'])if(input[field]!==undefined&&(!Number.isFinite(input[field])||input[field]<0||input[field]>1000000))throw fail('价格须为非负有限数值');
- if(input.inputPerMillion===undefined||input.outputPerMillion===undefined)throw fail('需同时填写输入与输出价格');
+ if(input.billingUnit!==undefined&&!['tokens','image'].includes(input.billingUnit))throw fail('不支持的计价单位');
+ for(const field of ['inputPerMillion','outputPerMillion','cachedInputPerMillion','perRequest','perImage'])if(input[field]!==undefined&&(!Number.isFinite(input[field])||input[field]<0||input[field]>1000000))throw fail('价格须为非负有限数值');
+ if(input.billingUnit!=='image'&&(input.inputPerMillion===undefined||input.outputPerMillion===undefined))throw fail('需同时填写输入与输出价格');
  const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||new Date(Date.now()+(source==='openrouter'?7:30)*86400000).toISOString();
  if(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.now())throw fail('价格有效期需晚于当前时间');
+ if(input.billingUnit==='image'){if(input.perImage===undefined)throw fail('需填写每张图片价格');if(input.periods?.length)throw fail('图片计价暂不支持分时价格');return {billingUnit:'image',currency:input.currency,perImage:input.perImage,source,observedAt,expiresAt};}
  let periods=[];const timeZone=input.timeZone||'Asia/Shanghai';try{new Intl.DateTimeFormat('en',{timeZone}).format();}catch{throw fail('无效的 IANA 时区');}
  if(input.periods!==undefined){if(!Array.isArray(input.periods)||input.periods.length>8)throw fail('最多配置 8 个价格时段');const occupied=new Set();periods=input.periods.map(row=>{if(!row||!['peak','offpeak'].includes(row.kind))throw fail('时段类型须为高峰或空闲');const start=minute(row.start),end=minute(row.end);if(start===end)throw fail('开始与结束时间不能相同；全天价格请使用基础价格');const weekdays=row.weekdays??[1,2,3,4,5,6,7];if(!Array.isArray(weekdays)||!weekdays.length||weekdays.some(d=>!Number.isInteger(d)||d<1||d>7)||new Set(weekdays).size!==weekdays.length)throw fail('请选择有效且不重复的星期');for(const day of weekdays)for(let offset=0;offset<(end-start+1440)%1440;offset++){const point=((day-1)*1440+start+offset)%10080;if(occupied.has(point))throw fail('价格时段不能重叠（包括跨午夜时段）');occupied.add(point);}const rate=validatePrice({...Object.fromEntries(priceFields.map(k=>[k,row[k]])),currency:input.currency,expiresAt},source);return {weekdays:[...weekdays].sort((a,b)=>a-b),kind:row.kind,start:row.start,end:row.end,...Object.fromEntries(priceFields.filter(k=>rate[k]!==undefined).map(k=>[k,rate[k]]))};});}
  return {timeZone,periods,currency:input.currency,inputPerMillion:input.inputPerMillion,outputPerMillion:input.outputPerMillion,...(input.cachedInputPerMillion!==undefined?{cachedInputPerMillion:input.cachedInputPerMillion}:{}),perRequest:input.perRequest||0,source,observedAt,expiresAt};
@@ -19,7 +21,7 @@ export function openRouterPrice(row){
  const cache=p.input_cache_read;const cachedInputPerMillion=typeof cache==='string'&&cache.trim()!==''&&Number.isFinite(Number(cache))&&Number(cache)>=0?Number(cache)*1000000:undefined;
  return validatePrice({cachedInputPerMillion,currency:'USD',inputPerMillion:Number(p.prompt)*1000000,outputPerMillion:Number(p.completion)*1000000,perRequest:Number(p.request||0)},'openrouter');
 }
-export function usablePrice(price,currency,now=Date.now()){return !!price&&price.currency===currency&&Number.isFinite(price.inputPerMillion)&&Number.isFinite(price.outputPerMillion)&&price.inputPerMillion>=0&&price.outputPerMillion>=0&&Date.parse(price.expiresAt)>now;}
+export function usablePrice(price,currency,now=Date.now()){return !!price&&price.billingUnit!=='image'&&price.currency===currency&&Number.isFinite(price.inputPerMillion)&&Number.isFinite(price.outputPerMillion)&&price.inputPerMillion>=0&&price.outputPerMillion>=0&&Date.parse(price.expiresAt)>now;}
 export function priceAt(price,now=Date.now()){
  if(!price?.periods?.length)return price;
  const parts=new Intl.DateTimeFormat('en-GB',{timeZone:price.timeZone||'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23',weekday:'short'}).formatToParts(new Date(now));

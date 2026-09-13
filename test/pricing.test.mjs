@@ -77,3 +77,10 @@ test('工作日价格和跨午夜星期归属',async()=>{
  assert.throws(()=>validatePrice({...base,periods:[{...peak,weekdays:[]}]}),/星期/);
  assert.equal(validatePrice({...base,periods:[peak,{...peak,weekdays:[6,7]}]}).periods.length,2);
 });
+
+test('按张价格不会被作为免费文本价格参与经济路由',async()=>{
+ const {usablePrice}=await import('../pricing.mjs');const price=validatePrice({billingUnit:'image',currency:'CNY',perImage:0});
+ assert.equal(price.perImage,0);assert.equal(price.inputPerMillion,undefined);assert.equal(usablePrice(price,'CNY'),false);
+ assert.equal(usageCost({prices:{m:price}},'m',{known:true,inputTokens:5,outputTokens:5}).estimatedCost,null);
+ assert.throws(()=>validatePrice({billingUnit:'image',currency:'CNY'}),/每张图片/);
+});
