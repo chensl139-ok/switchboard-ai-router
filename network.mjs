@@ -26,7 +26,7 @@ export function safeFetch(value,options={}){
  return new Promise((resolveResponse,reject)=>{
   const request=protocol.request(url,{method:options.method||'GET',headers:options.headers,signal:options.signal,lookup:resolve},response=>{
    const headers=new Headers();for(const [name,value] of Object.entries(response.headers))if(value!==undefined)headers.set(name,Array.isArray(value)?value.join(','):value);
-   let bytes=0;const limited=new Transform({transform(chunk,encoding,callback){bytes+=chunk.length;if(bytes>Math.min(options.maxResponseBytes||8*1024*1024,64*1024*1024))return callback(Error('上游响应超过大小限制'));callback(null,chunk);}});response.on('error',error=>limited.destroy(error));limited.on('close',()=>response.destroy());response.pipe(limited);
+   let bytes=0;let settled=false;const limited=new Transform({transform(chunk,encoding,callback){if(settled||this.destroyed)return callback();bytes+=chunk.length;if(bytes>Math.min(options.maxResponseBytes||8*1024*1024,64*1024*1024)){settled=true;return callback(Error('上游响应超过大小限制'));}callback(null,chunk);}});response.on('error',error=>{settled=true;if(!limited.destroyed)limited.destroy(error);});limited.on('close',()=>{if(!response.complete&&!response.destroyed)response.destroy();});response.pipe(limited);
    resolveResponse(new Response([204,205,304].includes(response.statusCode)?null:Readable.toWeb(limited),{status:response.statusCode,statusText:response.statusMessage,headers}));
   });
   request.on('error',reject);if(options.body)request.write(options.body);request.end();
