@@ -33,7 +33,7 @@ Switchboard 采用「路由器 + 控制台」双位面设计：
 - 控制台负责账号、租户、价格、API Key 与模型管理；  
 - 平台层提供 OpenAI / Anthropic 兼容边界，并通过统一 schema 做能力发现与错误归一化。
 
-当前仓库版本：`3.2.0`（在 `package.json` 中声明）。
+当前仓库版本：`3.2.1`（在 `package.json` 中声明）。
 
 ### 本次 README 更新内容
 

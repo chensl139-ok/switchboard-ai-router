@@ -1,5 +1,6 @@
 import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
+import {modelCapabilities} from './model-capability.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
@@ -7,7 +8,7 @@ export function stopPlayground(){if(controller){controller.abort();controller=nu
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
 export function renderPlayground({state,token,tenantId,esc,refresh}){
  const root=document.querySelector('#content');
- const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),label:p.name+' / '+model})));
+ const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),label:p.name+' / '+model,model}))).filter(item=>!modelCapabilities(item.model).mediaOnly);
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
  root.innerHTML=`<div class="heading lab-heading"><div><div class="eyebrow">MODEL PLAYGROUND</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>从一次对话开始，比较模型的回答与思考表现。</p></div><button id="lab-clear" class="subtle">清空对话</button></div>
  <div class="lab-layout"><section class="lab-main"><div class="lab-toolbar"><span>${spark}对话测试</span><span class="lab-state" id="lab-state">准备就绪</span></div>
