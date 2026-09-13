@@ -1,0 +1,26 @@
+services:
+  router:
+    build: .
+    ports:
+      - "127.0.0.1:${LOCAL_PORT:-3000}:3000"
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?请运行 npm run setup}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?请运行 npm run setup}
+      DATA_DIR: /app/data
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
+      ALLOW_HTTP_UPSTREAM: ${ALLOW_HTTP_UPSTREAM:-false}
+    volumes:
+      - router-data:/app/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 40s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+volumes:
+  router-data:

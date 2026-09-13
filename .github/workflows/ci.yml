@@ -1,20 +1,36 @@
-name: Router checks
+name: Independent router CI
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  realtime:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: standalone
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: standalone/package-lock.json
       - run: npm ci
+      - run: npm run check
       - run: npm test
-      - run: docker build -t switchboard:test .
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run setup
+      - run: docker compose config --quiet
+      - run: GATEWAY_DOMAIN=router.example.com docker compose -f compose.public.yaml config --quiet
+      - run: docker compose up -d --build --wait --wait-timeout 120
+      - run: curl --fail http://127.0.0.1:3000/healthz
+      - run: docker compose exec -T router id
+      - run: docker compose restart && docker compose up -d --wait --wait-timeout 120
+      - run: curl --fail http://127.0.0.1:3000/healthz
+      - if: always()
+        run: docker compose down
