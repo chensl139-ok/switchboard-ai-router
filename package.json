@@ -1,15 +1,15 @@
 {
   "name": "switchboard-ai-router",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.mjs",
+    "start": "node --env-file-if-exists=.env platform.mjs",
     "test": "node --test test/*.test.mjs",
     "setup": "node scripts/setup.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:public": "node scripts/deploy.mjs --public",
-    "check": "node --check server.mjs && node --check key-store.mjs && node --check realtime.mjs && node --check public/app.js"
+    "check": "node --check platform.mjs && node --check server.mjs && node --check accounts.mjs && node --check pricing.mjs && node --check usage-store.mjs && node --check public/app.js"
   },
   "engines": {
     "node": ">=22.13"

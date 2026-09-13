@@ -5,6 +5,7 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?请设置管理令牌}
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:?请设置调用令牌}
       DATA_DIR: /app/data
+      COOKIE_SECURE: "true"
       ALLOW_HTTP_UPSTREAM: ${ALLOW_HTTP_UPSTREAM:-false}
       WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
     volumes:

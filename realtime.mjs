@@ -1,10 +1,10 @@
 import {WebSocketServer, WebSocket} from 'ws';
 import {once} from 'node:events';
 
-export async function consumeSSE(response, protocol, model, emit, signal) {
+export async function consumeSSE(response, protocol, model, emit, signal, onUsage=()=>{}) {
   if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw Error('上游未返回 SSE');
   const reader = response.body.getReader(), decoder = new TextDecoder();
-  let buffer='',done=false,tokens=0;
+  let buffer='',done=false,tokens=0,inputTokens=0,outputTokens=0;
   const id='chatcmpl-'+crypto.randomUUID();
   const chunk=(delta,finish=null)=>({id,object:'chat.completion.chunk',created:Math.floor(Date.now()/1000),model,
     choices:[{index:0,delta,finish_reason:finish}]});
@@ -16,12 +16,12 @@ export async function consumeSSE(response, protocol, model, emit, signal) {
     if(parsed.error||parsed.type==='error')throw Error('上游流式请求失败');
     if(protocol!=='anthropic'){
       if(!parsed.choices&&!parsed.usage)throw Error('无效流式事件');
-      tokens=parsed.usage?.total_tokens??tokens;await emit(parsed);return;
+      if(parsed.usage){inputTokens=parsed.usage.prompt_tokens??0;outputTokens=parsed.usage.completion_tokens??0;tokens=parsed.usage.total_tokens??inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:Number.isFinite(parsed.usage.prompt_tokens)&&Number.isFinite(parsed.usage.completion_tokens)});}await emit(parsed);return;
     }
-    if(parsed.type==='message_start'){tokens=parsed.message?.usage?.input_tokens||0;await emit(chunk({role:'assistant',content:''}));}
+    if(parsed.type==='message_start'){inputTokens=(parsed.message?.usage?.input_tokens||0)+(parsed.message?.usage?.cache_read_input_tokens||0)+(parsed.message?.usage?.cache_creation_input_tokens||0);tokens=inputTokens;await emit(chunk({role:'assistant',content:''}));}
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='text_delta')await emit(chunk({content:parsed.delta.text}));
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='thinking_delta')await emit(chunk({reasoning_content:parsed.delta.thinking}));
-    if(parsed.type==='message_delta'){tokens+=parsed.usage?.output_tokens||0;await emit(chunk({},parsed.delta?.stop_reason==='max_tokens'?'length':'stop'));}
+    if(parsed.type==='message_delta'){outputTokens=parsed.usage?.output_tokens||0;tokens=inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:true});await emit(chunk({},parsed.delta?.stop_reason==='max_tokens'?'length':'stop'));}
     if(parsed.type==='message_stop')done=true;
   }
   try {
@@ -47,8 +47,8 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
     }
     wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,req));
   });
-  wss.on('connection',ws=>{
-    let authorized=false,credential=null,running=null,alive=true;
+  wss.on('connection',(ws,request)=>{
+    let authorized=false,credential=null,authContext=null,running=null,alive=true;
     const send=value=>{if(ws.readyState===WebSocket.OPEN){if(ws.bufferedAmount>1024*1024){ws.close(1013,'客户端读取过慢');return;}ws.send(JSON.stringify(value));}};
     const timeout=setTimeout(()=>{if(!authorized)ws.close(1008,'需要认证');},5000);
     ws.on('pong',()=>{alive=true;});
@@ -58,14 +58,14 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
     ws.on('message',async raw=>{
       let message;try{message=JSON.parse(raw.toString());}catch{send({type:'error',message:'JSON 无效'});return;}
       if(!authorized){
-        if(message?.type!=='auth'||!authenticate(message.token)){ws.close(1008,'认证失败');return;}
+        if(message?.type!=='auth'||!(authContext=authenticate(message.token,request,message.tenantId))){ws.close(1008,'认证失败');return;}
         authorized=true;credential=message.token;clearTimeout(timeout);send({type:'ready'});return;
       }
       if(message?.type==='cancel'){if(running?.id===message.id)running.abort.abort();return;}
       if(message?.type!=='chat'||typeof message.id!=='string'||message.id.length>80||!message.input){send({type:'error',message:'请求格式无效'});return;}
       if(running){send({type:'error',id:message.id,message:'当前连接已有请求生成中'});return;}
       running={id:message.id,abort:new AbortController()};
-      try{await execute({...message.input,stream:true},{token:credential,signal:running.abort.signal,onChunk:async chunk=>send({type:'delta',id:message.id,chunk})});send({type:'done',id:message.id});}
+      try{await execute({...message.input,stream:true},{token:credential,request,authContext,signal:running.abort.signal,onChunk:async chunk=>send({type:'delta',id:message.id,chunk})});send({type:'done',id:message.id});}
       catch(error){send({type:'error',id:message.id,message:error.status?error.message:'生成失败或已取消'});}
       finally{running=null;}
     });

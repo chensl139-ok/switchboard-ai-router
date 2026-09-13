@@ -4,7 +4,8 @@ let history=[],controller=null,settings={target:'auto',transport:'sse',thinking:
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
 export function stopPlayground(){controller?.abort();}
-export function renderPlayground({state,token,esc,refresh}){
+export function resetPlayground(){controller?.abort();history=[];settings.target='auto';}
+export function renderPlayground({state,token,tenantId,esc,refresh}){
  const root=document.querySelector('#content');
  const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),label:p.name+' / '+model})));
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
@@ -60,9 +61,9 @@ export function renderPlayground({state,token,esc,refresh}){
   try{
    let result;
    if(settings.transport==='http'){
-    const res=await fetch('/api/chat',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(input),signal:request.signal});
+    const res=await fetch('/api/chat',{method:'POST',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},body:JSON.stringify(input),signal:request.signal});
     const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result=data.choices[0].message;response.label=data.model||response.label;
-   }else result=await streamChat(settings.transport,token,input,update=>{Object.assign(response,update);draw();},request.signal);
+   }else result=await streamChat(settings.transport,token,input,update=>{Object.assign(response,update);draw();},request.signal,tenantId);
    Object.assign(response,result);response.status=`完成 · ${((Date.now()-started)/1000).toFixed(1)}s`;response.thinkingOpen=false;
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
   finally{controller=null;busy(false);draw();void refresh();}

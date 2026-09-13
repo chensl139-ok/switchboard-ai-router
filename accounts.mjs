@@ -1,0 +1,98 @@
+import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync} from 'node:fs';
+import {randomBytes,randomUUID,createHash,scrypt,timingSafeEqual} from 'node:crypto';
+import {promisify} from 'node:util';
+import path from 'node:path';
+const derive=promisify(scrypt);
+const hash=value=>createHash('sha256').update(value).digest('hex');
+const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&timingSafeEqual(Buffer.from(hash(a)),Buffer.from(hash(b)));
+const fail=(message,status=400)=>Object.assign(new Error(message),{status});
+export const roles=['owner','admin','member','viewer'];
+export class Accounts {
+ constructor(dir,bootstrapToken,{now=()=>Date.now()}={}){
+  mkdirSync(dir,{recursive:true,mode:0o700});this.file=path.join(dir,'accounts.json');this.bootstrapToken=bootstrapToken;this.now=now;this.kdf=0;
+  this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{users:[],tenants:[{id:'default',name:'默认租户',createdAt:new Date(now()).toISOString()}],members:[],sessions:[],invites:[],audit:[]};
+ }
+ save(){writeFileSync(this.file+'.tmp',JSON.stringify(this.state),{mode:0o600});renameSync(this.file+'.tmp',this.file);}
+ mutate(fn){const before=structuredClone(this.state);try{const result=fn();this.save();return result;}catch(error){this.state=before;throw error;}}
+ event(tenantId,actorId,action,target){this.state.audit.unshift({id:randomUUID(),tenantId,actorId,action,target,time:new Date(this.now()).toISOString()});this.state.audit=this.state.audit.slice(0,2000);}
+ validateUser(input){
+  if(!input||typeof input.email!=='string'||input.email.length>254||!/^\S+@\S+\.\S+$/.test(input.email))throw fail('邮箱格式无效');
+  if(typeof input.password!=='string'||input.password.length<12||input.password.length>256)throw fail('密码长度需为 12–256 个字符');
+  if(typeof input.name!=='string'||!input.name.trim()||input.name.length>80)throw fail('姓名长度需为 1–80 个字符');
+  return {email:input.email.trim().toLowerCase(),name:input.name.trim()};
+ }
+ async derivePassword(password,salt){if(this.kdf>=4)throw fail('密码校验繁忙，请稍后重试',429);this.kdf++;try{return await derive(password,salt,64);}finally{this.kdf--;}}
+ async passwordHash(password){const salt=randomBytes(16).toString('hex');return salt+':'+(await this.derivePassword(password,salt)).toString('hex');}
+ async checkPassword(password,stored){const [salt,expected]=stored.split(':');const actual=await this.derivePassword(password,salt);return timingSafeEqual(actual,Buffer.from(expected,'hex'));}
+ session(userId,tenantId){
+  const token=randomBytes(32).toString('hex');const now=this.now();
+  this.state.sessions=this.state.sessions.filter(s=>s.expiresAt>now).slice(-999);
+  this.state.sessions.push({hash:hash(token),userId,tenantId,expiresAt:now+12*3600000});return token;
+ }
+ resolve(token){
+  if(typeof token!=='string'||token.length>128)throw fail('请登录账户',401);
+  const session=this.state.sessions.find(s=>s.hash===hash(token)&&s.expiresAt>this.now());
+  const user=session&&this.state.users.find(u=>u.id===session.userId);
+  const membership=session&&this.state.members.find(m=>m.userId===session.userId&&m.tenantId===session.tenantId);
+  if(!user||!membership)throw fail('会话无效或当前租户权限已被移除，请重新登录',401);
+  return {userId:user.id,tenantId:session.tenantId,role:membership.role,sessionHash:session.hash,name:user.name,email:user.email};
+ }
+ me(caller){return {user:{id:caller.userId,name:caller.name,email:caller.email},tenantId:caller.tenantId,role:caller.role,
+  tenants:this.state.members.filter(m=>m.userId===caller.userId).map(m=>({...this.state.tenants.find(t=>t.id===m.tenantId),role:m.role})),roles};}
+ async setup(input){
+  if(this.state.users.length)throw fail('已完成初始化',409);
+  if(!equal(input?.bootstrapToken,this.bootstrapToken))throw fail('初始化管理令牌无效',403);
+  const value=this.validateUser(input);const password=await this.passwordHash(input.password);
+  return this.mutate(()=>{if(this.state.users.length)throw fail('已完成初始化',409);const id=randomUUID();this.state.users.push({id,...value,password,createdAt:new Date(this.now()).toISOString()});this.state.members.push({tenantId:'default',userId:id,role:'owner'});this.event('default',id,'account.setup',value.email);return this.session(id,'default');});
+ }
+ async login(input){
+  if(!input||typeof input.email!=='string'||typeof input.password!=='string'||input.password.length>256)throw fail('邮箱或密码错误',401);
+  const user=this.state.users.find(u=>u.email===input.email.trim().toLowerCase());
+  const valid=user?await this.checkPassword(input.password,user.password):await this.checkPassword(input.password,'00000000000000000000000000000000:'+ '00'.repeat(64));
+  if(!user||!valid)throw fail('邮箱或密码错误',401);
+  const member=this.state.members.find(m=>m.userId===user.id);if(!member)throw fail('账户未加入任何租户',403);
+  return this.mutate(()=>this.session(user.id,member.tenantId));
+ }
+ logout(token){if(typeof token!=='string')return;this.mutate(()=>{this.state.sessions=this.state.sessions.filter(s=>s.hash!==hash(token));});}
+ requireAdmin(caller){if(!['owner','admin'].includes(caller.role))throw fail('此操作需要租户管理员权限',403);}
+ validateRole(caller,role){this.requireAdmin(caller);if(!roles.includes(role))throw fail('角色无效');if(role==='owner'&&caller.role!=='owner')throw fail('只有所有者可授予所有者角色',403);}
+ createTenant(caller,name){
+  if(typeof name!=='string'||!name.trim()||name.length>80)throw fail('租户名称长度需为 1–80');
+  if(this.state.tenants.length>=50)throw fail('当前单实例最多支持 50 个租户');
+  return this.mutate(()=>{const tenant={id:randomUUID(),name:name.trim(),createdAt:new Date(this.now()).toISOString()};this.state.tenants.push(tenant);this.state.members.push({tenantId:tenant.id,userId:caller.userId,role:'owner'});this.event(tenant.id,caller.userId,'tenant.create',tenant.name);return tenant;});
+ }
+ switchTenant(caller,id){if(!this.state.members.some(m=>m.userId===caller.userId&&m.tenantId===id))throw fail('无权访问此租户',403);this.mutate(()=>{this.state.sessions.find(s=>s.hash===caller.sessionHash).tenantId=id;});}
+ members(caller){this.requireAdmin(caller);return {members:this.state.members.filter(m=>m.tenantId===caller.tenantId).map(m=>{const u=this.state.users.find(u=>u.id===m.userId);return {userId:u.id,name:u.name,email:u.email,role:m.role};}),invites:this.state.invites.filter(i=>i.tenantId===caller.tenantId&&!i.usedAt).map(({digest,...i})=>i)};}
+ invite(caller,input){
+  this.validateRole(caller,input?.role);
+  if(typeof input.email!=='string'||input.email.length>254||!/^\S+@\S+\.\S+$/.test(input.email))throw fail('邮箱格式无效');
+  const email=input.email.trim().toLowerCase();const target=this.state.users.find(u=>u.email===email);
+  if(target&&this.state.members.some(m=>m.userId===target.id&&m.tenantId===caller.tenantId))throw fail('该账户已是租户成员',409);
+  const code=randomBytes(24).toString('hex');
+  return this.mutate(()=>{this.state.invites=this.state.invites.filter(i=>i.expiresAt>this.now()&&!i.usedAt);if(this.state.invites.length>=500)throw fail('待处理邀请过多');this.state.invites.push({id:randomUUID(),tenantId:caller.tenantId,email,role:input.role,digest:hash(code),expiresAt:this.now()+72*3600000});this.event(caller.tenantId,caller.userId,'member.invite',email);return {code,expiresAt:this.now()+72*3600000};});
+ }
+ revokeInvite(caller,id){this.requireAdmin(caller);return this.mutate(()=>{const invite=this.state.invites.find(i=>i.id===id&&i.tenantId===caller.tenantId&&!i.usedAt);if(!invite)throw fail('邀请不存在',404);if(invite.role==='owner'&&caller.role!=='owner')throw fail('仅所有者可撤销所有者邀请',403);invite.expiresAt=this.now();invite.revokedAt=this.now();this.event(caller.tenantId,caller.userId,'invite.revoke',invite.email);});}
+ findInvite(code){if(typeof code!=='string'||code.length>128)throw fail('邀请码无效或已过期');const invite=this.state.invites.find(i=>i.digest===hash(code)&&!i.usedAt&&i.expiresAt>this.now());if(!invite)throw fail('邀请码无效或已过期');return invite;}
+ async register(input){
+  const value=this.validateUser(input);const invite=this.findInvite(input.inviteCode);if(invite.email!==value.email)throw fail('邀请码与邮箱不匹配');
+  const password=await this.passwordHash(input.password);
+  return this.mutate(()=>{const current=this.findInvite(input.inviteCode);if(this.state.users.some(u=>u.email===value.email))throw fail('此邮箱已注册，请登录后接受邀请',409);const id=randomUUID();this.state.users.push({id,...value,password,createdAt:new Date(this.now()).toISOString()});this.state.members.push({tenantId:current.tenantId,userId:id,role:current.role});current.usedAt=this.now();this.event(current.tenantId,id,'member.join',value.email);return this.session(id,current.tenantId);});
+ }
+ accept(caller,code){return this.mutate(()=>{const invite=this.findInvite(code);if(invite.email!==caller.email)throw fail('邀请码与当前账户不匹配');if(!this.state.members.some(m=>m.userId===caller.userId&&m.tenantId===invite.tenantId))this.state.members.push({userId:caller.userId,tenantId:invite.tenantId,role:invite.role});invite.usedAt=this.now();this.event(invite.tenantId,caller.userId,'member.join',caller.email);});}
+ updateMember(caller,input,remove=false){
+  this.requireAdmin(caller);if(!remove)this.validateRole(caller,input.role);
+  return this.mutate(()=>{const member=this.state.members.find(m=>m.tenantId===caller.tenantId&&m.userId===input.userId);if(!member)throw fail('成员不存在',404);
+   if(member.role==='owner'&&caller.role!=='owner')throw fail('仅所有者可修改其他所有者',403);
+   if(member.role==='owner'&&(remove||input.role!=='owner')&&this.state.members.filter(m=>m.tenantId===caller.tenantId&&m.role==='owner').length<=1)throw fail('不能移除或降级最后一个所有者');
+   if(remove)this.state.members.splice(this.state.members.indexOf(member),1);else member.role=input.role;
+   this.event(caller.tenantId,caller.userId,remove?'member.remove':'member.role',input.userId);
+  });
+ }
+ async changePassword(caller,input){
+  const user=this.state.users.find(u=>u.id===caller.userId),previous=user.password;
+  if(typeof input.currentPassword!=='string'||input.currentPassword.length>256||!await this.checkPassword(input.currentPassword,user.password))throw fail('原密码错误',403);
+  this.validateUser({name:user.name,email:user.email,password:input.newPassword});const password=await this.passwordHash(input.newPassword);
+  return this.mutate(()=>{const current=this.state.users.find(u=>u.id===caller.userId);if(current.password!==previous)throw fail('密码已发生变化，请重新登录',409);current.password=password;this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);this.event(caller.tenantId,user.id,'account.password','密码已更改');return this.session(user.id,caller.tenantId);});
+ }
+ audit(caller){this.requireAdmin(caller);return this.state.audit.filter(a=>a.tenantId===caller.tenantId).slice(0,200);}
+}

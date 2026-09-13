@@ -1,4 +1,5 @@
-export const strategies=['manual','fallback','weighted','latency','rules'];
+import {usablePrice,priceEstimate} from './pricing.mjs';
+export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  const available=state.providers.filter(p=>p.enabled&&p.secret&&p.model);
@@ -11,10 +12,17 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  }
  let candidates=[...available].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
  if(state.strategy==='manual')candidates=candidates.filter(p=>p.id===state.active);
- else candidates=candidates.filter(p=>{
+ else if(state.strategy!=='economy')candidates=candidates.filter(p=>{
   const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===p.model).slice(0,3);
   return !(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);
  });
+ if(state.strategy==='economy'){
+  const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||2048;
+  const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget)})));
+  priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
+  if(!priced.length)throw fail('没有同币种且价格有效的候选模型，请同步或录入价格；未知价格不会当作免费',503);
+  return priced.slice(0,state.routing.maxAttempts);
+ }
  let reason='默认服务商优先，失败时按优先级回退';
  if(state.strategy==='weighted'&&candidates.length){
   let position=sequence%candidates.reduce((n,p)=>n+(p.weight||1),0),first=candidates[0];
@@ -52,7 +60,8 @@ export function validateRouting(body,providers){
   if(!r||typeof r.name!=='string'||!r.name.trim()||r.name.length>80||!Array.isArray(r.keywords)||!r.keywords.length||r.keywords.length>20||r.keywords.some(k=>typeof k!=='string'||!k.trim()||k.length>100))throw fail('规则名称或关键词无效');
   if(!providers.some(p=>p.id===r.providerId&&p.enabled&&p.models.includes(r.model)))throw fail('规则引用的服务商或模型不可用');
  }
- const routing={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5,...body.routing};
+ const routing={currency:'USD',timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5,...body.routing};
+ if(!['USD','CNY'].includes(routing.currency))throw fail('经济优先币种须为 USD 或 CNY');
  for(const [key,min,max] of [['timeoutMs',3000,120000],['maxAttempts',1,10],['requestsPerMinute',1,10000],['concurrency',1,100]]){
   if(!Number.isInteger(routing[key])||routing[key]<min||routing[key]>max)throw fail(`${key} 必须为 ${min}–${max} 的整数`);
  }

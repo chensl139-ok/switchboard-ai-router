@@ -14,6 +14,8 @@ services:
         generateValue: true
       - key: GATEWAY_TOKEN
         generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
       - key: HOST
         value: 0.0.0.0
       - key: PORT

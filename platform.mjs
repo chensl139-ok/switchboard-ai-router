@@ -1,0 +1,88 @@
+import {safeFetch} from './network.mjs';
+import http from 'node:http';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createHmac} from 'node:crypto';
+import {createApp} from './server.mjs';
+import {Accounts} from './accounts.mjs';
+import {installWebSocket} from './realtime.mjs';
+const root=path.dirname(fileURLToPath(import.meta.url));
+const fail=(message,status=400)=>Object.assign(new Error(message),{status});
+export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch}={}){
+ if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
+ const accounts=new Accounts(dir,admin),engines=new Map(),limits=new Map();
+ const derive=(purpose,id)=>createHmac('sha256',admin).update(purpose+':'+id).digest('hex');
+ function engine(id){
+  if(!accounts.state.tenants.some(t=>t.id===id))throw fail('租户不存在',404);
+  if(!engines.has(id))engines.set(id,createApp({dir:id==='default'?dir:path.join(dir,'tenants',id),admin:derive('admin',id),gateway:id==='default'?gateway:derive('gateway',id),fetcher,tenantId:id,managed:true}));
+  return engines.get(id);
+ }
+ function sessionToken(req){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('sr_session='))?.slice('sr_session='.length)||'';}
+ function session(req){return accounts.resolve(sessionToken(req));}
+ function tokenIdentity(token){
+  if(typeof token!=='string'||!token)throw fail('需要 API Key 或账户登录',401);
+  const hinted=token.startsWith('srk_')?token.split('_')[1]:'';
+  const id=accounts.state.tenants.some(t=>t.id===hinted)?hinted:'default';
+  const caller=engine(id).resolveToken(token);if(caller.admin)throw fail('管理员令牌不能用于外部调用',401);
+  return {...caller,tenantId:id};
+ }
+ function originAllowed(origin,host){return !origin||origin===`http://${host}`||origin===`https://${host}`;}
+ function caller(req,token){return token?tokenIdentity(token):session(req);}
+ function cookie(req,res,token){const secure=process.env.COOKIE_SECURE==='true'||req.socket.encrypted||req.headers['x-forwarded-proto']==='https';res.setHeader('Set-Cookie',`sr_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token?43200:0}${secure?'; Secure':''}`);}
+ function json(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
+ async function body(req){let text='';for await(const part of req){text+=part;if(Buffer.byteLength(text)>65536)throw fail('请求过大',413);}try{const data=JSON.parse(text);if(!data||typeof data!=='object'||Array.isArray(data))throw Error();return data;}catch{throw fail('JSON 格式无效');}}
+ function rate(req){const key=req.socket.remoteAddress||'unknown';const now=Date.now();for(const [id,item] of limits)if(now-item.start>60000)limits.delete(id);if(limits.size>2000)throw fail('请求过多',429);const item=limits.get(key)||{start:now,count:0};item.count++;limits.set(key,item);if(item.count>20)throw fail('登录/注册尝试过多，请一分钟后重试',429);}
+ const server=http.createServer(async(req,res)=>{
+  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');
+  try{
+   const url=new URL(req.url,'http://localhost');
+   if(url.pathname==='/healthz')return json(res,200,{ok:true});
+   if(!originAllowed(req.headers.origin,req.headers.host))throw fail('拒绝跨域请求',403);
+   if(url.pathname.startsWith('/api/account/')){
+    const route=url.pathname.slice('/api/account/'.length);
+    if(req.method==='GET'&&route==='status')return json(res,200,{needsSetup:accounts.state.users.length===0});
+    if(req.method==='POST'&&['setup','login','register'].includes(route)){
+     rate(req);const data=await body(req);const token=await accounts[route](data);cookie(req,res,token);return json(res,200,accounts.me(accounts.resolve(token)));
+    }
+    if(req.method==='POST'&&route==='logout'){accounts.logout(sessionToken(req));cookie(req,res,'');return json(res,200,{ok:true});}
+    const current=session(req);if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已在其他页面切换，请刷新后重试',409);
+    if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
+    if(req.method==='GET'&&route==='members')return json(res,200,accounts.members(current));
+    if(req.method==='GET'&&route==='audit')return json(res,200,{items:accounts.audit(current)});
+    if(req.method!=='POST')throw fail('接口不存在',404);
+    const data=await body(req);
+    if(route==='tenants'){const tenant=accounts.createTenant(current,data.name);return json(res,201,tenant);}
+    if(route==='switch'){accounts.switchTenant(current,data.tenantId);return json(res,200,accounts.me(session(req)));}
+    if(route==='invite')return json(res,201,accounts.invite(current,data));
+    if(route==='revoke-invite'){accounts.revokeInvite(current,data.id);return json(res,200,{ok:true});}
+    if(route==='accept-invite'){accounts.accept(current,data.code);return json(res,200,accounts.me(session(req)));}
+    if(route==='member-role'){accounts.updateMember(current,data);return json(res,200,accounts.members(current));}
+    if(route==='member-remove'){accounts.updateMember(current,data,true);return json(res,200,{ok:true});}
+    if(route==='password'){const token=await accounts.changePassword(current,data);cookie(req,res,token);return json(res,200,{ok:true});}
+    throw fail('接口不存在',404);
+   }
+   if(url.pathname.startsWith('/api/')||url.pathname.startsWith('/v1/')){
+    const token=req.headers.authorization?.replace(/^Bearer\s+/i,'').trim();
+    const current=url.pathname.startsWith('/api/')?session(req):caller(req,token);
+    if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已切换，请刷新后重试',409);
+    req.principal=current;
+    if(req.method!=='GET'&&url.pathname.startsWith('/api/')&&url.pathname!=='/api/chat'){
+     res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,'配置已更新'));}catch{console.error('audit_write_failed');}}});
+    }
+    engine(current.tenantId).emit('request',req,res);return;
+   }
+   engine('default').emit('request',req,res);
+  }catch(error){if(!res.headersSent)json(res,error.status||500,{error:{message:error.status?error.message:'服务器内部错误'}});else res.end();}
+ });
+ installWebSocket(server,{originAllowed,authenticate:(token,req,expectedTenant)=>{try{const current=caller(req,token);if(expectedTenant&&expectedTenant!==current.tenantId)throw fail('租户已切换',409);return current;}catch{return false;}},execute:(input,options)=>{
+  const current=caller(options.request,options.token);if(current.tenantId!==options.authContext.tenantId)throw fail('租户已切换，请重新建立连接',403);
+  if(current.role==='viewer')throw fail('只读角色不可调用模型',403);
+  return engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});
+ }});
+ server.on('close',()=>{for(const app of engines.values())app.closeStore();});
+ return server;
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ const app=createPlatform();app.listen(Number(process.env.PORT)||3000,process.env.HOST||'127.0.0.1',()=>console.log(`Switchboard account platform listening on ${process.env.PORT||3000}`));
+ for(const event of ['SIGTERM','SIGINT'])process.once(event,()=>{app.close(()=>process.exit(0));setTimeout(()=>process.exit(0),35000).unref();});
+}

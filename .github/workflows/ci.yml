@@ -29,6 +29,7 @@ jobs:
       - run: GATEWAY_DOMAIN=router.example.com docker compose -f compose.public.yaml config --quiet
       - run: docker compose up -d --build --wait --wait-timeout 120
       - run: curl --fail http://127.0.0.1:3000/healthz
+      - run: curl --fail http://127.0.0.1:3000/api/account/status
       - run: docker compose exec -T router id
       - run: docker compose restart && docker compose up -d --wait --wait-timeout 120
       - run: curl --fail http://127.0.0.1:3000/healthz
