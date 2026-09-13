@@ -61,7 +61,7 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
     if(!response.body||!(/^(audio\/|application\/octet-stream)/i.test(type)))throw fail('语音接口未返回音频二进制数据',502);
     res.writeHead(200,{'content-type':type,'cache-control':'no-store'});let bytes=0;const reader=response.body.getReader();
     try{while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.length;if(bytes>64*1024*1024)throw fail('音频响应超过 64 MB',502);if(!res.write(part.value))await once(res,'drain',{signal});}if(!bytes)throw fail('上游返回空音频',502);}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
-    const speechPrice=priceAt(p.prices?.[p.model],started);if(speechPrice?.billingUnit==='audio'&&Number.isFinite(speechPrice.perThousandChars)&&Date.parse(speechPrice.expiresAt)>started)cost={estimatedCost:speechPrice.perThousandChars*(String(data.input||'').length/1000),currency:speechPrice.currency,priceSource:speechPrice.source};
+    const speechPrice=priceAt(p.prices?.[p.model],started);if(speechPrice?.billingUnit==='audio'&&Number.isFinite(speechPrice.perThousandChars)&&(speechPrice.expiresAt==null||Date.parse(speechPrice.expiresAt)>started))cost={estimatedCost:speechPrice.perThousandChars*(String(data.input||'').length/1000),currency:speechPrice.currency,priceSource:speechPrice.source};
     res.end();succeeded=true;return;
    }
    if(form&&pathname.includes('/audio/')&&!type.includes('json')){const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length>8*1024*1024)throw fail('转录响应超过限制',502);res.writeHead(200,{'content-type':/^text\//.test(type)?'text/plain; charset=utf-8':'application/octet-stream','cache-control':'no-store'});res.end(bytes);succeeded=true;return;}
@@ -75,12 +75,12 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
       const asset=await fetcher(url.href,{method:'GET',headers:{},redirect:'error',signal,maxResponseBytes:24*1024*1024});if(!asset.ok||!(/^(image\/|application\/octet-stream)/i.test(asset.headers.get('content-type')||''))){await asset.body?.cancel();throw fail('无法获取上游生成图片',502);}const pieces=[];for await(const piece of asset.body){totalBytes+=piece.length;if(totalBytes>24*1024*1024)throw fail('Base64 图片总大小超过 24 MB',502);pieces.push(piece);}const bytes=Buffer.concat(pieces),prefix=bytes.subarray(0,12);if(!(prefix.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||(prefix[0]===255&&prefix[1]===216&&prefix[2]===255)||/^GIF8[79]a/.test(prefix.toString('ascii'))||(prefix.toString('ascii',0,4)==='RIFF'&&prefix.toString('ascii',8,12)==='WEBP')))throw fail('上游返回的文件不是支持的图片格式',502);encoded.push({b64_json:bytes.toString('base64')});
      }result.data=encoded;
     }
-    const price=priceAt(p.prices?.[p.model],started);if(price?.billingUnit==='image'&&Number.isFinite(price.perImage)&&Date.parse(price.expiresAt)>started)cost={estimatedCost:price.perImage*result.data.length,currency:price.currency,priceSource:price.source};
+    const price=priceAt(p.prices?.[p.model],started);if(price?.billingUnit==='image'&&Number.isFinite(price.perImage)&&(price.expiresAt==null||Date.parse(price.expiresAt)>started))cost={estimatedCost:price.perImage*result.data.length,currency:price.currency,priceSource:price.source};
    }
    if(pathname==='/v1/video/submit'){
     if(typeof result.requestId!=='string'||!result.requestId||result.requestId.length>300)throw fail('上游未返回视频任务 ID',502);
     const id='video_'+randomUUID();jobs[id]={upstreamId:result.requestId,providerId:p.id,baseUrl:p.baseUrl,model:p.model,owner:owner(caller),expiresAt:Date.now()+86400000};save();result={...result,requestId:id};
-    const videoPrice=priceAt(p.prices?.[p.model],started);if(videoPrice?.billingUnit==='video'&&Number.isFinite(videoPrice.perVideo)&&Date.parse(videoPrice.expiresAt)>started)cost={estimatedCost:videoPrice.perVideo,currency:videoPrice.currency,priceSource:videoPrice.source};
+    const videoPrice=priceAt(p.prices?.[p.model],started);if(videoPrice?.billingUnit==='video'&&Number.isFinite(videoPrice.perVideo)&&(videoPrice.expiresAt==null||Date.parse(videoPrice.expiresAt)>started))cost={estimatedCost:videoPrice.perVideo,currency:videoPrice.currency,priceSource:videoPrice.source};
    }
    if(pathname==='/v1/embeddings'){usage=normalizeUsage({prompt_tokens:result.usage?.prompt_tokens,completion_tokens:0,total_tokens:result.usage?.total_tokens});tokens=usage.totalTokens;cost=usageCost(p,p.model,usage,started);}
    res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(result));succeeded=true;

@@ -7,8 +7,8 @@ export function validatePrice(input,source='manual'){
  if(input.billingUnit!==undefined&&!['tokens','image','video','audio'].includes(input.billingUnit))throw fail('不支持的计价单位');
  for(const field of ['inputPerMillion','outputPerMillion','cachedInputPerMillion','perRequest','perImage','perVideo','perThousandChars'])if(input[field]!==undefined&&(!Number.isFinite(input[field])||input[field]<0||input[field]>1000000))throw fail('价格须为非负有限数值');
  if(!['image','video','audio'].includes(input.billingUnit)&&(input.inputPerMillion===undefined||input.outputPerMillion===undefined))throw fail('需同时填写输入与输出价格');
- const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||(source==='openrouter'?new Date(Date.now()+7*86400000).toISOString():'9999-12-31T23:59:59.999Z');
- if(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.now())throw fail('价格有效期需晚于当前时间');
+ const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||(source==='openrouter'?new Date(Date.now()+7*86400000).toISOString():null);
+ if(expiresAt!==null&&(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.now()))throw fail('价格有效期需晚于当前时间');
  if(input.billingUnit==='image'){if(input.perImage===undefined)throw fail('需填写每张图片价格');if(input.periods?.length)throw fail('图片计价暂不支持分时价格');return {billingUnit:'image',currency:input.currency,perImage:input.perImage,source,observedAt,expiresAt};}
  if(input.billingUnit==='video'){if(input.perVideo===undefined)throw fail('需填写每个视频价格');if(input.periods?.length)throw fail('视频计价暂不支持分时价格');return {billingUnit:'video',currency:input.currency,perVideo:input.perVideo,source,observedAt,expiresAt};}
  if(input.billingUnit==='audio'){if(input.perThousandChars===undefined)throw fail('需填写每千字符价格');if(input.periods?.length)throw fail('音频计价暂不支持分时价格');return {billingUnit:'audio',currency:input.currency,perThousandChars:input.perThousandChars,source,observedAt,expiresAt};}
@@ -23,7 +23,7 @@ export function openRouterPrice(row){
  const cache=p.input_cache_read;const cachedInputPerMillion=typeof cache==='string'&&cache.trim()!==''&&Number.isFinite(Number(cache))&&Number(cache)>=0?Number(cache)*1000000:undefined;
  return validatePrice({cachedInputPerMillion,currency:'USD',inputPerMillion:Number(p.prompt)*1000000,outputPerMillion:Number(p.completion)*1000000,perRequest:Number(p.request||0)},'openrouter');
 }
-export function usablePrice(price,currency,now=Date.now()){return !!price&&price.billingUnit!=='image'&&price.currency===currency&&Number.isFinite(price.inputPerMillion)&&Number.isFinite(price.outputPerMillion)&&price.inputPerMillion>=0&&price.outputPerMillion>=0&&Date.parse(price.expiresAt)>now;}
+export function usablePrice(price,currency,now=Date.now()){return !!price&&price.billingUnit!=='image'&&price.currency===currency&&Number.isFinite(price.inputPerMillion)&&Number.isFinite(price.outputPerMillion)&&price.inputPerMillion>=0&&price.outputPerMillion>=0&&(price.expiresAt==null||Date.parse(price.expiresAt)>now);}
 export function priceAt(price,now=Date.now()){
  if(!price?.periods?.length)return price;
  const parts=new Intl.DateTimeFormat('en-GB',{timeZone:price.timeZone||'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23',weekday:'short'}).formatToParts(new Date(now));
