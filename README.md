@@ -1,11 +1,10 @@
 # Switchboard · AI 智能路由平台
 
-一个入口连接多个模型服务商。支持账户与租户隔离、六种路由策略、OpenAI / Anthropic 兼容 API、SSE / WebSocket，以及模型价格和用量管理。基于 Node.js 独立运行，可部署在本机、Docker 或支持持久磁盘的云服务器。
+一个入口连接多个模型服务商。支持账户与租户隔离、六种路由策略、OpenAI / Anthropic 兼容 API、SSE / WebSocket，以及模型价格和用量管理。基于 Node.js 独立运行。
 
 [![CI](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml/badge.svg)](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml)
-[![Deploy to Render](https://render.com/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chensl139-ok/switchboard-ai-router)
 
-[API 接入说明](API.md) · [租户与权限](TENANCY.md) · [调用示例](examples)
+[API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -18,62 +17,15 @@
 | 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
 | 模型实验室 | Enter 发送、Shift + Enter 换行、直接粘贴图片、附件预览、停止生成、草稿保留、回复复制 |
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
-| 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频提交与轮询，内置限额与任务归属追踪；与模型实验室严格按能力分桶 |
+| 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频提交与轮询，内置限额与任务归属追踪 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
 | 多租户 | 邮箱密码登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
 | 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张价格 |
 | 观测与文档 | 调用日志、用量分析、费用估算、操作审计、产品内 API 文档和 OpenAPI JSON 下载 |
 
-上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。界面支持侧栏收起、服务商搜索筛选和移动端布局。
-
-## 项目简介
-
-Switchboard 采用「路由器 + 控制台」双位面设计：
-
-- 路由层负责统一调度、熔断与限流；
-- 控制台负责账号、租户、价格、API Key 与模型管理；
-- 平台层提供 OpenAI / Anthropic 兼容边界，并通过统一 schema 做能力发现与错误归一化。
-
-当前仓库代码版本：`3.2.1`（`package.json`）；对外发布版本：**`v1.0`**（GitHub Release）。
-
-### 本次发布说明（v1.0）
-
-> 这是仓库在 GitHub 上的首个正式发布版本，以回退基线（`v1.0`，commit `ddcebe4`）之上的能力修复合并而成。目标：在保持上游主分支兼容性的前提下，确保两个实验室（模型 / 媒体）按能力严格分桶，并恢复所有静态资源路由。
-
-- **能力分离（playground ↔ media）**  
-  - 模型实验室只展示具备「聊天 / 工具 / 视觉」能力的模型；  
-  - 媒体实验室只展示显式标记为「图片 / 音频 / 视频 / 转写」能力的模型。  
-  - 由 `public/model-capability.js` 提供筛选；`public/model-capabilities.js` 提供更细粒度 API（`isModelForPlayground`、`isMediaModelFor`、`splitModelId`）供后续接入使用。
-- **静态资源补齐（v1.0.2 / v1.0.3 修复）**  
-  - v1.0.2 新增了 `/model-capabilities.js`，但误删了 `/model-capability.js` 的静态路由；  
-  - v1.0.3 把单数路由恢复，确保 `playground.js` / `media-lab.js` 通过相对 `import` 拿到的脚本能稳定加载，避免实验室初始化时静默丢失能力。
-- **平台默认监听地址**  
-  - `platform.mjs` 默认绑定 `0.0.0.0`，方便 Docker / 云部署；本机仍可通过 `.env` 设置 `HOST=127.0.0.1` 限定回环。
-- **账号与运维脚本**  
-  - 新增 `scripts/reset-admin-password.mjs`：scrypt（N=16384, r=8, p=1, 64 字节）与 `accounts.mjs` 保持一致，可用于丢失密码场景。  
-  - 配套脚本：`scripts/deploy-run.sh`（supervisor）、`scripts/recover.sh`（手动恢复）。
-
-### v1.0 之前的迭代差异
-
-| 版本 | commit | 角色 | 备注 |
-| --- | --- | --- | --- |
-| v1.0 | `ddcebe4` | 文档基线 | README、API 约束整理 |
-| **v1.0 (重打)** | 当前 HEAD | **可用基线** | 在 v1.0.2 的能力分离基础上恢复单数路由 |
-| 早期迭代 | — | 内部实验 | 已被覆盖，不再单独保留 |
-
-本次发布以 `v1.0` 作为唯一对外版本号；旧的迭代 tag 不会单独保留。
-
-### 代码级行为补充
-
-- 双层限流：平台级 `GLOBAL_MAX_CONCURRENCY`（默认 `20`）与租户级 `requestsPerMinute`（默认 `60`）/`concurrency`（默认 `5`）。
-- 请求校验约束：`messages 1–100`、`temperature 0–2`、`max_tokens 1–131072`、`stop` 最多 `4` 条。
-- 同时携带 `Authorization` 与 `x-api-key` 时必须一致；跨域来源非当前 Host 会被拒绝。
-- 模型未启用、provider 或路径受限时会在服务端阻断，不会回退到任意上游补偿。
-- 平台采用本地文件与 SQLite + 进程内速率控制，当前仅支持单实例运行。
+上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。
 
 ## 快速开始
-
-### 方式一：直接运行 Node.js
 
 需要 **Node.js >= 22.13**，适用于 Windows、macOS 和 Linux。
 
@@ -84,51 +36,18 @@ npm ci
 npm run setup
 ```
 
-编辑自动生成的 `.env`，本机示例使用 **3100**，避免与其他服务占用的 3000 冲突：
+编辑自动生成的 `.env`（保留已生成的令牌），本机示例使用 **3100**：
 
 ```dotenv
 HOST=127.0.0.1
 PORT=3100
 ```
 
-保留文件中已生成的令牌，再启动：
+启动并打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)：
 
 ```sh
 npm start
 ```
-
-打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)。如果未修改 `PORT`，原生运行默认使用 3000。
-
-### 方式二：Docker 一键部署
-
-安装 Docker Desktop，或 Docker Engine + Compose v2 后克隆仓库。
-
-**macOS / Linux：**
-
-```sh
-sh deploy.sh
-```
-
-**Windows PowerShell（需安装 Node.js）：**
-
-```powershell
-node scripts/deploy.mjs
-```
-
-有 Node.js 的环境也可以使用 `npm run deploy`。初始化脚本重复运行不会覆盖已有 `.env`。
-
-本地 Compose 默认入口为 `http://127.0.0.1:3000`。如需使用本文统一示例端口，在 `.env` 设置后重新部署：
-
-```dotenv
-LOCAL_PORT=3100
-```
-
-| 运行方式 | 修改哪个端口 | 说明 |
-| --- | --- | --- |
-| `npm start` | `PORT=3100` | Node.js 直接监听的端口 |
-| Docker Compose | `LOCAL_PORT=3100` | 宿主机端口；容器内部仍为 3000 |
-
-本地默认仅绑定回环地址。若 3000 打开的是 Grafana 等其他应用，请访问你配置的路由平台端口。
 
 ### 首次配置
 
@@ -140,14 +59,23 @@ LOCAL_PORT=3100
 
 `ADMIN_TOKEN` 用于首次账户初始化，不能用作业务调用 Key。新部署不会包含其他实例的账户、供应商密钥或价格配置。
 
-### 初始化令牌与补充环境变量
+### 环境变量
 
-- `npm run setup` 会基于 `.env.example` 生成 `ADMIN_TOKEN` 与 `GATEWAY_TOKEN`，并不会覆盖已存在 `.env` 中已有值。  
-- 推荐补充：`COOKIE_SECURE=true`（HTTPS）、`ALLOW_HTTP_UPSTREAM=true`（默认关闭，谨慎开启）、`GLOBAL_MAX_CONCURRENCY`（平台级并发上限）和 `GATEWAY_DOMAIN`（反代场景域名）。
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `HOST` / `PORT` | `127.0.0.1` / `3000` | 监听地址与端口 |
+| `ADMIN_TOKEN` / `GATEWAY_TOKEN` | setup 生成 | 初始化令牌，各至少 24 字符 |
+| `UPSTREAM_PROXY_FAKE_IP` | `false` | 本机使用 Fake-IP 代理（Surge / Clash 等）时设为 `true`，放行官方上游域名的 198.18/15 虚拟地址 |
+| `UPSTREAM_ALLOWED_PRIVATE_HOSTS` | 空 | 私有推理服务须精确授权域名/IP，逗号分隔 |
+| `ALLOW_HTTP_UPSTREAM` | `false` | 默认禁止 HTTP 上游，仅访问受信任的本地推理服务时开启 |
+| `COOKIE_SECURE` | `false` | HTTPS 反代场景设为 `true` |
+| `GLOBAL_MAX_CONCURRENCY` | `20` | 平台级并发上限 |
+
+> **提示**：若本机开启了 Fake-IP 模式代理，服务商模型列表会报「网络异常」——实际是被 SSRF 防护拦截。将 `UPSTREAM_PROXY_FAKE_IP` 设为 `true` 并重启即可。
 
 ### 忘记密码（owner 账号）
 
-`accounts.mjs` 使用 scrypt 单向哈希存储密码，无法反推明文；使用随仓库提供的 reset 脚本：
+密码使用 scrypt 单向哈希存储，无法反推明文；使用随仓库提供的 reset 脚本：
 
 ```sh
 # 1. 停掉正在运行的 platform.mjs
@@ -161,14 +89,14 @@ node scripts/reset-admin-password.mjs
 
 # 4. 取消密码变量并重启服务
 unset SWITCHBOARD_NEW_PASSWORD
-HOST=0.0.0.0 PORT=3100 npm start
+npm start
 ```
 
 脚本会原子覆盖 `data/accounts.json`、清空该账号 session、并在审计日志追加 `account.password.reset`。
 
 ## API 接入
 
-以下地址假设本机已配置为 3100；云端部署请替换为实际 HTTPS 域名。
+以下地址假设本机已配置为 3100。
 
 ```sh
 curl -N 'http://127.0.0.1:3100/v1/chat/completions' \
@@ -199,21 +127,10 @@ curl -N 'http://127.0.0.1:3100/v1/chat/completions' \
 
 ### 接口兼容性边界（便于排错）
 
-- `n`、`best_of` 不支持除 `1` 之外的值；`Responses` 不支持 `response` 历史会话类参数；部分复杂参数会直接返回 `invalid_request`。  
-- `messages` 场景目前不支持 `tool` 角色的图片内容；工具调用仅支持调用方执行的 `function`。  
-- `/v1/messages/count_tokens` 仅用于 Anthropic 上游。  
+- `n`、`best_of` 不支持除 `1` 之外的值；`Responses` 不支持 `response` 历史会话类参数；部分复杂参数会直接返回 `invalid_request`。
+- `messages` 场景目前不支持 `tool` 角色的图片内容；工具调用仅支持调用方执行的 `function`。
+- `/v1/messages/count_tokens` 仅用于 Anthropic 上游。
 - `/v1/realtime` 为本仓库自定义 JSON 协议，非 OpenAI 音频实时协议；每个连接同一时刻只处理一个生成请求。
-
-### 一次获取全部模型
-
-```sh
-curl 'http://127.0.0.1:3100/v1/models/all' \
-  -H 'Authorization: Bearer YOUR_API_KEY'
-```
-
-返回的 `data` 使用 `provider::model` ID，`callable` 表示是否已经加入调用列表。`partial: true` 表示部分服务商失败，具体原因见 `errors`，不能将部分结果当作完整目录。
-
-目录查询限定在当前 Key 所属租户的已启用服务商。发现模型不会自动注册或启用；私有模型目录需要配置相应服务商密钥。查询最多等待 45 秒、最多并发 3 个服务商，10 秒内限一次；`all` 与 `discover` 共用限频，不消耗生成次数额度。
 
 ### SSE 与 WebSocket
 
@@ -231,73 +148,52 @@ WebSocket 连接 `ws://127.0.0.1:3100/v1/realtime`，5 秒内发送认证消息�
 {"type":"chat","id":"request-1","input":{"model":"auto","messages":[{"role":"user","content":"你好"}]}}
 ```
 
-服务器返回 `delta`、`done` 或 `error`。发送 `{"type":"cancel","id":"request-1"}` 可取消；每个连接同时处理一个生成请求。不要把密钥放进 URL。此接口是自建协议，不是 OpenAI Realtime 音频接口。
+服务器返回 `delta`、`done` 或 `error`。发送 `{"type":"cancel","id":"request-1"}` 可取消；每个连接同时处理一个生成请求。不要把密钥放进 URL。
 
-完整参数、SDK、图片与工具回传示例见 [API.md](API.md) 和产品内 `/#api`。文档页支持代码复制及 OpenAPI JSON 下载，并自动填入当前部署地址。`/api/*` 管理接口使用账户会话，不能使用外部 Key 修改平台配置。
+完整参数、SDK、图片与工具回传示例见 [API.md](API.md) 和产品内 `/#api`。`/api/*` 管理接口使用账户会话，不能使用外部 Key 修改平台配置。
 
 ## Cherry Studio 配置
 
 1. 添加 OpenAI 兼容服务商。
-2. API 地址填写 **`http://127.0.0.1:3100/v1`**，云端使用对应域名。
+2. API 地址填写 **`http://127.0.0.1:3100/v1`**。
 3. API 密钥填写本平台签发的 Key。
 4. 点击「获取模型列表」，将需要的模型加入客户端；选择 `auto` 可使用后台路由策略。
 
 API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准模型列表使用 `/v1/models`，仅显示已配置的模型；完整上游目录使用 `/v1/models/all` 查询。
 
-**能聊天但拉取模型列表失败：**检查客户端代理。已复现列表请求被系统代理转发并断开的情况；改为使用原代理地址的「自定义代理」，在绕过规则中加入 `localhost,127.0.0.1,::1`，保留原有绕过规则后可恢复。代理端口以你自己的配置为准，不要复制其他机器的端口。
+**能聊天但拉取模型列表失败**：检查客户端代理。列表请求可能被系统代理转发并断开；在客户端代理绕过规则中加入 `localhost,127.0.0.1,::1` 后可恢复。
 
 ## 价格与经济优先
 
 - 按调用渠道分别维护价格，支持 CNY / USD。相同模型在不同服务商的价格互不替代。
 - 录入普通输入、输出、缓存命中输入的每百万 Tokens 价格及每次请求固定费用。缓存价留空表示未知，`0` 表示已确认免费。
-- 支持最多 8 个高峰／空闲时段，设置 IANA 时区及生效星期；可跨午夜，开始时间包含、结束时间不包含，跨午夜归属开始日。重叠时段禁止保存，未覆盖时间使用基础价格。
-- 经济优先只比较同币种、价格有效的已配置模型，按选路时的时段价格及输出上限估算，不预设缓存命中。图片输入不进行经济选路估算。
-- 调用费用根据上游实际用量，按每次上游尝试开始时间估算；流式生成过程中不切价。命中缓存但缓存价格未知、或有不支持的缓存写入费用时，不估算总费用。
-- 图片按张价格用于成功图片生成费用估算，不参与聊天经济路由。
-- OpenRouter 可同步价格，默认有效 7 天；手动价格默认有效 30 天。自动同步会替换相应模型的价格配置，包括手动时段。
+- 支持最多 8 个高峰／空闲时段，设置 IANA 时区及生效星期；可跨午夜，开始时间包含、结束时间不包含。
+- 经济优先只比较同币种、价格有效的已配置模型，按选路时的时段价格及输出上限估算。
+- OpenRouter 可同步价格，默认有效 7 天；手动价格默认有效 30 天。
 
-价格数据属于部署实例。仓库不内置会随时间变化的个人渠道报价；录入前请核对服务商当期价格。费用为参考估算，不作为供应商账单或计费结算凭据。
+价格数据属于部署实例。费用为参考估算，不作为供应商账单或计费结算凭据。
 
 ## 思考、图片与工具的边界
 
 实验室支持图片附件和直接粘贴截图，最多 4 张、单张不超过 4 MB；包含历史及 Base64 的总请求上限为 10 MB。选择具备视觉能力的上游模型后才能处理图片。
 
-"显示思考"仅影响界面；`thinking_mode: "disabled"` 控制实际推理。不支持关闭的模型会明确拒绝，不能通过隐藏文字减少推理费用。GLM-5.3 等强制思考模型禁用关闭选项。模型返回的思考会占用输出预算，仅返回思考而无正文时可检查输出上限。
+"显示思考"仅影响界面；`thinking_mode: "disabled"` 控制实际推理。不支持关闭的模型会明确拒绝，不能通过隐藏文字减少推理费用。模型返回的思考会占用输出预算。
 
-函数工具由调用方验证参数、执行并回传结果；网关不执行工具。专用媒体接口支持图片生成、语音合成、音频转文字及硅基流动视频任务。当前不支持聊天消息中的音视频内容块、通用文件存储、内置联网／代码执行工具、Responses 服务端会话存储，以及 JSON Schema 结构化输出。兼容范围以 [API.md](API.md) 为准。
+函数工具由调用方验证参数、执行并回传结果；网关不执行工具。当前不支持聊天消息中的音视频内容块、通用文件存储、内置联网／代码执行工具、Responses 服务端会话存储，以及 JSON Schema 结构化输出。兼容范围以 [API.md](API.md) 为准。
 
-## 云部署
+## 媒体生成
 
-### Docker 服务器 + HTTPS / WSS
+外部客户端使用 `/v1/images/generations`、`/v1/images/edits`、`/v1/audio/speech`、`/v1/audio/transcriptions`、`/v1/audio/translations`（后两者为 multipart）；嵌入与重排为 `/v1/embeddings`、`/v1/rerank`；视频采用硅基流动 `/v1/video/submit` 与 `/v1/video/status`。
 
-适用于有 Docker 的云服务器或 VPS。将域名解析到服务器并开放 80/443：
-
-```sh
-npm run setup
-# 编辑 .env：GATEWAY_DOMAIN=router.example.com
-sh deploy.sh --public
-# 有 Node.js 时也可执行 npm run deploy:public
-```
-
-仓库的 Caddy 配置负责 HTTPS、WebSocket Upgrade 和 SSE 转发。应用内部 3000 端口不直接暴露公网。
-
-| 平台 | 仓库提供 | 部署时需配置 |
-| --- | --- | --- |
-| Render | `render.yaml`、上方部署按钮 | 登录并确认计划；Blueprint 配置 Starter 与持久磁盘，可能产生费用 |
-| Railway | `railway.json`、Dockerfile | 导入仓库、设置令牌、添加 `/app/data` Volume、生成域名 |
-| Fly.io | `fly.toml`、Dockerfile | 应用名、`router_data` 卷、令牌；单实例部署 |
-| Coolify / Dokploy | Dockerfile、Compose | 仓库、环境变量、域名和持久卷 |
-| 通用容器平台 | Dockerfile、健康检查 | 持久化目录、单副本、HTTPS / WSS 与长连接支持 |
-
-自定义容器环境需设置 `ADMIN_TOKEN`、`GATEWAY_TOKEN`（各至少 24 字符）、`HOST=0.0.0.0`、`DATA_DIR=/app/data`。对外使用 HTTPS 时设置 `COOKIE_SECURE=true`。原生本机的 `HOST=127.0.0.1` 不适用于容器对外监听。
-
-云端配置需在目标环境验收。当前验证范围为本地及 CI；不支持直接作为 GitHub Pages、纯静态网站，或无持久磁盘／不支持长连接的函数服务部署。
+- 媒体需显式指定已注册的 `provider::model`，不使用聊天自动路由；上游必须支持所选模型与接口。
+- 视频任务仅支持硅基流动（`api.siliconflow.*`）。
+- 任务归属提交 Key / 账户及当前租户，元数据保存在 `data/media-jobs.json`，应随数据目录一起备份。
+- 音频返回二进制；视频返回异步任务，按 `requestId` 轮询。
+- 控制台「媒体实验室」提供对应界面入口，与模型实验室按能力严格分桶。
 
 ## 配额、备份与升级
 
-调用配额按开始执行的生成请求计数；上游失败或取消也计一次，内部回退不重复扣次数。每日额度按 UTC 零点（北京时间 08:00）重置。Token 是已知用量统计，不是 Token 或金额硬限额。停用或过期阻止新请求，已开始请求允许完成。
-
-旧 `GATEWAY_TOKEN` 可在「API Key 管理」中关闭。它不受产品 Key 配额限制；业务调用应使用产品签发的受限 Key。初始化脚本仍需该环境变量。
+调用配额按开始执行的生成请求计数；上游失败或取消也计一次，内部回退不重复扣次数。每日额度按 UTC 零点（北京时间 08:00）重置。停用或过期阻止新请求，已开始请求允许完成。
 
 持久数据包含：
 
@@ -311,22 +207,18 @@ data/
 └── tenants/<tenantId>/     # 其他租户的独立数据
 ```
 
-整体备份数据目录或 Docker 持久卷，不可丢失 `master.key`。不要提交 `.env`、密钥或数据目录到公开仓库。
+整体备份数据目录，不可丢失 `master.key`。不要提交 `.env`、密钥或数据目录到公开仓库。
 
-当前使用本地文件、SQLite 和进程内限流，**只支持单副本运行**，不要让多个进程共享同一数据目录。多副本需先迁移共享数据库及分布式限流。默认日志保留 90 天，不包含 SSO / MFA、支付结算或可用性 SLA。
+当前使用本地文件、SQLite 和进程内限流，**只支持单副本运行**，不要让多个进程共享同一数据目录。默认日志保留 90 天。
 
 升级前备份数据，然后执行：
 
 ```sh
 git pull --ff-only
-# Node.js：停止原进程后
+# 停止原进程后
 npm ci
 npm start
-# Docker：
-# npm run deploy
 ```
-
-不要执行 `docker compose down -v`，它会删除持久卷。容器完成目录权限初始化后以非 root 用户运行。
 
 ## 验证与项目结构
 
@@ -336,67 +228,20 @@ npm run check
 npm test
 ```
 
-CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构建、Compose 启动、健康检查和重启。
-
 | 文件 / 目录 | 职责 |
 | --- | --- |
 | `platform.mjs` / `accounts.mjs` | 账户、租户与访问控制 |
 | `server.mjs` / `routing.mjs` | API 服务、选路与调用 |
 | `protocols.mjs` / `protocol-stream.mjs` / `realtime.mjs` | 协议转换与流式传输 |
 | `model-catalog.mjs` / `openapi.mjs` | 模型目录与接口定义 |
-| `pricing.mjs` / `usage-store.mjs` | 价格计算与用量记录 |
+| `pricing.mjs` / `usage-store.mjs` / `media.mjs` | 价格计算、用量记录与媒体任务 |
+| `key-store.mjs` / `network.mjs` / `thinking.mjs` | API Key 存储、上游安全请求与思考开关 |
 | `public/` | 控制台、实验室和 API 文档 |
-| `test/` / `examples/` | 自动化测试与客户端示例 |
+| `test/` | 自动化测试（`npm test`） |
+| `scripts/setup.mjs` | 初始化 `.env` 与令牌（`npm run setup`） |
 | `scripts/reset-admin-password.mjs` | owner 密码重置（scrypt 哈希） |
 | `scripts/deploy-run.sh` / `scripts/recover.sh` | 后台 supervisor / 手动恢复 |
 
-默认分支 `main` 包含完整独立运行源码与部署配置。
-
-### 升级与运维注意
-
-- 本项目默认使用本地文件与 SQLite，当前版本仅支持单副本运行；若未来迁移到多实例，请先完成数据库与限流中间件改造。
-- 每次升级前先备份 `data/` 与 `.env`（如有），并确认 `master.key` 保持可用，否则历史上游密钥会解密失败。
-- 线上部署请优先使用有状态持久卷，并通过 `npm run check` + 部署环境健康检查确认服务可达。
-- 建议开启反向代理的 WebSocket/SSE 转发超时保护，避免长连接在空闲时被云厂商强制关闭。
-
-## 媒体生成（3.2）
-
-侧栏新增「媒体实验室」。外部客户端使用 `/v1/images/generations`、`/v1/audio/speech`、`/v1/audio/transcriptions`；视频采用硅基流动 `/v1/video/submit` 与 `/v1/video/status`。媒体需显式指定已注册的 `provider::model`，不使用聊天自动路由；上游必须支持所选模型与接口。音频返回二进制，视频返回异步任务。任务归属提交 Key / 账户及当前租户管理员，元数据保存在 `data/media-jobs.json`，应随数据目录一起备份。更多限制与示例见 [API.md](API.md)。
-
-### 媒体接口实现约束
-
-- 视频任务仅当前支持硅基流动（`api.siliconflow.*`）；不支持其他上游视频能力。  
-- 音频转写/翻译要求 `multipart/form-data`，`/v1/audio/speech` 返回音频二进制流。  
-- 媒体任务 `requestId` 为本地生成标识，状态查询按所有者与租户权限校验；任务结果会保留并在本地清理过期记录。  
-- 图片/音频返回结果和任务提交都受大小上限约束，超限会返回错误。
-
-### 媒体实验室（控制台端）
-
-控制台"媒体实验室"用于统一调用上游图片/语音/视频能力，区别于聊天接口模型调用。建议按下列步骤使用：
-
-1. 在服务商里配置并启用支持对应能力的服务商与模型。  
-2. 将目标模型加入该服务商的可调用模型列表，并确认模型可用。  
-3. 进入侧栏"媒体实验室"，选择 `provider::model`（此处不支持 `auto`）。  
-4. 选择对应功能后提交请求；任务类接口会返回 `requestId`，后续使用 `/v1/video/status` 轮询。  
-
-支持入口（与仓库实现一致）：
-
-- 图片：`/v1/images/generations`  
-- 图片编辑：`/v1/images/edits`（受上游与厂商能力限制）  
-- 语音合成：`/v1/audio/speech`（返回音频二进制）  
-- 音频转写：`/v1/audio/transcriptions`（multipart）  
-- 音频翻译：`/v1/audio/translations`（multipart）  
-- 视频提交：`/v1/video/submit`  
-- 视频轮询：`/v1/video/status`（按 `requestId`）  
-- 嵌入与重排：`/v1/embeddings`、`/v1/rerank`
-
-调用时的注意点：
-
-- 不经过聊天路由器，必须显式使用已注册模型 ID；若 `model` 未配置或未启用会被拒绝。  
-- 视频仅支持硅基流动，`media-jobs` 任务记录与调用者归属会随数据目录持久化。  
-- 任务和大文件接口有体积上限，响应或中间下载失败会直接返回错误并终止请求。  
-- 结果文件与任务状态建议与业务日志一起留存，便于排查供应商侧问题（超时、限流、参数不匹配）。
-
 ## 维护者联系
 
-仓库维护联系邮箱：`chen15652641985@gmail.com`（owner 账号绑定邮箱，用于紧急修复沟通与 owner 密码重置关联）。
+仓库维护联系邮箱：`chen15652641985@gmail.com`。

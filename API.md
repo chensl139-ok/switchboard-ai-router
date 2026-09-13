@@ -31,8 +31,7 @@ Anthropic SDK 自动携带 `anthropic-version`，模型列表将返回 Anthropic
 
 ## SDK
 
-安装开发依赖后可运行 `examples/openai-tools.mjs`、`examples/anthropic.mjs` 和 `examples/responses.mjs`。
-示例使用 `ROUTER_API_KEY`，避免误用机器环境中已有的 OpenAI/Anthropic 供应商密钥。
+示例统一使用 `ROUTER_API_KEY` 环境变量，避免误用机器环境中已有的 OpenAI/Anthropic 供应商密钥。
 
 ```python
 from openai import OpenAI
