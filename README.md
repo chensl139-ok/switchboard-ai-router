@@ -120,10 +120,13 @@ WebSocket 连接 `/v1/realtime`，5 秒内发送：
 - **显示思考内容**：仅控制显示，隐藏不减少推理计算或费用。
 - **模型默认**：不发送控制参数，兼容所有已接入服务商。
 - **开启/关闭思考**：`thinking_mode: "enabled" / "disabled"`。硅基流动/百炼映射 `enable_thinking`，DeepSeek 映射 `thinking.type`；具体模型仍须支持混合思考模式。
-- 如果发送关闭参数后模型仍返回思考，界面会明确提示模型可能不支持关闭，不会假装成功。
+- GLM-5.3 系列为强制思考模型，产品禁用关闭选项，API 在调用上游前直接拒绝，不消耗生成配额。
+- 若其他模型无视关闭参数并返回 reasoning_content，HTTP 返回 422，SSE/WebSocket 返回错误并中断，不把隐藏输出当作关闭推理。
 - 未适配服务商的开关请求会明确失败；仍可以选择模型默认并显示它返回的思考。
 - `max_tokens` 可能同时包含思考与回答；只有思考、没有正文时，检查模型设置并提高上限。
 - 思考和对话只保留在当前浏览器页面内存，不写入服务端日志。支持文本多轮，不支持工具调用、多模态或音频。
+
+模型能力依据：[GLM-5.3 官方说明](https://docs.z.ai/guides/llm/glm-5.3)。
 
 协议来源：[SiliconFlow](https://docs.siliconflow.cn/docs/userguide/capabilities/reasoning)、[DeepSeek](https://api-docs.deepseek.com/guides/thinking_mode/)、[百炼](https://help.aliyun.com/zh/model-studio/deep-thinking)。
 

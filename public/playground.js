@@ -1,3 +1,4 @@
+import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
 let history=[],controller=null,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
@@ -14,13 +15,20 @@ export function renderPlayground({state,token,esc,refresh}){
  <div class="lab-privacy">对话仅保留在当前页面内存中 · 调用按服务商规则计费</div></section>
  <aside class="lab-settings"><div class="lab-settings-heading">运行配置<span>PARAMETERS</span></div><label>服务商与模型<select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label>
  <label>传输方式<select id="lab-transport"><option value="sse">SSE · 增量输出</option><option value="ws">WebSocket · 实时连接</option><option value="http">HTTP · 完整响应</option></select></label>
- <div class="lab-settings-divider"></div><label>模型思考<select id="lab-thinking"><option value="auto">模型默认</option><option value="enabled">开启思考</option><option value="disabled">关闭思考</option></select></label><p class="lab-help">思考开关已适配硅基流动、DeepSeek、百炼，具体模型需支持。其他服务商请选择“模型默认”。</p>
- <label class="lab-switch"><span>显示思考内容<small>只控制显示，不影响模型计算</small></span><input id="lab-show-thinking" type="checkbox" role="switch"></label>
+ <div class="lab-settings-divider"></div><label>模型思考<select id="lab-thinking"><option value="auto">模型默认</option><option value="enabled">开启思考</option><option value="disabled">关闭思考</option></select></label><p class="lab-help" id="lab-thinking-help">思考开关控制模型推理，不只是隐藏显示。</p>
+ <label class="lab-switch"><span>思考区可见性<small>仅调整界面，独立于模型思考开关</small></span><input id="lab-show-thinking" type="checkbox" role="switch"></label>
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
  <div class="lab-call-info"><span>本次调用</span><strong id="lab-target-label"></strong><p>固定选择模型时，不会改变后台默认模型。</p></div></aside></div>`;
  const $=selector=>root.querySelector(selector);
  $('#lab-model').value=settings.target;$('#lab-transport').value=settings.transport;$('#lab-thinking').value=settings.thinking;$('#lab-show-thinking').checked=settings.showThinking;
- function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';}
+ function selectedCapability(){
+  if(settings.target==='auto'){
+   if(!['manual','fallback'].includes(state.strategy))return null;
+   return thinkingCapability(state.providers.find(p=>p.id===state.active));
+  }
+  const [id,model]=JSON.parse(settings.target);return thinkingCapability({...state.providers.find(p=>p.id===id),model});
+ }
+ function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';const capability=selectedCapability();$('#lab-thinking').querySelector('option[value=disabled]').disabled=capability?.canDisable===false;$('#lab-thinking-help').textContent=capability?.reason||'按实际选中的模型校验关闭能力；不支持的默认目标会拒绝请求。';} 
  function draw(){const list=$('#lab-messages');if(!list)return;const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
   list.innerHTML=history.length?history.map((m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small>${esc(m.status||'')}</small></div><div class="lab-message-body">${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer">${esc(m.content|| (m.status==='生成中'?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':''))}</div>${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`).join(''):
   `<div class="lab-empty"><span class="lab-empty-icon">${spark}</span><h2>一个问题，多种可能</h2><p>选择一个模型，或者让路由策略为你选择。</p><div class="lab-prompts"><button type="button" data-example="用一个生活中的例子解释什么是 API。">解释一个概念</button><button type="button" data-example="用 Python 编写一个带注释的快速排序函数。">编写一段代码</button><button type="button" data-example="给一个 AI 模型路由平台写三条简洁的产品介绍。">探索一个想法</button></div></div>`;
@@ -41,6 +49,7 @@ export function renderPlayground({state,token,esc,refresh}){
  $('#lab-form').onsubmit=async e=>{
   e.preventDefault();e.stopPropagation();if(controller)return;
   const prompt=$('#lab-prompt').value.trim();if(!prompt)return;
+  const capability=selectedCapability();if(settings.thinking==='disabled'&&capability?.canDisable===false){$('#lab-error').textContent=capability.reason;return;}
   const context=history.filter(m=>m.status!=='已停止'&&m.status!=='失败').map(({role,content,reasoning_content})=>({role,content,...(reasoning_content?{reasoning_content}:{})}));
   if(context.length>=99){$('#lab-error').textContent='对话达到上限，请清空对话后继续。';return;}
   const [model,upstream_model]=settings.target==='auto'?['auto']:JSON.parse(settings.target);
@@ -54,7 +63,7 @@ export function renderPlayground({state,token,esc,refresh}){
     const res=await fetch('/api/chat',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(input),signal:request.signal});
     const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result=data.choices[0].message;response.label=data.model||response.label;
    }else result=await streamChat(settings.transport,token,input,update=>{Object.assign(response,update);draw();},request.signal);
-   Object.assign(response,result);if(settings.thinking==='disabled'&&response.reasoning_content)response.notice='已发送关闭思考参数，但当前模型仍返回了思考内容，可能不支持关闭。可通过右侧开关隐藏显示。';response.status=`完成 · ${((Date.now()-started)/1000).toFixed(1)}s`;response.thinkingOpen=false;
+   Object.assign(response,result);response.status=`完成 · ${((Date.now()-started)/1000).toFixed(1)}s`;response.thinkingOpen=false;
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
   finally{controller=null;busy(false);draw();void refresh();}
  };

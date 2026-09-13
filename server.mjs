@@ -1,4 +1,4 @@
-import {thinkingOptions} from './thinking.mjs';
+import {thinkingOptions,assertThinkingDisabled} from './thinking.mjs';
 import {selectRoutes,validateRouting} from './routing.mjs';
 import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
@@ -101,8 +101,9 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(input.max_tokens!==undefined&&(!Number.isInteger(input.max_tokens)||input.max_tokens<1||input.max_tokens>131072))throw fail('max_tokens 无效');
   if(input.upstream_model!==undefined&&(typeof input.upstream_model!=='string'||!input.model||input.model==='auto'))throw fail('指定模型需要同时指定服务商路由 ID');
   const explicit=input.model&&input.model!=='auto';
-  const candidates=selectRoutes(state,input,{sequence:sequence++});
-  for(const p of candidates)thinkingOptions(p,input.thinking_mode,input.max_tokens);
+  let candidates=selectRoutes(state,input,{sequence:sequence++});
+  thinkingOptions(candidates[0],input.thinking_mode);
+  candidates=candidates.filter(p=>{try{thinkingOptions(p,input.thinking_mode);return true;}catch{return false;}});
   if(input.messages.some(m=>m.reasoning_content!==undefined&&typeof m.reasoning_content!=='string'))throw fail('reasoning_content 必须为文本');
   if(apiKeyId)apiKeys.admit(apiKeyId);
   let succeeded=false,usedTokens=0;
@@ -121,17 +122,19 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     status=resp.status;
     if(!resp.ok)throw fail(`上游返回 HTTP ${status}`,status);
     if(input.stream){
-     const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{committed=true;await onChunk(chunk);},signal);
+     const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{assertThinkingDisabled(input,chunk.choices?.[0]?.delta);committed=true;await onChunk(chunk);},signal);
      state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens});state.logs=state.logs.slice(0,500);save();
      succeeded=true;usedTokens=tokens;return {provider:p.id};
     }
     let data=await resp.json();
     if(p.protocol==='anthropic')data={id:data.id,object:'chat.completion',created:Math.floor(Date.now()/1000),model:data.model,choices:[{index:0,message:{role:'assistant',content:(data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join(''),reasoning_content:(data.content||[]).filter(c=>c.type==='thinking').map(c=>c.thinking||'').join('')},finish_reason:data.stop_reason==='max_tokens'?'length':'stop'}],usage:{prompt_tokens:data.usage?.input_tokens||0,completion_tokens:data.usage?.output_tokens||0,total_tokens:(data.usage?.input_tokens||0)+(data.usage?.output_tokens||0)}};
     if(!Array.isArray(data.choices))throw fail('上游响应格式错误',502);
+    for(const choice of data.choices)assertThinkingDisabled(input,choice.message);
     state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens:data.usage?.total_tokens||0});state.logs=state.logs.slice(0,500);save();
     succeeded=true;usedTokens=data.usage?.total_tokens||0;return {data,provider:p.id};
    }catch(e){
     state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0});state.logs=state.logs.slice(0,500);save();
+    if(e.status===422)throw e;
     if(committed||signal.aborted||explicit||![401,403,408,429,500,502,503,504,529].includes(e.status||502))throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
    }
   }
@@ -192,10 +195,10 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     throw fail('接口不存在',404);
    }
-   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css'};
+   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css'};
    if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));
-  }catch(e){if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: {"error":"流式响应中断"}\n\n');return;}json(res,e.status||500,{error:{message:e.status?e.message:'服务器内部错误',type:'router_error'}})}
+  }catch(e){if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify({error:{message:e.status===422?e.message:'流式响应中断'}})+'\n\n');return;}json(res,e.status||500,{error:{message:e.status?e.message:'服务器内部错误',type:'router_error'}})}
  });
  installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
  return server;

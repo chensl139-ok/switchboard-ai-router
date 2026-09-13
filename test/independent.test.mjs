@@ -34,10 +34,11 @@ test('含加密服务商的数据丢失主密钥时禁止静默重建',()=>{
 });
 test('HTTP 将思考关闭参数发给上游，并保留 reasoning_content',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'thinking-api-'));let sent;
- const app=createApp({dir,admin:'a'.repeat(32),gateway:'g'.repeat(32),fetcher:async(url,opts)=>{sent=JSON.parse(opts.body);return Response.json({model:'model',choices:[{message:{role:'assistant',content:'answer',reasoning_content:'provider reasoning'}}]});}});
+ const app=createApp({dir,admin:'a'.repeat(32),gateway:'g'.repeat(32),fetcher:async(url,opts)=>{sent=JSON.parse(opts.body);return Response.json({model:'model',choices:[{message:{role:'assistant',content:'answer',reasoning_content:sent.enable_thinking?'provider reasoning':''}}]});}});
  await new Promise(r=>app.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.address().port}`;
  const post=(url,data,token='a'.repeat(32))=>fetch(base+url,{method:'POST',headers:{authorization:'Bearer '+token},body:JSON.stringify(data)});
  try{await post('/api/provider',{id:'siliconflow',name:'Test',baseUrl:'https://api.siliconflow.cn/v1',protocol:'openai',model:'model',models:['model'],enabled:true,priority:1,apiKey:'fake-key'});
- const r=await post('/v1/chat/completions',{...input,thinking_mode:'disabled'},'g'.repeat(32));assert.equal(r.status,200);assert.equal(sent.enable_thinking,false);assert.equal((await r.json()).choices[0].message.reasoning_content,'provider reasoning');
+ const r=await post('/v1/chat/completions',{...input,thinking_mode:'disabled'},'g'.repeat(32));assert.equal(r.status,200);assert.equal(sent.enable_thinking,false);assert.equal((await r.json()).choices[0].message.reasoning_content,'');
+ const on=await post('/v1/chat/completions',{...input,thinking_mode:'enabled'},'g'.repeat(32));assert.equal((await on.json()).choices[0].message.reasoning_content,'provider reasoning');
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}
 });

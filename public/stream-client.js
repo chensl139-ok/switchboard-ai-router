@@ -17,7 +17,7 @@ export async function streamChat(transport,token,input,onText,signal){
  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',done=false;
  try{while(!done){const part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true}).replace(/\r\n/g,'\n');let index;
   while((index=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,index);buffer=buffer.slice(index+2);
-   if(block.startsWith('event: error'))throw Error('上游流式响应中断');
+   if(block.startsWith('event: error')){const line=block.split('\n').find(l=>l.startsWith('data:'));const payload=line?JSON.parse(line.slice(5)):{};throw Error(payload.error?.message||'上游流式响应中断');}
    const data=block.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');
    if(data==='[DONE]'){done=true;break}if(data)receive(JSON.parse(data));
   }}if(!done)throw Error('流式连接意外关闭');return result();
