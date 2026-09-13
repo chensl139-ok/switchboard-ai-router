@@ -62,3 +62,18 @@ test('分时价格：时区、跨午夜、边界、重叠及经济路由',async(
  assert.equal(selectRoutes(state,{messages:[],max_tokens:100},{now:Date.parse('2026-09-13T15:00:00Z')})[0].id,'a');
  assert.equal(priceAt(validatePrice({...base,timeZone:'America/New_York',periods:[{...peak,start:'01:00',end:'02:00'}]}),Date.parse('2026-11-01T06:30:00Z')).periodLabel,'高峰');
 });
+
+test('工作日价格和跨午夜星期归属',async()=>{
+ const {priceAt}=await import('../pricing.mjs');
+ const base={currency:'CNY',inputPerMillion:1,outputPerMillion:4};
+ const peak={kind:'peak',start:'09:00',end:'12:00',weekdays:[1,2,3,4,5],inputPerMillion:2,outputPerMillion:8};
+ const price=validatePrice({...base,periods:[peak]});
+ assert.equal(priceAt(price,Date.parse('2026-09-14T01:00:00Z')).inputPerMillion,2);
+ assert.equal(priceAt(price,Date.parse('2026-09-13T01:00:00Z')).inputPerMillion,1);
+ assert.equal(priceAt(price,Date.parse('2026-09-14T04:00:00Z')).inputPerMillion,1);
+ const night={...peak,weekdays:[7],start:'23:00',end:'02:00'};
+ assert.equal(priceAt(validatePrice({...base,periods:[night]}),Date.parse('2026-09-13T17:00:00Z')).inputPerMillion,2);
+ assert.throws(()=>validatePrice({...base,periods:[night,{...peak,weekdays:[1],start:'01:00',end:'03:00'}]}),/重叠/);
+ assert.throws(()=>validatePrice({...base,periods:[{...peak,weekdays:[]}]}),/星期/);
+ assert.equal(validatePrice({...base,periods:[peak,{...peak,weekdays:[6,7]}]}).periods.length,2);
+});

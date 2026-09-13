@@ -55,3 +55,5 @@ dialog{padding:28px;width:min(600px,94vw);border-color:#d2dfd7;border-radius:16p
 @media(max-width:720px){.lab-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}.lab-heading>button{padding:7px;font-size:11px}.lab-heading h1{font-size:24px}.lab-heading .lab-beta{margin-left:6px;font-size:8px}.lab-messages{height:clamp(250px,35dvh,340px)}.lab-empty-icon{width:44px;height:44px;margin-bottom:12px}.lab-prompts{margin-top:16px}.lab-empty p{font-size:12px}.lab-message-body{padding-left:0}}
 
 .price-schedule{margin:24px 0;padding-top:20px;border-top:1px solid var(--line)}.price-period{border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0;background:#fafcfb;min-width:0}.price-period legend{font-size:12px;color:var(--ink-muted);padding:0 6px}.price-period label{margin:6px 0}.price-period .remove-period{margin-top:12px;font-size:12px}.price-schedule .lab-error{margin:12px 0}
+
+.price-weekdays{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 14px}.price-weekdays .check{gap:5px;font-size:12px}
