@@ -1,163 +1,255 @@
-# Switchboard · 独立 AI 智能路由
+# Switchboard · AI 智能路由平台
 
-多服务商、多模型统一调用平台。基于 Node.js 独立运行，支持本地部署、容器部署和主流云平台。
+一个入口连接多个模型服务商。支持账户与租户隔离、六种路由策略、OpenAI / Anthropic 兼容 API、SSE / WebSocket，以及模型价格和用量管理。基于 Node.js 独立运行，可部署在本机、Docker 或支持持久磁盘的云服务器。
 
 [![CI](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml/badge.svg)](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chensl139-ok/switchboard-ai-router)
 
-> 本仓库公开可用。Render 一键部署需要登录 Render 账号并确认资源配置；Blueprint 使用付费 Starter + 持久磁盘。
+[API 接入说明](API.md) · [租户与权限](TENANCY.md) · [调用示例](examples)
 
-## 功能
+## 主要功能
 
-- 服务商：硅基流动、DeepSeek、OpenAI、Anthropic、Gemini、百炼，以及自定义兼容接口。
-- 一键跨服务商查询模型目录，使用 provider::model 统一 ID；同服务商多模型切换；六种路由：固定、故障转移、加权轮询、最低延迟、关键词规则、经济优先。
-- OpenAI Chat/Responses/Completions 与 Anthropic Messages 兼容入口；文本、图片输入、函数工具及结果回传。
-- HTTP、SSE、WebSocket；流式失败不拼接其他模型的回复；取消、心跳和基础背压保护。
-- 产品侧 API Key 管理：一次性展示明文、哈希存储、生效/过期、停用/启用、总次数/每日次数/RPM 限制。
-- 模型实验室：独立运行参数面板、增量回复、折叠思考区、显示/隐藏思考、思考开关、停止生成、Enter 发送。
-- 上游密钥 AES-256-GCM 加密，配置和 Key 配额保存在挂载磁盘，日志只保存调用元数据。
-- 收起式导航、窄屏布局、账户登录、租户隔离与成员角色管理，无外部账号平台依赖。
+| 功能 | 支持内容 |
+| --- | --- |
+| 服务商与模型 | 硅基流动、DeepSeek、OpenAI、Anthropic、Gemini、OpenRouter、百炼及自定义兼容服务；同服务商多模型切换 |
+| 智能路由 | 固定模型、故障转移、加权轮询、延迟优先、关键词规则、经济优先 |
+| 模型目录 | 一键查询服务商模型、搜索并加入调用列表；通过 `provider::model` 指定渠道与模型 |
+| 兼容 API | Chat Completions、Responses、Legacy Completions、Anthropic Messages；JSON、SSE、自建 WebSocket |
+| 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
+| 模型实验室 | Enter 发送、Shift + Enter 换行、直接粘贴图片、附件预览、停止生成、草稿保留、回复复制 |
+| 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
+| API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
+| 多租户 | 邮箱密码登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
+| 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张参考价格 |
+| 观测与文档 | 调用日志、用量分析、费用估算、操作审计、产品内 API 文档和 OpenAPI JSON 下载 |
 
-## 账户、租户与价格
+上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。界面支持侧栏收起、服务商搜索筛选和移动端布局。
 
-- 账户：邮箱 + 密码、邀请注册、修改密码、会话退出；Cookie 为 HttpOnly + SameSite。
-- 租户：配置、上游密钥、路由、API Key、日志和价格隔离；每个账户可加入多个租户。
-- 角色：所有者、管理员、成员、只读；最后一个所有者不能被移除或降级。
-- API Key：创建、限额、有效期、停用和删除；删除不可恢复，既有日志保留。
-- 价格：OpenRouter 公共接口自动同步（7 天有效），其他平台手动录入（默认 30 天有效）。
-- 经济优先：只比较同币种、价格有效的已配置模型；按输入 Token 估算与实际发送的输出上限计算参考成本。未知/过期价格不会当作免费。
-- 用量：每租户 SQLite 保存 90 天元数据，支持按日期、服务商、模型和 Key 分析；成本仅为估算。
+## 快速开始
 
-## 本机一键部署
+### 方式一：直接运行 Node.js
 
-安装 Docker Desktop（Windows/macOS）或 Docker Engine + Compose v2（Linux），然后克隆仓库。
+需要 **Node.js >= 22.13**，适用于 Windows、macOS 和 Linux。
+
+```sh
+git clone https://github.com/chensl139-ok/switchboard-ai-router.git
+cd switchboard-ai-router
+npm ci
+npm run setup
+```
+
+编辑自动生成的 `.env`，本机示例使用 **3100**，避免与其他服务占用的 3000 冲突：
+
+```dotenv
+HOST=127.0.0.1
+PORT=3100
+```
+
+保留文件中已生成的令牌，再启动：
+
+```sh
+npm start
+```
+
+打开 [http://127.0.0.1:3100](http://127.0.0.1:3100)。如果未修改 `PORT`，原生运行默认使用 3000。
+
+### 方式二：Docker 一键部署
+
+安装 Docker Desktop，或 Docker Engine + Compose v2 后克隆仓库。
 
 **macOS / Linux：**
 
 ```sh
-git clone https://github.com/chensl139-ok/switchboard-ai-router.git
-cd switchboard-ai-router
 sh deploy.sh
 ```
 
-**Windows PowerShell（需 Node.js 22 LTS + Docker Desktop）：**
+**Windows PowerShell（需安装 Node.js）：**
 
 ```powershell
-git clone https://github.com/chensl139-ok/switchboard-ai-router.git
-cd switchboard-ai-router
 node scripts/deploy.mjs
 ```
 
-安装了 Node.js 的所有系统都可以执行 `npm run deploy`。脚本首次运行自动生成独立随机管理令牌和兼容调用令牌，写入 `.env`，重复执行不覆盖配置。
+有 Node.js 的环境也可以使用 `npm run deploy`。初始化脚本重复运行不会覆盖已有 `.env`。
 
-打开 **http://127.0.0.1:3000**，首次使用 `.env` 中的 `ADMIN_TOKEN` 创建所有者账户，之后使用邮箱与密码登录。配置服务商 API Key、获取模型、启用服务商，再进入「API Key 管理」给业务方签发受限 Key。
+本地 Compose 默认入口为 `http://127.0.0.1:3000`。如需使用本文统一示例端口，在 `.env` 设置后重新部署：
 
-端口被占用时在 `.env` 设置 `LOCAL_PORT=3001` 后重新执行部署命令。本地 Compose 只绑定回环地址，不向局域网公开。
-
-## 不使用 Docker
-
-需要 Node.js >= 22.13：
-
-```sh
-npm ci
-npm run setup
-npm start
+```dotenv
+LOCAL_PORT=3100
 ```
 
-适用于 Windows、macOS、Linux。原生运行使用 `.env` 的 `HOST` / `PORT`；Docker 内部固定 `HOST=0.0.0.0`，对外绑定由部署平台控制。
-
-## 云服务器 HTTPS/WSS 一键启动
-
-适用于阿里云、腾讯云、AWS EC2 等支持 Docker 的服务器，以及自己的 VPS。先将域名解析到服务器，并开放 80/443。
-
-```sh
-npm run setup
-# 编辑 .env：GATEWAY_DOMAIN=router.example.com
-sh deploy.sh --public
-# 或 npm run deploy:public
-```
-
-Caddy 自动管理 HTTPS，支持 WebSocket Upgrade，SSE 即时刷新、不缓冲；应用的 3000 端口不直接暴露公网。
-
-## 托管平台
-
-| 平台 | 仓库配置 | 仍需完成的步骤 |
+| 运行方式 | 修改哪个端口 | 说明 |
 | --- | --- | --- |
-| Render | `render.yaml` + 上方 Deploy 按钮 | 登录并确认资源计划；令牌自动生成，磁盘自动挂载 |
-| Railway | `railway.json` + Dockerfile | 从 GitHub 导入；添加挂载 `/app/data` 的 Volume；设置两个令牌；生成公开域名 |
-| Fly.io | `fly.toml` + Dockerfile | 创建唯一应用名、`router_data` 持久卷、设置两个令牌；单实例 `fly deploy --ha=false` |
-| Coolify / Dokploy | Dockerfile 或 Compose | 连接 Git 仓库、设置环境变量和域名、挂载 `/app/data` |
-| 通用容器平台 | Dockerfile | 设置环境变量、持久化目录、健康检查、单副本、HTTPS/WSS 转发 |
+| `npm start` | `PORT=3100` | Node.js 直接监听的端口 |
+| Docker Compose | `LOCAL_PORT=3100` | 宿主机端口；容器内部仍为 3000 |
 
-Railway/Fly/通用容器平台必须设置 `ADMIN_TOKEN`、`GATEWAY_TOKEN`（各至少 24 字符），`HOST=0.0.0.0` 和 `DATA_DIR=/app/data`。不能把原生本地 `.env` 中的 `HOST=127.0.0.1` 直接复制到云容器。
+本地默认仅绑定回环地址。若 3000 打开的是 Grafana 等其他应用，请访问你配置的路由平台端口。
 
-平台配置依据：[Render Blueprint](https://render.com/docs/blueprint-spec)、[一键部署按钮](https://render.com/docs/deploy-to-render)、[Railway 配置](https://docs.railway.com/config-as-code/reference)、[Fly 配置与持久卷](https://fly.io/docs/reference/configuration/)。
+### 首次配置
 
-**边界：**“跨平台部署”指支持上述 Node/Docker 环境，不包括无持久磁盘、禁止长连接的环境；不支持直接部署为 GitHub Pages、纯静态网站或普通 Vercel/Netlify Functions。不能用同一按钮自动开通所有云厂商账号。本仓库提供可用配置与入口，除本地及 CI 外，云厂商配置尚未逐一实机部署验收。
+1. 使用 `.env` 中的 `ADMIN_TOKEN` 创建首个所有者账户，之后通过邮箱和密码登录。
+2. 在「服务商管理」填写上游地址与密钥，获取模型并启用服务商。
+3. 在「模型实验室」验证模型，按需要设置路由策略与价格。
+4. 在「API Key 管理」创建业务调用 Key，并设置额度和有效时间。
+5. 打开侧栏「API 文档」查看示例，或访问 `/#api`。
 
-## 多协议、图片与工具
+`ADMIN_TOKEN` 用于首次账户初始化，不能用作业务调用 Key。新部署不会包含其他实例的账户、供应商密钥或价格配置。
 
-详细接口矩阵、一键模型查询、SDK 示例和兼容范围见 [统一 API 说明](API.md)。服务商上游可选 OpenAI Chat、OpenAI Responses 或 Anthropic Messages，所有入口共用租户与配额。
+## API 接入
 
-## 外部调用
-
-非流式：`POST /v1/chat/completions`，`stream: false`。
-SSE：同一地址，`stream: true`；成功以 `[DONE]` 结束。
+以下地址假设本机已配置为 3100；云端部署请替换为实际 HTTPS 域名。
 
 ```sh
-curl -N http://127.0.0.1:3000/v1/chat/completions \
+curl -N 'http://127.0.0.1:3100/v1/chat/completions' \
   -H 'Authorization: Bearer YOUR_API_KEY' \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"你好"}],"stream":true}'
 ```
 
-`model: "auto"` 跟随当前策略；`model: "siliconflow"` 固定服务商；`upstream_model` 可指定该服务商已保存模型。`GET /v1/models` 返回可用路由 ID 和 provider::model 模型 ID；`GET /v1/models/discover` 查询已启用服务商的全部模型目录。
+- `model: "auto"`：跟随当前租户的后台路由策略。
+- `model: "siliconflow"`：固定使用该服务商的当前模型。
+- `model: "siliconflow::zai-org/GLM-5.3"`：固定服务商和已配置模型。
 
-WebSocket 连接 `/v1/realtime`，5 秒内发送：
+鉴权支持 `Authorization: Bearer KEY` 或 `x-api-key: KEY`；同时提供时必须一致。使用产品签发的 Key，不要填上游服务商密钥。
+
+| 方法 | 接口 | 用途 |
+| --- | --- | --- |
+| GET | `/v1/models` | 已配置并启用的可调用模型，以及自动路由／服务商别名 |
+| GET | `/v1/models/all` | 一次查询已启用服务商的全部模型，返回统一列表 |
+| GET | `/v1/models/discover` | 查询完整目录，按服务商分组返回 |
+| GET | `/v1/models/{id}` | 查询单个可调用模型，ID 需 URL 编码 |
+| POST | `/v1/chat/completions` | OpenAI Chat，支持图片、函数工具和 SSE |
+| POST | `/v1/responses` | 无状态 Responses，支持 SSE |
+| POST | `/v1/messages` | Anthropic Messages，支持 SSE |
+| POST | `/v1/completions` | 单个文本 prompt，支持 SSE |
+| POST | `/v1/messages/count_tokens` | 原生 Anthropic 上游真实 Token 计数 |
+| GET | `/v1/openapi.json` | 对外 HTTP API 的 OpenAPI 3.1 文档，需鉴权 |
+| WS | `/v1/realtime` | 自建 WebSocket 协议 |
+
+### 一次获取全部模型
+
+```sh
+curl 'http://127.0.0.1:3100/v1/models/all' \
+  -H 'Authorization: Bearer YOUR_API_KEY'
+```
+
+返回的 `data` 使用 `provider::model` ID，`callable` 表示是否已经加入调用列表。`partial: true` 表示部分服务商失败，具体原因见 `errors`，不能将部分结果当作完整目录。
+
+目录查询限定在当前 Key 所属租户的已启用服务商。发现模型不会自动注册或启用；私有模型目录需要配置相应服务商密钥。查询最多等待 45 秒、最多并发 3 个服务商，10 秒内限一次；`all` 与 `discover` 共用限频，不消耗生成次数额度。
+
+### SSE 与 WebSocket
+
+HTTP 请求设置 `stream: true` 开启 SSE。Chat 以 `[DONE]` 结束；Responses 和 Messages 使用各自协议的命名事件。已经输出内容后不会换上游拼接回复。
+
+WebSocket 连接 `ws://127.0.0.1:3100/v1/realtime`，5 秒内发送认证消息：
 
 ```json
 {"type":"auth","token":"YOUR_API_KEY"}
 ```
 
-收到 ready 后发送：
+收到 `ready` 后发送：
 
 ```json
-{"type":"chat","id":"request-1","input":{"model":"auto","messages":[{"role":"user","content":"你好"}],"thinking_mode":"auto"}}
+{"type":"chat","id":"request-1","input":{"model":"auto","messages":[{"role":"user","content":"你好"}]}}
 ```
 
-收到 `delta`、`done` 或 `error`；`{ "type": "cancel", "id": "request-1" }` 取消。密钥不要放 URL。
-可运行示例：`GATEWAY_URL` 和 `GATEWAY_TOKEN` 配置到环境后，执行 `node examples/stream.mjs sse` 或 `node examples/stream.mjs ws`。
+服务器返回 `delta`、`done` 或 `error`。发送 `{"type":"cancel","id":"request-1"}` 可取消；每个连接同时处理一个生成请求。不要把密钥放进 URL。此接口是自建协议，不是 OpenAI Realtime 音频接口。
 
-## 思考内容与开关
+完整参数、SDK、图片与工具回传示例见 [API.md](API.md) 和产品内 `/#api`。文档页支持代码复制及 OpenAPI JSON 下载，并自动填入当前部署地址。`/api/*` 管理接口使用账户会话，不能使用外部 Key 修改平台配置。
 
-实验室只展示模型 API 真实返回的 `reasoning_content` 或 Anthropic thinking 文本；模型不返回时不会伪造。
+## Cherry Studio 配置
 
-- **显示思考内容**：仅控制显示，隐藏不减少推理计算或费用。
-- **模型默认**：不发送控制参数，兼容所有已接入服务商。
-- **开启/关闭思考**：`thinking_mode: "enabled" / "disabled"`。硅基流动/百炼映射 `enable_thinking`，DeepSeek 映射 `thinking.type`；具体模型仍须支持混合思考模式。
-- GLM-5.3 系列为强制思考模型，产品禁用关闭选项，API 在调用上游前直接拒绝，不消耗生成配额。
-- 若其他模型无视关闭参数并返回 reasoning_content，HTTP 返回 422，SSE/WebSocket 返回错误并中断，不把隐藏输出当作关闭推理。
-- 未适配服务商的开关请求会明确失败；仍可以选择模型默认并显示它返回的思考。
-- `max_tokens` 可能同时包含思考与回答；只有思考、没有正文时，检查模型设置并提高上限。
-- 思考和对话只保留在当前浏览器页面内存，不写入服务端日志。支持文本、图片和函数工具多轮；音频、视频及内置工具暂不支持。
+1. 添加 OpenAI 兼容服务商。
+2. API 地址填写 **`http://127.0.0.1:3100/v1`**，云端使用对应域名。
+3. API 密钥填写本平台签发的 Key。
+4. 点击「获取模型列表」，将需要的模型加入客户端；选择 `auto` 可使用后台路由策略。
 
-模型能力依据：[GLM-5.3 官方说明](https://docs.z.ai/guides/llm/glm-5.3)。
+API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准模型列表使用 `/v1/models`，仅显示已配置的模型；完整上游目录使用 `/v1/models/all` 查询。
 
-协议来源：[SiliconFlow](https://docs.siliconflow.cn/docs/userguide/capabilities/reasoning)、[DeepSeek](https://api-docs.deepseek.com/guides/thinking_mode/)、[百炼](https://help.aliyun.com/zh/model-studio/deep-thinking)。
+**能聊天但拉取模型列表失败：**检查客户端代理。已复现列表请求被系统代理转发并断开的情况；改为使用原代理地址的「自定义代理」，在绕过规则中加入 `localhost,127.0.0.1,::1`，保留原有绕过规则后可恢复。代理端口以你自己的配置为准，不要复制其他机器的端口。
 
-## 配额、持久化与升级
+## 价格与经济优先
 
-调用配额按**开始执行的生成请求**计数；上游失败/取消也计一次，内部回退不重复计数。每日按 UTC 零点（北京时间 08:00）重置。Token 是上游返回的已知用量统计，不是 Token 或金额硬限额。停用/过期阻止新请求，已开始请求允许完成。
+- 按调用渠道分别维护价格，支持 CNY / USD。相同模型在不同服务商的价格互不替代。
+- 录入普通输入、输出、缓存命中输入的每百万 Tokens 价格及每次请求固定费用。缓存价留空表示未知，`0` 表示已确认免费。
+- 支持最多 8 个高峰／空闲时段，设置 IANA 时区及生效星期；可跨午夜，开始时间包含、结束时间不包含，跨午夜归属开始日。重叠时段禁止保存，未覆盖时间使用基础价格。
+- 经济优先只比较同币种、价格有效的已配置模型，按选路时的时段价格及输出上限估算，不预设缓存命中。图片输入不进行经济选路估算。
+- 调用费用根据上游实际用量，按每次上游尝试开始时间估算；流式生成过程中不切价。命中缓存但缓存价格未知、或有不支持的缓存写入费用时，不估算总费用。
+- 图片按张价格可单独记录，不参与聊天经济路由；录入图片价格不代表支持图片生成接口。
+- OpenRouter 可同步价格，默认有效 7 天；手动价格默认有效 30 天。自动同步会替换相应模型的价格配置，包括手动时段。
 
-旧 `GATEWAY_TOKEN` 默认兼容，可在 API Key 管理页关闭。它不受应用 Key 配额限制；`ADMIN_TOKEN` 仅用于首次账户初始化，不能作为业务调用 Key。
+价格数据属于部署实例。仓库不内置会随时间变化的个人渠道报价；录入前请核对服务商当期价格。费用为参考估算，不作为供应商账单或计费结算凭据。
 
-`data` 包含默认租户的 `state.json`、`api-keys.json`、`master.key`、`usage.sqlite`，以及全局 `accounts.json`；新增租户的数据位于 `data/tenants/<tenantId>/`。必须整体备份，不可只保留加密数据而丢失主密钥。旧本地版的数据目录可原样继续使用；其他部署实例的数据需由管理员自行备份和迁移。
+## 思考、图片与工具的边界
 
-当前使用本地文件和单实例配额，**只能运行一个副本**，不要把多个进程指向同一目录。需要多副本时应先迁移共享数据库与分布式限流。本版本支持单实例多租户账户，不包含计费结算、SSO/MFA 或可用性 SLA；实际生产使用需自己的负载和故障演练。
+实验室支持图片附件和直接粘贴截图，最多 4 张、单张不超过 4 MB；包含历史及 Base64 的总请求上限为 10 MB。选择具备视觉能力的上游模型后才能处理图片。
 
-升级：`git pull --ff-only` 后 `npm run deploy`，不要执行 `docker compose down -v`，后者会删除持久数据。容器启动时仅初始化目录权限，随后以非 root 用户运行。
+“显示思考”仅影响界面；`thinking_mode: "disabled"` 控制实际推理。不支持关闭的模型会明确拒绝，不能通过隐藏文字减少推理费用。GLM-5.3 等强制思考模型禁用关闭选项。模型返回的思考会占用输出预算，仅返回思考而无正文时可检查输出上限。
 
-## 验证
+函数工具由调用方验证参数、执行并回传结果；网关不执行工具。当前不支持音频、视频、文件上传、图像生成、内置联网／代码执行工具、Responses 服务端会话存储，以及 JSON Schema 结构化输出。兼容范围以 [API.md](API.md) 为准。
+
+## 云部署
+
+### Docker 服务器 + HTTPS / WSS
+
+适用于有 Docker 的云服务器或 VPS。将域名解析到服务器并开放 80/443：
+
+```sh
+npm run setup
+# 编辑 .env：GATEWAY_DOMAIN=router.example.com
+sh deploy.sh --public
+# 有 Node.js 时也可执行 npm run deploy:public
+```
+
+仓库的 Caddy 配置负责 HTTPS、WebSocket Upgrade 和 SSE 转发。应用内部 3000 端口不直接暴露公网。
+
+| 平台 | 仓库提供 | 部署时需配置 |
+| --- | --- | --- |
+| Render | `render.yaml`、上方部署按钮 | 登录并确认计划；Blueprint 配置 Starter 与持久磁盘，可能产生费用 |
+| Railway | `railway.json`、Dockerfile | 导入仓库、设置令牌、添加 `/app/data` Volume、生成域名 |
+| Fly.io | `fly.toml`、Dockerfile | 应用名、`router_data` 卷、令牌；单实例部署 |
+| Coolify / Dokploy | Dockerfile、Compose | 仓库、环境变量、域名和持久卷 |
+| 通用容器平台 | Dockerfile、健康检查 | 持久化目录、单副本、HTTPS / WSS 与长连接支持 |
+
+自定义容器环境需设置 `ADMIN_TOKEN`、`GATEWAY_TOKEN`（各至少 24 字符）、`HOST=0.0.0.0`、`DATA_DIR=/app/data`。对外使用 HTTPS 时设置 `COOKIE_SECURE=true`。原生本机的 `HOST=127.0.0.1` 不适用于容器对外监听。
+
+云端配置需在目标环境验收。当前验证范围为本地及 CI；不支持直接作为 GitHub Pages、纯静态网站，或无持久磁盘／不支持长连接的函数服务部署。
+
+## 配额、备份与升级
+
+调用配额按开始执行的生成请求计数；上游失败或取消也计一次，内部回退不重复扣次数。每日额度按 UTC 零点（北京时间 08:00）重置。Token 是已知用量统计，不是 Token 或金额硬限额。停用或过期阻止新请求，已开始请求允许完成。
+
+旧 `GATEWAY_TOKEN` 可在「API Key 管理」中关闭。它不受产品 Key 配额限制；业务调用应使用产品签发的受限 Key。初始化脚本仍需该环境变量。
+
+持久数据包含：
+
+```text
+data/
+├── accounts.json          # 账户、会话、租户与成员
+├── state.json             # 默认租户配置与价格
+├── api-keys.json           # 默认租户调用 Key 与配额
+├── master.key             # 上游凭据加密主密钥
+├── usage.sqlite           # 调用元数据
+└── tenants/<tenantId>/     # 其他租户的独立数据
+```
+
+整体备份数据目录或 Docker 持久卷，不可丢失 `master.key`。不要提交 `.env`、密钥或数据目录到公开仓库。
+
+当前使用本地文件、SQLite 和进程内限流，**只支持单副本运行**，不要让多个进程共享同一数据目录。多副本需先迁移共享数据库及分布式限流。默认日志保留 90 天，不包含 SSO / MFA、支付结算或可用性 SLA。
+
+升级前备份数据，然后执行：
+
+```sh
+git pull --ff-only
+# Node.js：停止原进程后
+npm ci
+npm start
+# Docker：
+# npm run deploy
+```
+
+不要执行 `docker compose down -v`，它会删除持久卷。容器完成目录权限初始化后以非 root 用户运行。
+
+## 验证与项目结构
 
 ```sh
 npm ci
@@ -165,8 +257,16 @@ npm run check
 npm test
 ```
 
-详细账户、隔离、价格和用量规则见 [租户与权限说明](TENANCY.md)。
+CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构建、Compose 启动、健康检查和重启。
 
-GitHub CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构建、Compose 启动、健康检查与重启。默认分支 `main` 包含完整的独立运行源码与部署配置。
+| 文件 | 职责 |
+| --- | --- |
+| `platform.mjs` / `accounts.mjs` | 账户、租户与访问控制 |
+| `server.mjs` / `routing.mjs` | API 服务、选路与调用 |
+| `protocols.mjs` / `protocol-stream.mjs` / `realtime.mjs` | 协议转换与流式传输 |
+| `model-catalog.mjs` / `openapi.mjs` | 模型目录与接口定义 |
+| `pricing.mjs` / `usage-store.mjs` | 价格计算与用量记录 |
+| `public/` | 控制台、实验室和 API 文档 |
+| `test/` / `examples/` | 自动化测试与客户端示例 |
 
-模型价格支持缓存命中输入价格，以及按 IANA 时区及所选星期重复的高峰 / 空闲价格（最多 8 段，支持跨午夜，禁止重叠）。每段独立设置输入、输出、缓存命中和请求固定费用；空档使用基础价格。经济优先在选路时按当前时段比较，调用费用按每次上游尝试开始时间估算；流式请求不在生成中途切价。OpenRouter 自动同步会替换价格配置，包括手动时段。
+默认分支 `main` 包含完整独立运行源码与部署配置。
