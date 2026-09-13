@@ -10,7 +10,7 @@
 
 ## Render
 
-点击 README 部署按钮；私有仓库先授权 Render GitHub App。Blueprint 会配置 1GB 持久磁盘、单实例和自动生成令牌。登录令牌在 Render 环境变量中查看。
+点击 README 部署按钮，登录 Render 并确认部署配置。Blueprint 会配置 1GB 持久磁盘、单实例和自动生成令牌。登录令牌在 Render 环境变量中查看。
 
 ## Railway
 

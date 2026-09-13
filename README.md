@@ -1,11 +1,11 @@
 # Switchboard · 独立 AI 智能路由
 
-多服务商、多模型统一调用平台。可完全独立运行，不需要飞书、妙搭、平台 SDK、平台登录或平台数据库。
+多服务商、多模型统一调用平台。基于 Node.js 独立运行，支持本地部署、容器部署和主流云平台。
 
 [![CI](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml/badge.svg)](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chensl139-ok/switchboard-ai-router)
 
-> 当前仓库为私有仓库。Render 一键入口需要先授权 Render 访问本仓库；Render Blueprint 使用付费 Starter + 持久磁盘，不是免费部署承诺。
+> 本仓库公开可用。Render 一键部署需要登录 Render 账号并确认资源配置；Blueprint 使用付费 Starter + 持久磁盘。
 
 ## 功能
 
@@ -72,7 +72,7 @@ Caddy 自动管理 HTTPS，支持 WebSocket Upgrade，SSE 即时刷新、不缓�
 
 | 平台 | 仓库配置 | 仍需完成的步骤 |
 | --- | --- | --- |
-| Render | `render.yaml` + 上方 Deploy 按钮 | 授权私有仓库、确认付费计划；令牌自动生成，磁盘自动挂载 |
+| Render | `render.yaml` + 上方 Deploy 按钮 | 登录并确认资源计划；令牌自动生成，磁盘自动挂载 |
 | Railway | `railway.json` + Dockerfile | 从 GitHub 导入；添加挂载 `/app/data` 的 Volume；设置两个令牌；生成公开域名 |
 | Fly.io | `fly.toml` + Dockerfile | 创建唯一应用名、`router_data` 持久卷、设置两个令牌；单实例 `fly deploy --ha=false` |
 | Coolify / Dokploy | Dockerfile 或 Compose | 连接 Git 仓库、设置环境变量和域名、挂载 `/app/data` |
@@ -80,7 +80,7 @@ Caddy 自动管理 HTTPS，支持 WebSocket Upgrade，SSE 即时刷新、不缓�
 
 Railway/Fly/通用容器平台必须设置 `ADMIN_TOKEN`、`GATEWAY_TOKEN`（各至少 24 字符），`HOST=0.0.0.0` 和 `DATA_DIR=/app/data`。不能把原生本地 `.env` 中的 `HOST=127.0.0.1` 直接复制到云容器。
 
-平台配置依据：[Render Blueprint](https://render.com/docs/blueprint-spec)、[私有仓库部署按钮](https://render.com/docs/deploy-to-render)、[Railway 配置](https://docs.railway.com/config-as-code/reference)、[Fly 配置与持久卷](https://fly.io/docs/reference/configuration/)。
+平台配置依据：[Render Blueprint](https://render.com/docs/blueprint-spec)、[一键部署按钮](https://render.com/docs/deploy-to-render)、[Railway 配置](https://docs.railway.com/config-as-code/reference)、[Fly 配置与持久卷](https://fly.io/docs/reference/configuration/)。
 
 **边界：**“跨平台部署”指支持上述 Node/Docker 环境，不包括无持久磁盘、禁止长连接的环境；不支持直接部署为 GitHub Pages、纯静态网站或普通 Vercel/Netlify Functions。不能用同一按钮自动开通所有云厂商账号。本仓库提供可用配置与入口，除本地及 CI 外，云厂商配置尚未逐一实机部署验收。
 
@@ -136,7 +136,7 @@ WebSocket 连接 `/v1/realtime`，5 秒内发送：
 
 旧 `GATEWAY_TOKEN` 默认兼容，可在 API Key 管理页关闭。它不受应用 Key 配额限制；`ADMIN_TOKEN` 仅供管理，不能交给业务调用方。
 
-`data` 包含 `state.json`、`api-keys.json`、`master.key`。必须整体备份，不可只保留加密数据而丢失主密钥。旧本地版的数据目录可原样继续使用；旧平台托管版数据不会自动迁出。
+`data` 包含 `state.json`、`api-keys.json`、`master.key`。必须整体备份，不可只保留加密数据而丢失主密钥。旧本地版的数据目录可原样继续使用；其他部署实例的数据需由管理员自行备份和迁移。
 
 当前使用本地文件和单实例配额，**只能运行一个副本**，不要把多个进程指向同一目录。需要多副本时应先迁移共享数据库与分布式限流。本版本不包含计费结算、多租户账户或可用性 SLA；实际生产使用需自己的负载和故障演练。
 
@@ -150,4 +150,4 @@ npm run check
 npm test
 ```
 
-GitHub CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构建、Compose 启动、健康检查与重启。旧妙搭工程保留于历史提交，当前默认分支不再含其代码或运行依赖。
+GitHub CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构建、Compose 启动、健康检查与重启。默认分支 `main` 包含完整的独立运行源码与部署配置。
