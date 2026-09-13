@@ -8,7 +8,7 @@ export function stopPlayground(){if(controller){controller.abort();controller=nu
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
 export function renderPlayground({state,token,tenantId,esc,refresh}){
  const root=document.querySelector('#content');
- const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),label:p.name+' / '+model,model}))).filter(item=>!modelCapabilities(item.model).mediaOnly);
+ const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),label:p.name+' / '+model,model}))).filter(item=>modelCapabilities(item.model).chat);
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
  root.innerHTML=`<div class="heading lab-heading"><div><div class="eyebrow">MODEL PLAYGROUND</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>从一次对话开始，比较模型的回答与思考表现。</p></div><button id="lab-clear" class="subtle">清空对话</button></div>
  <div class="lab-layout"><section class="lab-main"><div class="lab-toolbar"><span>${spark}对话测试</span><span class="lab-state" id="lab-state">准备就绪</span></div>
