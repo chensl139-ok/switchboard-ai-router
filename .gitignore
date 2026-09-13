@@ -4,5 +4,8 @@
 data/
 node_modules/
 *.log
+*.pid
 .DS_Store
 coverage/
+.local-api-key
+.workbuddy/

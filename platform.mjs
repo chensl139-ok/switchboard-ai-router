@@ -88,6 +88,9 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  return server;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const app=createPlatform();app.listen(Number(process.env.PORT)||3000,process.env.HOST||'127.0.0.1',()=>console.log(`Switchboard account platform listening on ${process.env.PORT||3000}`));
+ const app=createPlatform();
+ const port=Number(process.env.PORT)||3000;
+ const host=process.env.HOST||'0.0.0.0';
+ app.listen(port,host,()=>console.log(`Switchboard account platform listening on ${host}:${port}`));
  for(const event of ['SIGTERM','SIGINT'])process.once(event,()=>{app.close(()=>process.exit(0));setTimeout(()=>process.exit(0),35000).unref();});
 }

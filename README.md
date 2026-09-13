@@ -3,7 +3,7 @@
 一个入口连接多个模型服务商。支持账户与租户隔离、六种路由策略、OpenAI / Anthropic 兼容 API、SSE / WebSocket，以及模型价格和用量管理。基于 Node.js 独立运行，可部署在本机、Docker 或支持持久磁盘的云服务器。
 
 [![CI](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml/badge.svg)](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chensl139-ok/switchboard-ai-router)
+[![Deploy to Render](https://render.com/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chensl139-ok/switchboard-ai-router)
 
 [API 接入说明](API.md) · [租户与权限](TENANCY.md) · [调用示例](examples)
 
@@ -18,7 +18,7 @@
 | 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
 | 模型实验室 | Enter 发送、Shift + Enter 换行、直接粘贴图片、附件预览、停止生成、草稿保留、回复复制 |
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
-| 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频提交与轮询，内置限额与任务归属追踪 |
+| 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频提交与轮询，内置限额与任务归属追踪；与模型实验室严格按能力分桶 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
 | 多租户 | 邮箱密码登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
 | 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张价格 |
@@ -26,20 +26,42 @@
 
 上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。界面支持侧栏收起、服务商搜索筛选和移动端布局。
 
-## 项目简介（更新于 2026-09-13）
+## 项目简介
 
-Switchboard 采用「路由器 + 控制台」双位面设计：  
-- 路由层负责统一调度、熔断与限流；  
-- 控制台负责账号、租户、价格、API Key 与模型管理；  
+Switchboard 采用「路由器 + 控制台」双位面设计：
+
+- 路由层负责统一调度、熔断与限流；
+- 控制台负责账号、租户、价格、API Key 与模型管理；
 - 平台层提供 OpenAI / Anthropic 兼容边界，并通过统一 schema 做能力发现与错误归一化。
 
-当前仓库版本：`3.2.1`（在 `package.json` 中声明）。
+当前仓库代码版本：`3.2.1`（`package.json`）；对外发布版本：**`v1.0`**（GitHub Release）。
 
-### 本次 README 更新内容
+### 本次发布说明（v1.0）
 
-- 补充项目边界、部署与升级注意事项，便于快速接手运维；
-- 新增“验证与项目结构”段落中的权限、数据与兼容性说明；
-- 调整文档顺序，让快速开始、API 接入与排错路径更清晰。
+> 这是仓库在 GitHub 上的首个正式发布版本，以回退基线（`v1.0`，commit `ddcebe4`）之上的能力修复合并而成。目标：在保持上游主分支兼容性的前提下，确保两个实验室（模型 / 媒体）按能力严格分桶，并恢复所有静态资源路由。
+
+- **能力分离（playground ↔ media）**  
+  - 模型实验室只展示具备「聊天 / 工具 / 视觉」能力的模型；  
+  - 媒体实验室只展示显式标记为「图片 / 音频 / 视频 / 转写」能力的模型。  
+  - 由 `public/model-capability.js` 提供筛选；`public/model-capabilities.js` 提供更细粒度 API（`isModelForPlayground`、`isMediaModelFor`、`splitModelId`）供后续接入使用。
+- **静态资源补齐（v1.0.2 / v1.0.3 修复）**  
+  - v1.0.2 新增了 `/model-capabilities.js`，但误删了 `/model-capability.js` 的静态路由；  
+  - v1.0.3 把单数路由恢复，确保 `playground.js` / `media-lab.js` 通过相对 `import` 拿到的脚本能稳定加载，避免实验室初始化时静默丢失能力。
+- **平台默认监听地址**  
+  - `platform.mjs` 默认绑定 `0.0.0.0`，方便 Docker / 云部署；本机仍可通过 `.env` 设置 `HOST=127.0.0.1` 限定回环。
+- **账号与运维脚本**  
+  - 新增 `scripts/reset-admin-password.mjs`：scrypt（N=16384, r=8, p=1, 64 字节）与 `accounts.mjs` 保持一致，可用于丢失密码场景。  
+  - 配套脚本：`scripts/deploy-run.sh`（supervisor）、`scripts/recover.sh`（手动恢复）。
+
+### v1.0 之前的迭代差异
+
+| 版本 | commit | 角色 | 备注 |
+| --- | --- | --- | --- |
+| v1.0 | `ddcebe4` | 文档基线 | README、API 约束整理 |
+| **v1.0 (重打)** | 当前 HEAD | **可用基线** | 在 v1.0.2 的能力分离基础上恢复单数路由 |
+| 早期迭代 | — | 内部实验 | 已被覆盖，不再单独保留 |
+
+本次发布以 `v1.0` 作为唯一对外版本号；旧的迭代 tag 不会单独保留。
 
 ### 代码级行为补充
 
@@ -47,7 +69,7 @@ Switchboard 采用「路由器 + 控制台」双位面设计：
 - 请求校验约束：`messages 1–100`、`temperature 0–2`、`max_tokens 1–131072`、`stop` 最多 `4` 条。
 - 同时携带 `Authorization` 与 `x-api-key` 时必须一致；跨域来源非当前 Host 会被拒绝。
 - 模型未启用、provider 或路径受限时会在服务端阻断，不会回退到任意上游补偿。
-- 平台采用本地文件与 SQLite+进程内速率控制，当前仅支持单实例运行。
+- 平台采用本地文件与 SQLite + 进程内速率控制，当前仅支持单实例运行。
 
 ## 快速开始
 
@@ -122,6 +144,27 @@ LOCAL_PORT=3100
 
 - `npm run setup` 会基于 `.env.example` 生成 `ADMIN_TOKEN` 与 `GATEWAY_TOKEN`，并不会覆盖已存在 `.env` 中已有值。  
 - 推荐补充：`COOKIE_SECURE=true`（HTTPS）、`ALLOW_HTTP_UPSTREAM=true`（默认关闭，谨慎开启）、`GLOBAL_MAX_CONCURRENCY`（平台级并发上限）和 `GATEWAY_DOMAIN`（反代场景域名）。
+
+### 忘记密码（owner 账号）
+
+`accounts.mjs` 使用 scrypt 单向哈希存储密码，无法反推明文；使用随仓库提供的 reset 脚本：
+
+```sh
+# 1. 停掉正在运行的 platform.mjs
+kill <PID_on_3100>
+
+# 2. 把新密码通过环境变量传入，不进 shell history
+export SWITCHBOARD_NEW_PASSWORD='你的新密码（≥12 字符）'
+
+# 3. 执行重置
+node scripts/reset-admin-password.mjs
+
+# 4. 取消密码变量并重启服务
+unset SWITCHBOARD_NEW_PASSWORD
+HOST=0.0.0.0 PORT=3100 npm start
+```
+
+脚本会原子覆盖 `data/accounts.json`、清空该账号 session、并在审计日志追加 `account.password.reset`。
 
 ## API 接入
 
@@ -219,7 +262,7 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 
 实验室支持图片附件和直接粘贴截图，最多 4 张、单张不超过 4 MB；包含历史及 Base64 的总请求上限为 10 MB。选择具备视觉能力的上游模型后才能处理图片。
 
-“显示思考”仅影响界面；`thinking_mode: "disabled"` 控制实际推理。不支持关闭的模型会明确拒绝，不能通过隐藏文字减少推理费用。GLM-5.3 等强制思考模型禁用关闭选项。模型返回的思考会占用输出预算，仅返回思考而无正文时可检查输出上限。
+"显示思考"仅影响界面；`thinking_mode: "disabled"` 控制实际推理。不支持关闭的模型会明确拒绝，不能通过隐藏文字减少推理费用。GLM-5.3 等强制思考模型禁用关闭选项。模型返回的思考会占用输出预算，仅返回思考而无正文时可检查输出上限。
 
 函数工具由调用方验证参数、执行并回传结果；网关不执行工具。专用媒体接口支持图片生成、语音合成、音频转文字及硅基流动视频任务。当前不支持聊天消息中的音视频内容块、通用文件存储、内置联网／代码执行工具、Responses 服务端会话存储，以及 JSON Schema 结构化输出。兼容范围以 [API.md](API.md) 为准。
 
@@ -295,7 +338,7 @@ npm test
 
 CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构建、Compose 启动、健康检查和重启。
 
-| 文件 | 职责 |
+| 文件 / 目录 | 职责 |
 | --- | --- |
 | `platform.mjs` / `accounts.mjs` | 账户、租户与访问控制 |
 | `server.mjs` / `routing.mjs` | API 服务、选路与调用 |
@@ -304,6 +347,8 @@ CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构�
 | `pricing.mjs` / `usage-store.mjs` | 价格计算与用量记录 |
 | `public/` | 控制台、实验室和 API 文档 |
 | `test/` / `examples/` | 自动化测试与客户端示例 |
+| `scripts/reset-admin-password.mjs` | owner 密码重置（scrypt 哈希） |
+| `scripts/deploy-run.sh` / `scripts/recover.sh` | 后台 supervisor / 手动恢复 |
 
 默认分支 `main` 包含完整独立运行源码与部署配置。
 
@@ -327,11 +372,11 @@ CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构�
 
 ### 媒体实验室（控制台端）
 
-控制台“媒体实验室”用于统一调用上游图片/语音/视频能力，区别于聊天接口模型调用。建议按下列步骤使用：
+控制台"媒体实验室"用于统一调用上游图片/语音/视频能力，区别于聊天接口模型调用。建议按下列步骤使用：
 
 1. 在服务商里配置并启用支持对应能力的服务商与模型。  
 2. 将目标模型加入该服务商的可调用模型列表，并确认模型可用。  
-3. 进入侧栏“媒体实验室”，选择 `provider::model`（此处不支持 `auto`）。  
+3. 进入侧栏"媒体实验室"，选择 `provider::model`（此处不支持 `auto`）。  
 4. 选择对应功能后提交请求；任务类接口会返回 `requestId`，后续使用 `/v1/video/status` 轮询。  
 
 支持入口（与仓库实现一致）：
@@ -351,3 +396,7 @@ CI 在 Linux、Windows、macOS 上运行测试；Linux 额外验证 Docker 构�
 - 视频仅支持硅基流动，`media-jobs` 任务记录与调用者归属会随数据目录持久化。  
 - 任务和大文件接口有体积上限，响应或中间下载失败会直接返回错误并终止请求。  
 - 结果文件与任务状态建议与业务日志一起留存，便于排查供应商侧问题（超时、限流、参数不匹配）。
+
+## 维护者联系
+
+仓库维护联系邮箱：`chen15652641985@gmail.com`（owner 账号绑定邮箱，用于紧急修复沟通与 owner 密码重置关联）。
