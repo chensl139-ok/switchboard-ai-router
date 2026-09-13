@@ -40,7 +40,7 @@ export class UsageStore {
    coalesce(sum(tokens),0) AS tokens,round(avg(latency)) AS latency FROM calls WHERE time>=? GROUP BY provider_id,provider,model ORDER BY attempts DESC`).all(since);
   const costs=this.db.prepare(`SELECT currency,sum(estimated_cost) AS amount,count(*) AS pricedAttempts FROM calls WHERE time>=? AND estimated_cost IS NOT NULL GROUP BY currency`).all(since);
   const keys=this.db.prepare(`SELECT api_key_id AS apiKeyId,count(*) AS attempts,coalesce(sum(tokens),0) AS tokens FROM calls WHERE time>=? GROUP BY api_key_id ORDER BY attempts DESC`).all(since);
-  return {days,totals,daily,providers,keys,costs,retentionDays:90,costNotice:'基于当时模型单价与上游用量的估算，不等同于供应商账单；未知用量不计费估算。'};
+  return {days,totals,daily,providers,keys,costs,retentionDays:90,costNotice:'基于当时单价与上游用量的估算，不等同于供应商账单；图片按返回张数估算，其他未知用量或价格不估算费用。'};
  }
  close(){if(!this.closed){this.db.close();this.closed=true;}}
 }

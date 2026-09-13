@@ -1,6 +1,6 @@
 {
   "name": "switchboard-ai-router",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "setup": "node scripts/setup.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:public": "node scripts/deploy.mjs --public",
-    "check": "node --check platform.mjs && node --check server.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js && node --check openapi.mjs && node --check public/api-docs.js"
+    "check": "node --check platform.mjs && node --check server.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js && node --check openapi.mjs && node --check public/api-docs.js && node --check media.mjs && node --check public/media-lab.js"
   },
   "engines": {
     "node": ">=22.13"

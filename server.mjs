@@ -1,3 +1,4 @@
+import {mediaPaths,createMediaHandler} from './media.mjs';
 import {normalizeRequest,NORMALIZED,generationPaths,apiToken,anthropicPayload,responsesPayload,chatPayload,toChatResponse,clientResponse,clientError,contentParts} from './protocols.mjs';
 import {createClientStream} from './protocol-stream.mjs';
 import {platformOpenAPI} from './openapi.mjs';
@@ -160,9 +161,10 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   throw fail('所有候选服务商均调用失败，请查看请求日志',502);
   }finally{inFlight--;if(apiKeyId){try{apiKeys.complete(apiKeyId,succeeded,usedTokens);}catch{console.error('API Key usage persistence failed');}}}
  }
+ const handleMedia=createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acquire:()=>{if(Date.now()-windowStart>=60000){windowStart=Date.now();windowUsed=0;}if(++windowUsed>state.routing.requestsPerMinute)throw fail('每分钟请求数已达上限',429);if(inFlight>=state.routing.concurrency)throw fail('并发请求已满',429);inFlight++;return ()=>{inFlight--;};}});
  function identity(token){if(equal(token,admin))return {admin:true};if(apiKeys.state.legacyEnabled&&equal(token,gateway))return {legacy:true};return {apiKeyId:apiKeys.authenticate(token)};}
  const server=http.createServer(async(req,res)=>{
-  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'");
+  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data: https:; media-src 'self' blob: https:; frame-ancestors 'none'");
   try{
    const url=new URL(req.url,'http://localhost');
    if(url.pathname==='/healthz')return json(res,200,{ok:true});
@@ -175,7 +177,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      const allowedRead=req.method==='GET'&&['/api/state','/api/analytics','/api/logs'].includes(url.pathname)&&caller.role;
      if(!allowedRead&&!(url.pathname==='/api/chat'&&canChat))throw fail('当前角色无权执行此操作',403);
     }
-    if((generationPaths[url.pathname]||url.pathname==='/v1/messages/count_tokens')&&!canChat)throw fail('只读角色不可调用模型',403);
+    if((generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')&&!canChat)throw fail('只读角色不可调用模型',403);
     if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`&&req.headers.origin!==`https://${req.headers.host}`)throw fail('跨域请求被拒绝',403);
     if(req.method==='GET'&&url.pathname==='/api/analytics')return json(res,200,usageStore.summary(url.searchParams.get('days')));
     if(req.method==='GET'&&url.pathname==='/api/logs')return json(res,200,usageStore.logs(Object.fromEntries(url.searchParams)));
@@ -236,6 +238,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&url.pathname==='/api/routing'){
      const b=await body(req);Object.assign(state,validateRouting({...b,rules:b.rules??state.rules,routing:b.routing??state.routing},state.providers));save();return json(res,200,safe());
     }
+    if(req.method==='POST'&&mediaPaths.has(url.pathname))return await handleMedia(req,res,caller);
     if(req.method==='POST'&&generationPaths[url.pathname]){
      const kind=generationPaths[url.pathname],input=normalizeRequest(kind,await body(req)),abort=new AbortController();req.protocolKind=kind;const requestIdentifier=crypto.randomUUID();res.setHeader('x-request-id',requestIdentifier);res.setHeader('request-id',requestIdentifier);
      res.on('close',()=>{if(!res.writableEnded)abort.abort();});
@@ -249,7 +252,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     throw fail('接口不存在',404);
    }
-   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js'};
+   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
    if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}

@@ -1,3 +1,4 @@
+import {mediaPaths} from './media.mjs';
 import {generationPaths,apiToken,clientError} from './protocols.mjs';
 import {safeFetch} from './network.mjs';
 import http from 'node:http';
@@ -72,7 +73,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(req.method!=='GET'&&url.pathname.startsWith('/api/')&&url.pathname!=='/api/chat'){
      res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,'配置已更新'));}catch{console.error('audit_write_failed');}}});
     }
-    if(req.method==='POST'&&(generationPaths[url.pathname]||url.pathname==='/v1/messages/count_tokens')){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
+    if(req.method==='POST'&&(generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
     engine(current.tenantId).emit('request',req,res);return;
    }
    engine('default').emit('request',req,res);

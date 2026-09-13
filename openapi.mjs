@@ -5,7 +5,7 @@ const common={model:{type:'string',default:'auto',description:'auto、服务商 
 const error={description:'失败，检查 error.message；流开始后错误通过 SSE 事件返回',content:{'application/json':{schema:object}}};
 const responses={200:{description:'完整生成结果或 SSE 事件流',headers:{'x-request-id':{description:'关联生成日志的请求 ID',schema:{type:'string'}}},content:{'application/json':{schema:object},'text/event-stream':{schema:{type:'string'}}}},400:error,401:error,403:error,404:error,429:error,500:error,502:error,501:error};
 export const platformOpenAPI=structuredClone(modelOpenAPI);
-platformOpenAPI.info={title:'Switchboard Platform API',version:'3.1.0',description:'租户隔离的统一模型 API。支持 OpenAI / Anthropic、SSE、图片和函数工具。WebSocket 使用自定义协议，请参阅产品 API 文档。'};
+platformOpenAPI.info={title:'Switchboard Platform API',version:'3.2.0',description:'租户隔离的统一模型 API。支持 OpenAI / Anthropic、SSE、图片和函数工具。WebSocket 使用自定义协议，请参阅产品 API 文档。'};
 for(const [path,name,properties,required,example] of [
  ['/v1/chat/completions','createChatCompletion',{...common,messages},['messages'],{model:'auto',messages:[{role:'user',content:'你好'}],stream:false}],
  ['/v1/messages','createMessage',{...common,messages,system:{oneOf:[{type:'string'},{type:'array',items:object}]},thinking:object},['messages','max_tokens'],{model:'auto',max_tokens:512,messages:[{role:'user',content:'你好'}]}],
@@ -16,3 +16,15 @@ platformOpenAPI.paths['/v1/models/{id}']={get:{operationId:'getModel',summary:'�
 platformOpenAPI.paths['/v1/messages/count_tokens']={post:{operationId:'countMessageTokens',summary:'原生 Anthropic 上游 Token 计数',description:'仅支持原生 Anthropic 上游，不使用字符数猜测。其他协议返回 501。',requestBody:{required:true,content:{'application/json':{schema:{type:'object',required:['messages'],properties:{model:common.model,messages,system:{type:'string'},tools:common.tools}},example:{model:'provider::model',messages:[{role:'user',content:'你好'}]}}}},responses:{200:{description:'上游真实输入 Token 数',content:{'application/json':{schema:{type:'object',properties:{input_tokens:{type:'integer',minimum:0}},required:['input_tokens']}}}},400:error,401:error,501:error,502:error}}};
 platformOpenAPI.paths['/v1/openapi.json']={get:{operationId:'getOpenAPI',summary:'获取此 OpenAPI 文档',responses:{200:{description:'OpenAPI 3.1 JSON',content:{'application/json':{schema:object}}},401:error}}};
 platformOpenAPI['x-websocket']={path:'/v1/realtime',protocol:'Switchboard custom JSON',authentication:{type:'auth',token:'YOUR_API_KEY'},request:{type:'chat',id:'request-1',input:{model:'auto',messages:[{role:'user',content:'你好'}]}},events:['ready','delta','done','error'],cancel:{type:'cancel',id:'request-1'}};
+
+for(const [path,summary,properties,required,binary,multipart] of [
+ ['/v1/images/generations','图片生成',{model:{type:'string'},prompt:{type:'string'},n:{type:'integer',minimum:1},size:{type:'string'},image:{type:'string'}},['model','prompt'],false,false],
+ ['/v1/images/edits','兼容上游的图片编辑',{model:{type:'string'},prompt:{type:'string'},image:{type:'string',format:'binary'}},['model','image'],false,true],
+ ['/v1/audio/speech','语音合成，返回音频二进制',{model:{type:'string'},input:{type:'string'},voice:{type:'string'},response_format:{type:'string'},stream:{type:'boolean'}},['model','input'],true,false],
+ ['/v1/audio/transcriptions','音频转文字',{model:{type:'string'},file:{type:'string',format:'binary'}},['model','file'],false,true],
+ ['/v1/audio/translations','兼容上游的音频翻译',{model:{type:'string'},file:{type:'string',format:'binary'}},['model','file'],false,true],
+ ['/v1/video/submit','硅基流动异步视频提交',{model:{type:'string'},prompt:{type:'string'},image_size:{type:'string'},image:{type:'string'}},['model','prompt'],false,false],
+ ['/v1/video/status','硅基流动视频任务状态',{requestId:{type:'string'}},['requestId'],false,false],
+ ['/v1/embeddings','兼容上游的向量嵌入',{model:{type:'string'},input:{oneOf:[{type:'string'},{type:'array',items:{type:'string'}}]}},['model','input'],false,false],
+ ['/v1/rerank','兼容上游的重排',{model:{type:'string'},query:{type:'string'},documents:{type:'array',items:{type:'string'}}},['model','query','documents'],false,false]
+])platformOpenAPI.paths[path]={post:{operationId:'media_'+path.slice(4).replaceAll('/','_'),tags:['媒体与专用模型'],summary,description:'需显式指定已配置媒体模型，不支持 auto；上游必须支持此协议。生成请求共享 Key 次数额度；视频状态查询不扣生成次数。JSON 最大 10 MB，multipart 最大 52 MB，单音频文件最大 50 MB。媒体调用不自动重试或切换服务商。',requestBody:{required:true,content:{[multipart?'multipart/form-data':'application/json']:{schema:{type:'object',properties,required,additionalProperties:true}}}},responses:{200:{description:binary?'音频二进制（可分块）':'媒体结果，视频提交返回 requestId，查询返回 status / results',content:{[binary?'audio/mpeg':'application/json']:{schema:binary?{type:'string',format:'binary'}:object}}},400:error,401:error,403:error,404:error,413:error,429:error,501:error,502:error}}};

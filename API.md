@@ -93,7 +93,7 @@ OpenAI Chat 使用 `assistant.tool_calls` 和 `role:tool/tool_call_id`；Respons
 
 ## 明确不支持
 
-- 音频、视频、文档文件上传、图像生成、内置工具。
+- 聊天消息中的音视频内容块、通用文档文件存储、内置工具。图片／语音／视频生成使用下方专用媒体接口。
 - Responses 服务端会话：previous_response_id、conversation、background、store=true。
 - 传统 Completions 的多 prompt、token 数组、n>1、best_of、echo。
 - logprobs、JSON schema 结构化输出、模型特有的 reasoning 参数；现有 thinking_mode 扩展仍按模型能力校验。
@@ -121,3 +121,34 @@ curl 'http://127.0.0.1:3100/v1/models/all' \
 本机已验证 API 地址 `http://127.0.0.1:3100/v1`，使用平台签发的 Key。旧的 3000 端口由 Grafana 使用。API 地址不要包含 `/chat/completions` 或 `/models`。标准获取模型列表访问 `/v1/models`，仅列出已配置的可调用模型；完整上游目录请调用 `/v1/models/all`。
 
 Cherry Studio 若能聊天但无法获取模型列表，请检查代理绕过规则。本机复现的错误为列表请求经过系统代理后断开；改用原代理地址的自定义代理，并明确绕过 `localhost,127.0.0.1,::1` 后已验证成功。保留原有绕过规则，不要照抄其他机器的代理端口。
+
+## 媒体与专用模型接口
+
+3.2 版加入专用接口；在「媒体实验室」可测试图片生成、语音合成、音频转文字和视频任务。
+
+| POST 接口 | 输入与输出 |
+| --- | --- |
+| /v1/images/generations | JSON，model + prompt；返回 data 图片列表，硅基流动同时保留 images |
+| /v1/images/edits | 兼容上游 multipart 图片编辑；硅基流动请在 generations 使用 image 字段 |
+| /v1/audio/speech | JSON，model + input + 模型适配的 voice；返回音频二进制，非 SSE |
+| /v1/audio/transcriptions | multipart，model + file；返回转录 |
+| /v1/audio/translations | 兼容上游的 multipart 翻译；取决于服务商支持 |
+| /v1/video/submit | 硅基流动 JSON 视频提交；返回网关 requestId |
+| /v1/video/status | 使用提交返回的 requestId 轮询，返回 status / results |
+| /v1/embeddings | 兼容上游 JSON 向量嵌入 |
+| /v1/rerank | 兼容上游 JSON 重排 |
+
+必须显式指定已注册模型，例如 `siliconflow::Kwai-Kolors/Kolors`，不支持 auto。JSON 上限 10 MB；multipart 上限 52 MB；单音频文件上限 50 MB；单次上游超时 180 秒，音频响应上限 64 MB。不自动回退或重试，避免重复生成。生成使用共同 Key 配额；视频轮询不扣生成次数，但受频率和并发限制。
+
+硅基流动图片请求将 n / size 转换为 batch_size / image_size，支持 URL；请求 response_format=b64_json 时，网关从 HTTPS 结果地址读取图片并转为 Base64（不向图片地址转发上游密钥，总图片大小限制 24 MB）。链接有效期由服务商决定，请及时保存。
+
+视频仅适配硅基流动异步协议，不等同于 OpenAI Videos API。任务在网关持久化 24 小时，仅提交 Key / 账户及当前租户管理员可查询；上游链接可能提前过期。提交后的任务可能继续在上游执行，取消本地等待不保证取消视频生成。
+
+```sh
+curl 'http://127.0.0.1:3100/v1/audio/transcriptions' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'model=siliconflow::FunAudioLLM/SenseVoiceSmall' \
+  -F 'file=@recording.wav'
+```
+
+图片按张价格可用于成功图片生成的费用估算；语音／视频若没有可核实计价，则记录未知费用。未开通或未注册对应模型仍会失败；查询目录并加入调用列表后再调用。

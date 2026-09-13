@@ -1,3 +1,4 @@
+import {renderMediaLab,stopMediaLab} from './media-lab.js';
 import {renderModelCatalog,renderApiGuide} from './model-catalog.js';
 import {startAccountUI,showLogin,accountRequest,renderMembers,renderAccount} from './accounts.js';
 import {renderAnalytics,renderLogs} from './analytics.js';
@@ -9,7 +10,7 @@ let modelList=[],modelEpoch=0;
 let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer;
 const isManager=()=>['owner','admin'].includes(profile?.role);
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录'};
+const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室'};
 async function api(url,data){const tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile?.tenantId!==tenantAtCall)throw Error('租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();throw Error(b.error?.message||'请求失败')}return b}
 function toast(s){clearTimeout(toastTimer);$('#toast').textContent=s;$('#toast').style.display='block';toastTimer=setTimeout(()=>$('#toast').style.display='none',4500)}
 function navigate(next){if(!names[next]||next===tab)return;tab=next;history.pushState(null,'','#'+tab);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
@@ -19,11 +20,11 @@ const heading=(title,desc,action='')=>`<div class="heading"><div><div class="eye
 function cards(){return `<div class="cards">${state.providers.map(p=>`<article data-provider-card data-search="${esc([p.name,p.id,...(p.models||[])].join(' ').toLowerCase())}" data-ready="${ready(p)?'true':'false'}" class="card ${state.active===p.id?'active':''}"><div class="card-top"><div class="avatar">${esc(p.name[0])}</div><h3>${esc(p.name)}</h3><span class="tag ${ready(p)?'green':''}">${!p.enabled?'未启用':!p.hasKey||!p.model?'待配置':state.active===p.id?'默认路由':'已启用'}</span></div><div class="provider-meta"><span>${esc({openai:'Chat Completions',responses:'Responses',anthropic:'Messages'}[p.protocol]||p.protocol)}</span><span>${p.models?.length||0} 个模型</span></div><label>当前模型<select data-provider-model="${esc(p.id)}" ${!p.models?.length||!isManager()?'disabled':''}>${(p.models?.length?p.models:['']).map(m=>`<option value="${esc(m)}" ${m===p.model?'selected':''}>${esc(m||'尚未设置模型')}</option>`).join('')}</select></label><div class="card-actions"><button data-edit="${esc(p.id)}" ${!isManager()?'disabled':''}>配置服务商 ↗</button><button data-switch="${esc(p.id)}" ${!ready(p)||state.active===p.id||!isManager()?'disabled':''}>${state.active===p.id?'✓ 当前使用':'切换使用 →'}</button></div></article>`).join('')}</div>`}
 function logs(rows){return rows.length?`<div class="table-wrap"><table><thead><tr><th>请求时间</th><th>服务商 / 模型</th><th>API Key</th><th>状态</th><th>耗时</th><th>Tokens</th></tr></thead><tbody>${rows.map(l=>`<tr><td>${esc(new Date(l.time).toLocaleString())}</td><td>${esc(l.provider)}<br><small class="muted">${esc(l.model)}</small></td><td>${esc(l.apiKeyId?l.apiKeyId.slice(0,10):'管理员 / 旧令牌')}</td><td><span class="tag ${l.status===200?'green':''}">${l.status}</span></td><td>${l.latency} ms</td><td>${l.tokens.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">还没有请求记录。配置服务商后，前往模型实验室发起第一次调用。</div>'}
 function render(){
- stopPlayground();
- if(!names[tab]||(!isManager()&&['keys','members','prices','routing'].includes(tab))||(profile?.role==='viewer'&&tab==='playground'))tab='overview';
+ stopPlayground();stopMediaLab();
+ if(!names[tab]||(!isManager()&&['keys','members','prices','routing'].includes(tab))||(profile?.role==='viewer'&&['playground','media'].includes(tab)))tab='overview';
  history.replaceState(null,'','#'+tab);document.title=names[tab]+' · Switchboard';
  const previous=$('#content'),view=document.createElement('section');view.id='content';view.tabIndex=-1;previous.replaceWith(view);
- document.querySelectorAll('nav [data-tab]').forEach(b=>{b.hidden=(['keys','members','prices','routing'].includes(b.dataset.tab)&&!isManager())||(b.dataset.tab==='playground'&&profile?.role==='viewer');});
+ document.querySelectorAll('nav [data-tab]').forEach(b=>{b.hidden=(['keys','members','prices','routing'].includes(b.dataset.tab)&&!isManager())||(['playground','media'].includes(b.dataset.tab)&&profile?.role==='viewer');});
  $('#breadcrumb').textContent=names[tab];document.querySelectorAll('nav button[data-tab]').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('selected',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
  const nav=document.querySelector('.sidebar nav'),selected=nav.querySelector('[aria-current=page]');if(selected&&matchMedia('(max-width:720px)').matches)nav.scrollLeft+=selected.getBoundingClientRect().left-nav.getBoundingClientRect().left-(nav.clientWidth-selected.clientWidth)/2;
  let html='';const active=state.providers.find(p=>p.id===state.active),total=state.logs.length,success=state.logs.filter(l=>l.status===200),average=success.length?Math.round(success.reduce((s,l)=>s+l.latency,0)/success.length):0;
@@ -34,6 +35,7 @@ function render(){
 
  $('#content').innerHTML=html||'<div class="view-loading" role="status"><span class="loading-dot"></span>正在加载…</div>';
  if(tab==='providers'){const filter=()=>{let count=0;document.querySelectorAll('[data-provider-card]').forEach(card=>{card.hidden=!card.dataset.search.includes($('#provider-search').value.trim().toLowerCase())||!!($('#provider-filter').value&&card.dataset.ready!==$('#provider-filter').value);if(!card.hidden)count++;});$('#provider-count').textContent=count+' 个服务商';$('#provider-empty').hidden=count>0;};$('#provider-search').oninput=filter;$('#provider-filter').onchange=filter;filter();}
+ if(tab==='media')renderMediaLab({state,tenantId:profile?.tenantId,esc});
  if(tab==='api')renderApiGuide({esc,toast});
  if(tab==='models')renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;}});
  if(tab==='members')void renderMembers({profile,esc,toast});
@@ -63,7 +65,7 @@ $('#fetch-models').onclick=async()=>{
  }catch(e){if(epoch===modelEpoch)$('#model-status').textContent=e.message}
  finally{if(epoch===modelEpoch){b.disabled=false;b.textContent='↻ 重新获取所有模型'}}
 };
-$('#logout').onclick=async()=>{try{await accountRequest('logout',{});profile=null;state=null;token='';resetPlayground();$('#current-account').textContent='';document.querySelector('.workspace-chip').textContent='登录后选择租户';$('#content').innerHTML='';showLogin();}catch(e){toast(e.message)}};
+$('#logout').onclick=async()=>{try{await accountRequest('logout',{});profile=null;state=null;token='';resetPlayground();stopMediaLab();$('#current-account').textContent='';document.querySelector('.workspace-chip').textContent='登录后选择租户';$('#content').innerHTML='';showLogin();}catch(e){toast(e.message)}};
 $('#close-edit').onclick=()=>$('#edit').close();
 $('#cancel-edit').onclick=()=>$('#edit').close();
 $('#edit').addEventListener('close',resetModels);
@@ -82,7 +84,7 @@ document.addEventListener('change',async e=>{const id=e.target.dataset.providerM
 
 async function accountReady(value){
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
- if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();tab='overview';}
+ if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();stopMediaLab();tab='overview';}
  const chip=document.querySelector('.workspace-chip');chip.innerHTML='<label class="tenant-label">当前租户<select id="tenant-select" aria-label="切换租户"></select></label>';
  const select=document.querySelector('#tenant-select');select.innerHTML=profile.tenants.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');select.value=profile.tenantId;
  select.onchange=async()=>{try{resetPlayground();await accountReady(await accountRequest('switch',{tenantId:select.value}));}catch(e){toast(e.message);select.value=profile.tenantId;}};
