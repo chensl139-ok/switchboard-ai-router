@@ -47,7 +47,7 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
     wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,req));
   });
   wss.on('connection',ws=>{
-    let authorized=false,running=null,alive=true;
+    let authorized=false,credential=null,running=null,alive=true;
     const send=value=>{if(ws.readyState===WebSocket.OPEN){if(ws.bufferedAmount>1024*1024){ws.close(1013,'客户端读取过慢');return;}ws.send(JSON.stringify(value));}};
     const timeout=setTimeout(()=>{if(!authorized)ws.close(1008,'需要认证');},5000);
     ws.on('pong',()=>{alive=true;});
@@ -58,13 +58,13 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
       let message;try{message=JSON.parse(raw.toString());}catch{send({type:'error',message:'JSON 无效'});return;}
       if(!authorized){
         if(message?.type!=='auth'||!authenticate(message.token)){ws.close(1008,'认证失败');return;}
-        authorized=true;clearTimeout(timeout);send({type:'ready'});return;
+        authorized=true;credential=message.token;clearTimeout(timeout);send({type:'ready'});return;
       }
       if(message?.type==='cancel'){if(running?.id===message.id)running.abort.abort();return;}
       if(message?.type!=='chat'||typeof message.id!=='string'||message.id.length>80||!message.input){send({type:'error',message:'请求格式无效'});return;}
       if(running){send({type:'error',id:message.id,message:'当前连接已有请求生成中'});return;}
       running={id:message.id,abort:new AbortController()};
-      try{await execute({...message.input,stream:true},{signal:running.abort.signal,onChunk:async chunk=>send({type:'delta',id:message.id,chunk})});send({type:'done',id:message.id});}
+      try{await execute({...message.input,stream:true},{token:credential,signal:running.abort.signal,onChunk:async chunk=>send({type:'delta',id:message.id,chunk})});send({type:'done',id:message.id});}
       catch(error){send({type:'error',id:message.id,message:error.status?error.message:'生成失败或已取消'});}
       finally{running=null;}
     });

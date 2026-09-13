@@ -13,7 +13,7 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  const provider=(id,baseUrl,protocol='openai')=>({id,name:id,baseUrl,protocol,model:'test-model',priority:50,enabled:true,apiKey:'secret-upstream-key'});
  try{
  assert.equal((await request('/api/state',undefined,'wrong')).status,401);
- assert.equal((await request('/api/state',undefined,gateway)).status,401);
+ assert.equal((await request('/api/state',undefined,gateway)).status,403);
  assert.equal((await request('/api/provider',provider('bad','https://bad.example/v1'))).status,200);
  await request('/api/provider',provider('good','https://good.example/v1'));
  await request('/api/routing',{active:'bad',strategy:'fallback'});
@@ -35,7 +35,7 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  assert.equal((await request('/v1/models',undefined,gateway)).data.data.some(m=>m.id==='good'),true);
  await request('/api/provider',{...provider('good','https://good.example/v1'),apiKey:'',models:['test-model','second/model','second/model']});
  let multi=(await request('/api/state')).data.providers.find(p=>p.id==='good');assert.deepEqual(multi.models,['test-model','second/model']);
- assert.equal((await request('/api/provider/switch-model',{id:'good',model:'second/model'},gateway)).status,401);
+ assert.equal((await request('/api/provider/switch-model',{id:'good',model:'second/model'},gateway)).status,403);
  assert.equal((await request('/api/provider/switch-model',{id:'good',model:'unknown'})).status,400);
  assert.equal((await request('/api/provider/switch-model',{id:'good',model:'second/model'})).status,200);
  calls=[];await request('/v1/chat/completions',{...chat,model:'good'},gateway);assert.equal(calls[0].body.model,'second/model');
@@ -65,7 +65,7 @@ test('模型发现：完整分页、搜索数据、临时密钥、权限与安�
  const request=async(data,token=admin,url='/api/provider/models')=>{const res=await fetch(base+url,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(data)});return {status:res.status,data:await res.json()}};
  const draft={id:'draft',baseUrl:'https://models.example/v1',protocol:'openai',apiKey:'temporary-key'};
  try{
-  assert.equal((await request(draft,gateway)).status,401);assert.equal(calls.length,0);
+  assert.equal((await request(draft,gateway)).status,403);assert.equal(calls.length,0);
   assert.equal((await request({...draft,apiKey:''})).status,400);assert.equal(calls.length,0);
   let out=await request(draft);assert.equal(out.status,200);assert.deepEqual(out.data.data.map(m=>m.id),['model-a','model-b']);assert.equal(calls[0].opts.headers.authorization,'Bearer temporary-key');assert.equal(calls[0].opts.redirect,'error');
   assert.equal((await request({...draft,baseUrl:'http://models.example/v1'})).status,400);

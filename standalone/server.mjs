@@ -1,3 +1,4 @@
+import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
 import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync} from 'node:fs';
@@ -16,6 +17,7 @@ export const presets=[
 export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=fetch,allowHttp=process.env.ALLOW_HTTP_UPSTREAM==='true'}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24) throw Error('ADMIN_TOKEN 和 GATEWAY_TOKEN 必须分别设置为至少 24 位随机字符串');
  mkdirSync(dir,{recursive:true,mode:0o700});
+ const apiKeys=new ApiKeyStore(dir);
  const keyPath=path.join(dir,'master.key');
  if(!existsSync(keyPath))writeFileSync(keyPath,randomBytes(32),{mode:0o600,flag:'wx'});
  const key=readFileSync(keyPath);
@@ -79,7 +81,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   throw fail('模型列表超过 100 页，未能获取完整列表',502);
  }
  let inFlight=0;let windowStart=Date.now(),windowUsed=0;
- async function route(input,{signal:clientSignal,onChunk}={}){
+ async function route(input,{signal:clientSignal,onChunk,apiKeyId}={}){
   if(!input||typeof input!=='object')throw fail('请求格式错误');
   if(input.stream!==undefined&&typeof input.stream!=='boolean')throw fail('stream 必须为布尔值');
   if(Date.now()-windowStart>=60000){windowStart=Date.now();windowUsed=0;}
@@ -98,6 +100,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   }
   if(state.strategy==='manual'&&!explicit)candidates=candidates.filter(p=>p.id===state.active);
   if(!candidates.length)throw fail('没有可用路由，请配置密钥、模型 ID 并启用服务商',503);
+  if(apiKeyId)apiKeys.admit(apiKeyId);
+  let succeeded=false,usedTokens=0;
   inFlight++;const timeout=AbortSignal.timeout(30000);const signal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false;
   try{
   for(const p of candidates){
@@ -114,22 +118,23 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(!resp.ok)throw fail(`上游返回 HTTP ${status}`,status);
     if(input.stream){
      const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{committed=true;await onChunk(chunk);},signal);
-     state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens});state.logs=state.logs.slice(0,500);save();
-     return {provider:p.id};
+     state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),apiKeyId:apiKeyId||null,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens});state.logs=state.logs.slice(0,500);save();
+     succeeded=true;usedTokens=tokens;return {provider:p.id};
     }
     let data=await resp.json();
     if(p.protocol==='anthropic')data={id:data.id,object:'chat.completion',created:Math.floor(Date.now()/1000),model:data.model,choices:[{index:0,message:{role:'assistant',content:(data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('')},finish_reason:data.stop_reason==='max_tokens'?'length':'stop'}],usage:{prompt_tokens:data.usage?.input_tokens||0,completion_tokens:data.usage?.output_tokens||0,total_tokens:(data.usage?.input_tokens||0)+(data.usage?.output_tokens||0)}};
     if(!Array.isArray(data.choices))throw fail('上游响应格式错误',502);
-    state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens:data.usage?.total_tokens||0});state.logs=state.logs.slice(0,500);save();
-    return {data,provider:p.id};
+    state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),apiKeyId:apiKeyId||null,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens:data.usage?.total_tokens||0});state.logs=state.logs.slice(0,500);save();
+    succeeded=true;usedTokens=data.usage?.total_tokens||0;return {data,provider:p.id};
    }catch(e){
-    state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0});state.logs=state.logs.slice(0,500);save();
+    state.logs.unshift({id:randomBytes(6).toString('hex'),time:new Date().toISOString(),apiKeyId:apiKeyId||null,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0});state.logs=state.logs.slice(0,500);save();
     if(committed||signal.aborted||explicit||![401,403,408,429,500,502,503,504,529].includes(e.status||502))throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
    }
   }
   throw fail('所有候选服务商均调用失败，请查看请求日志',502);
-  }finally{inFlight--;}
+  }finally{inFlight--;if(apiKeyId){try{apiKeys.complete(apiKeyId,succeeded,usedTokens);}catch{console.error('API Key usage persistence failed');}}}
  }
+ function identity(token){if(equal(token,admin))return {admin:true};if(apiKeys.state.legacyEnabled&&equal(token,gateway))return {legacy:true};return {apiKeyId:apiKeys.authenticate(token)};}
  const server=http.createServer(async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
   try{
@@ -137,8 +142,14 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    if(url.pathname==='/healthz')return json(res,200,{ok:true});
    if(url.pathname.startsWith('/api/')||url.pathname.startsWith('/v1/')){
     const token=req.headers.authorization?.replace(/^Bearer /,'');
-    if(!equal(token,admin)&&!(url.pathname.startsWith('/v1/')&&equal(token,gateway)))throw fail('访问令牌无效',401);
+    const caller=identity(token);
+    if(url.pathname.startsWith('/api/')&&!caller.admin)throw fail('需要管理员权限',403);
     if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`&&req.headers.origin!==`https://${req.headers.host}`)throw fail('跨域请求被拒绝',403);
+    if(req.method==='GET'&&url.pathname==='/api/keys')return json(res,200,apiKeys.list());
+    if(req.method==='POST'&&url.pathname==='/api/keys')return json(res,201,apiKeys.create(await body(req)));
+    if(req.method==='POST'&&url.pathname==='/api/keys/update'){const b=await body(req);return json(res,200,apiKeys.update(b.id,b));}
+    if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
+    if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
     if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,safe());
     if(req.method==='GET'&&url.pathname==='/v1/models')return json(res,200,{object:'list',data:[{id:'auto',object:'model',owned_by:'router'},...state.providers.filter(p=>p.enabled&&p.secret&&p.model).map(p=>({id:p.id,object:'model',owned_by:p.name}))]});
     if(req.method==='POST'&&url.pathname==='/api/provider/models')return json(res,200,await listModels(await body(req)));
@@ -168,7 +179,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&['/v1/chat/completions','/api/chat'].includes(url.pathname)){
      const input=await body(req),abort=new AbortController();
      res.on('close',()=>{if(!res.writableEnded)abort.abort();});
-     const out=await route(input,{signal:abort.signal,onChunk:async chunk=>{
+     const out=await route(input,{apiKeyId:caller.apiKeyId,signal:abort.signal,onChunk:async chunk=>{
       if(!res.headersSent)res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache, no-transform','x-accel-buffering':'no'});
       await writeSSE(res,chunk,abort.signal);
      }});
@@ -177,12 +188,12 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     throw fail('接口不存在',404);
    }
-   const files={'/':'index.html','/app.js':'app.js','/stream-client.js':'stream-client.js','/style.css':'style.css'};
+   const files={'/':'index.html','/app.js':'app.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css'};
    if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));
   }catch(e){if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: {"error":"流式响应中断"}\n\n');return;}json(res,e.status||500,{error:{message:e.status?e.message:'服务器内部错误',type:'router_error'}})}
  });
- installWebSocket(server,{authenticate:token=>equal(token,gateway)||equal(token,admin),execute:route,originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
+ installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
  return server;
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){const app=createApp();app.listen(Number(process.env.PORT)||3000,process.env.HOST||'127.0.0.1',()=>console.log(`Switchboard listening on port ${process.env.PORT||3000}`))}
