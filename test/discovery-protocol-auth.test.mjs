@@ -17,13 +17,13 @@ test('跨协议 x-api-key 鉴权、统一配额及模型批量发现隔离',asyn
   const key=(await request('/api/keys',{name:'SDK key',totalLimit:1},headers)).data.token;
   const external={'x-api-key':key,'anthropic-version':'2023-06-01'};
   const list=await request('/v1/models',null,external);assert.equal(list.status,200);assert.equal(list.data.has_more,false);assert.ok(list.data.data.some(m=>m.id==='first::configured'));
-  const discovery=await request('/v1/models/discover',null,external);assert.equal(discovery.status,200);assert.equal(discovery.data.errors,1);assert.equal(discovery.data.total,2);assert.equal(generated,0);
+  const discovery=await request('/v1/models/all',null,external);assert.equal(discovery.status,200);assert.equal(discovery.data.errors.length,1);assert.equal(discovery.data.partial,true);assert.equal(discovery.data.data.find(m=>m.id==='first::new-model').callable,false);assert.equal(discovery.data.data.find(m=>m.id==='first::configured').callable,true);assert.equal((await request('/v1/models/discover',null,external)).status,429);assert.equal((await request('/v1/openapi.json',null,external)).data.openapi,'3.1.0');assert.equal(discovery.data.total,2);assert.equal(generated,0);
   const register=await request('/api/models/register',{providerId:'first',model:'new-model'},headers);assert.equal(register.status,200);
   assert.equal((await request('/v1/models/'+encodeURIComponent('first::new-model'),null,external)).status,200);
   const response=await request('/v1/messages',{model:'first::new-model',max_tokens:10,messages:[{role:'user',content:'hi'}]},external);assert.equal(response.status,200);assert.equal(response.data.type,'message');
   const quota=await request('/v1/responses',{model:'first::configured',input:'hi'},{authorization:'Bearer '+key});assert.equal(quota.status,429);assert.equal(generated,1);
   const tenant=(await request('/api/account/tenants',{name:'Other'},headers)).data;await request('/api/account/switch',{tenantId:tenant.id},headers);
-  assert.ok(!(await request('/api/state',null,headers)).data.providers.some(p=>p.id==='first'));
+  assert.ok(!(await request('/api/state',null,headers)).data.providers.some(p=>p.id==='first'));assert.equal((await request('/v1/models/all',null,headers)).data.total,0);
   const unauthorized=await request('/v1/messages',{model:'auto',max_tokens:10,messages:[{role:'user',content:'hi'}]},{'x-api-key':'wrong'});assert.equal(unauthorized.status,401);assert.equal(unauthorized.data.type,'error');
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}
 });

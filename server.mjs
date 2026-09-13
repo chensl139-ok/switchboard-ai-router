@@ -1,6 +1,6 @@
 import {normalizeRequest,NORMALIZED,generationPaths,apiToken,anthropicPayload,responsesPayload,chatPayload,toChatResponse,clientResponse,clientError,contentParts} from './protocols.mjs';
 import {createClientStream} from './protocol-stream.mjs';
-import {callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
+import {flattenDiscovery,modelOpenAPI,callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
 import {safeFetch} from './network.mjs';
 import {UsageStore} from './usage-store.mjs';
 import {validatePrice,openRouterPrice,usageCost,normalizeUsage} from './pricing.mjs';
@@ -185,6 +185,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
     if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
     if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,safe());
+    if(req.method==='GET'&&url.pathname==='/v1/openapi.json')return json(res,200,modelOpenAPI);
+    if(req.method==='GET'&&url.pathname==='/v1/models/all')return json(res,200,flattenDiscovery(await discovery.refresh(false)));
     if(req.method==='GET'&&url.pathname==='/v1/models'){const list=callableModels(state);return json(res,200,req.headers['anthropic-version']?anthropicModels(list):list);}
     if((req.method==='GET'&&url.pathname==='/v1/models/discover')||(req.method==='POST'&&url.pathname==='/api/models/discover'))return json(res,200,await discovery.refresh(url.pathname.startsWith('/api/')));
     if(req.method==='GET'&&url.pathname.startsWith('/v1/models/')){let id;try{id=decodeURIComponent(url.pathname.slice('/v1/models/'.length));}catch{throw fail('模型 ID 无效');}const item=callableModels(state).data.find(m=>m.id===id);if(!item)throw fail('模型未注册或未启用',404);return json(res,200,req.headers['anthropic-version']?anthropicModels({data:[item]}).data[0]:item);}

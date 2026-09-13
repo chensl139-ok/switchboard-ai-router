@@ -102,3 +102,14 @@ OpenAI Chat 使用 `assistant.tool_calls` 和 `role:tool/tool_call_id`；Respons
 不支持的内容类型会返回 400/501，不静默把图片/工具转换成空文本。流中发生错误时发送错误事件且不发送完成事件；已经输出内容后不会换模型拼接。
 
 参考：[OpenAI 流式响应](https://developers.openai.com/api/docs/guides/streaming-responses)、[OpenAI 函数工具](https://developers.openai.com/api/docs/guides/function-calling)、[Anthropic 流式 Messages](https://platform.claude.com/docs/en/build-with-claude/streaming)。
+
+### 一次获取所有服务商模型
+
+```sh
+curl 'http://127.0.0.1:3100/v1/models/all' \
+  -H "Authorization: Bearer $ROUTER_API_KEY"
+```
+
+返回统一的 `data` 列表，`id` 为 `provider::model`，`callable` 表示是否已配置可调用。只查询 Key 所属租户已启用的服务商，不自动注册模型；没有 Key 的私有服务商无法查询。最长等待 45 秒，10 秒内限制一次，与 `/v1/models/discover` 共用限频；查询不消耗生成次数额度。部分查询失败时 HTTP 200 且 `partial: true`，具体见 `errors`，不能将其视为完整列表。`/v1/models` 仍用于获取已经配置可调用的模型。
+
+`GET /v1/openapi.json` 提供模型查询的 OpenAPI 3.1 文档，使用同样的 API Key 鉴权。示例 3100 为本地端口，其他部署请替换地址。

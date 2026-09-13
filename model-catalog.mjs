@@ -17,3 +17,12 @@ export function createDiscovery({state,listModels,save}){
  }
  return {async refresh(includeDisabled=false){if(pending.has(includeDisabled))return pending.get(includeDisabled);if(Date.now()-(lastStart.get(includeDisabled)||0)<10000)throw Object.assign(Error('模型批量查询过于频繁，请 10 秒后重试'),{status:429});lastStart.set(includeDisabled,Date.now());const work=query(includeDisabled);pending.set(includeDisabled,work);try{return await work;}finally{pending.delete(includeDisabled);}}};
 }
+
+export function flattenDiscovery(result){
+ return {object:'list',data:result.providers.flatMap(p=>p.models.map(m=>({id:m.routeId,object:'model',created:0,owned_by:p.name,provider_id:p.providerId,upstream_model:m.id,name:m.name||m.id,callable:!!m.callable}))),total:result.total,partial:result.errors>0,errors:result.providers.filter(p=>p.status==='error').map(p=>({provider_id:p.providerId,message:p.error})),fetched_at:result.fetchedAt};
+}
+export const modelOpenAPI={openapi:'3.1.0',info:{title:'Switchboard Model Catalog API',version:'1.0.0',description:'当前 API Key 所属租户的模型目录。全部模型查询只访问已启用且可查询的服务商，不注册或启用模型。'},servers:[{url:'/'}],security:[{bearerAuth:[]},{apiKeyAuth:[]}],paths:Object.fromEntries([
+ ['/v1/models','listCallableModels','获取已配置并启用的模型及路由别名'],
+ ['/v1/models/all','listAllProviderModels','一键查询所有已启用服务商的模型，统一列表；callable 标明是否已加入调用列表'],
+ ['/v1/models/discover','discoverProviderModels','按服务商分组查询全部模型目录']
+].map(([path,operationId,summary])=>[path,{get:{operationId,summary,description:path==='/v1/models'?'不访问上游。':'最多等待 45 秒，同范围 10 秒内限一次；部分服务商失败仍返回 200，检查 errors。查询不消耗生成次数额度。',responses:{200:{description:'模型列表；all 包含 data、total、partial、errors、fetched_at',content:{'application/json':{schema:{type:'object',properties:{object:{type:'string'},data:{type:'array',items:{type:'object',properties:{id:{type:'string'},provider_id:{type:'string'},upstream_model:{type:'string'},callable:{type:'boolean'}}}},total:{type:'integer'},partial:{type:'boolean'},errors:{type:'array',items:{type:'object'}},fetched_at:{type:'string',format:'date-time'}}}}}},401:{description:'API Key 无效或过期'},403:{description:'没有访问权限'},429:{description:'查询过于频繁'}}}}])),components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer'},apiKeyAuth:{type:'apiKey',in:'header',name:'x-api-key'}}}};
