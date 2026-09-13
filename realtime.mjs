@@ -1,10 +1,11 @@
 import {WebSocketServer, WebSocket} from 'ws';
+import {normalizeUsage} from './pricing.mjs';
 import {once} from 'node:events';
 
 export async function consumeSSE(response, protocol, model, emit, signal, onUsage=()=>{}, onNative=null) {
   if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw Error('上游未返回 SSE');
   const reader = response.body.getReader(), decoder = new TextDecoder();
-  let buffer='',done=false,tokens=0,inputTokens=0,outputTokens=0;const toolBlocks=new Map();
+  let buffer='',done=false,tokens=0,inputTokens=0,outputTokens=0,cacheRead=0,cacheCreation=0;const toolBlocks=new Map();
   const id='chatcmpl-'+crypto.randomUUID();
   const chunk=(delta,finish=null)=>({id,object:'chat.completion.chunk',created:Math.floor(Date.now()/1000),model,
     choices:[{index:0,delta,finish_reason:finish}]});
@@ -21,21 +22,21 @@ export async function consumeSSE(response, protocol, model, emit, signal, onUsag
       if(parsed.type==='response.reasoning_summary_text.delta')await emit(chunk({reasoning_content:parsed.delta}));
       if(parsed.type==='response.output_item.added'&&parsed.item?.type==='function_call'){const index=toolBlocks.size;toolBlocks.set(parsed.item.id,index);await emit(chunk({tool_calls:[{index,id:parsed.item.call_id,type:'function',function:{name:parsed.item.name,arguments:parsed.item.arguments||''}}]}));}
       if(parsed.type==='response.function_call_arguments.delta'){const index=toolBlocks.get(parsed.item_id);if(index===undefined)throw Error('工具流顺序错误');await emit(chunk({tool_calls:[{index,function:{arguments:parsed.delta}}]}));}
-      if(['response.completed','response.incomplete'].includes(parsed.type)){const u=parsed.response?.usage;inputTokens=u?.input_tokens||0;outputTokens=u?.output_tokens||0;tokens=u?.total_tokens||inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:!!u});await emit({...chunk({},parsed.type==='response.incomplete'?'length':toolBlocks.size?'tool_calls':'stop'),usage:{prompt_tokens:inputTokens,completion_tokens:outputTokens,total_tokens:tokens}});done=true;}
+      if(['response.completed','response.incomplete'].includes(parsed.type)){const u=parsed.response?.usage;inputTokens=u?.input_tokens||0;outputTokens=u?.output_tokens||0;tokens=u?.total_tokens||inputTokens+outputTokens;onUsage({...normalizeUsage({prompt_tokens:u?.input_tokens,completion_tokens:u?.output_tokens,total_tokens:u?.total_tokens,prompt_tokens_details:u?.input_tokens_details}),known:!!u});await emit({...chunk({},parsed.type==='response.incomplete'?'length':toolBlocks.size?'tool_calls':'stop'),usage:{prompt_tokens:inputTokens,completion_tokens:outputTokens,total_tokens:tokens}});done=true;}
       return;
     }
     if(protocol!=='anthropic'){
       if(!parsed.choices&&!parsed.usage)throw Error('无效流式事件');
-      if(parsed.usage){inputTokens=parsed.usage.prompt_tokens??0;outputTokens=parsed.usage.completion_tokens??0;tokens=parsed.usage.total_tokens??inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:Number.isFinite(parsed.usage.prompt_tokens)&&Number.isFinite(parsed.usage.completion_tokens)});}await emit(parsed);return;
+      if(parsed.usage){inputTokens=parsed.usage.prompt_tokens??0;outputTokens=parsed.usage.completion_tokens??0;tokens=parsed.usage.total_tokens??inputTokens+outputTokens;onUsage(normalizeUsage(parsed.usage));}await emit(parsed);return;
     }
     if(onNative)await onNative(parsed);
-    if(parsed.type==='message_start'){inputTokens=(parsed.message?.usage?.input_tokens||0)+(parsed.message?.usage?.cache_read_input_tokens||0)+(parsed.message?.usage?.cache_creation_input_tokens||0);tokens=inputTokens;await emit(chunk({role:'assistant',content:''}));}
+    if(parsed.type==='message_start'){cacheRead=parsed.message?.usage?.cache_read_input_tokens||0;cacheCreation=parsed.message?.usage?.cache_creation_input_tokens||0;inputTokens=(parsed.message?.usage?.input_tokens||0)+(parsed.message?.usage?.cache_read_input_tokens||0)+(parsed.message?.usage?.cache_creation_input_tokens||0);tokens=inputTokens;await emit(chunk({role:'assistant',content:''}));}
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='text_delta')await emit(chunk({content:parsed.delta.text}));
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='thinking_delta')await emit(chunk({reasoning_content:parsed.delta.thinking}));
     if(parsed.type==='content_block_start'&&parsed.content_block?.type==='tool_use'){const index=toolBlocks.size;const initial=parsed.content_block.input&&Object.keys(parsed.content_block.input).length?JSON.stringify(parsed.content_block.input):'';toolBlocks.set(parsed.index,{index,args:initial});await emit(chunk({tool_calls:[{index,id:parsed.content_block.id,type:'function',function:{name:parsed.content_block.name,arguments:initial}}]}));}
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='input_json_delta'){const tool=toolBlocks.get(parsed.index);if(!tool)throw Error('工具流顺序错误');tool.args+=parsed.delta.partial_json;await emit(chunk({tool_calls:[{index:tool.index,function:{arguments:parsed.delta.partial_json}}]}));}
     if(parsed.type==='content_block_stop'&&toolBlocks.has(parsed.index)){const tool=toolBlocks.get(parsed.index);if(!tool.args)await emit(chunk({tool_calls:[{index:tool.index,function:{arguments:'{}'}}]}));}
-    if(parsed.type==='message_delta'){outputTokens=parsed.usage?.output_tokens||0;tokens=inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:true});await emit(chunk({},parsed.delta?.stop_reason==='tool_use'?'tool_calls':parsed.delta?.stop_reason==='max_tokens'?'length':'stop'));}
+    if(parsed.type==='message_delta'){outputTokens=parsed.usage?.output_tokens||0;tokens=inputTokens+outputTokens;onUsage(normalizeUsage({prompt_tokens:inputTokens,completion_tokens:outputTokens,total_tokens:tokens,prompt_tokens_details:{cached_tokens:cacheRead,cache_creation_tokens:cacheCreation}}));await emit(chunk({},parsed.delta?.stop_reason==='tool_use'?'tool_calls':parsed.delta?.stop_reason==='max_tokens'?'length':'stop'));}
     if(parsed.type==='message_stop')done=true;
   }
   try {
