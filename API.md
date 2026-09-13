@@ -36,14 +36,14 @@ Anthropic SDK 自动携带 `anthropic-version`，模型列表将返回 Anthropic
 
 ```python
 from openai import OpenAI
-client = OpenAI(base_url="http://127.0.0.1:3000/v1", api_key="YOUR_ROUTER_KEY")
+client = OpenAI(base_url="http://127.0.0.1:3100/v1", api_key="YOUR_ROUTER_KEY")
 response = client.responses.create(model="auto", input="你好", store=False)
 print(response.output_text)
 ```
 
 ```python
 from anthropic import Anthropic
-client = Anthropic(base_url="http://127.0.0.1:3000", api_key="YOUR_ROUTER_KEY")
+client = Anthropic(base_url="http://127.0.0.1:3100", api_key="YOUR_ROUTER_KEY")
 message = client.messages.create(
     model="auto", max_tokens=512,
     messages=[{"role": "user", "content": "你好"}]
@@ -112,4 +112,10 @@ curl 'http://127.0.0.1:3100/v1/models/all' \
 
 返回统一的 `data` 列表，`id` 为 `provider::model`，`callable` 表示是否已配置可调用。只查询 Key 所属租户已启用的服务商，不自动注册模型；没有 Key 的私有服务商无法查询。最长等待 45 秒，10 秒内限制一次，与 `/v1/models/discover` 共用限频；查询不消耗生成次数额度。部分查询失败时 HTTP 200 且 `partial: true`，具体见 `errors`，不能将其视为完整列表。`/v1/models` 仍用于获取已经配置可调用的模型。
 
-`GET /v1/openapi.json` 提供模型查询的 OpenAPI 3.1 文档，使用同样的 API Key 鉴权。示例 3100 为本地端口，其他部署请替换地址。
+`GET /v1/openapi.json` 提供模型查询、生成与 Token 计数的 OpenAPI 3.1 文档，使用同样的 API Key 鉴权。示例 3100 为本地端口，其他部署请替换地址。
+
+产品内完整文档入口：`/#api`。支持接口目录跳转、cURL / Python / WebSocket 示例复制，以及下载自动填入当前部署地址的 OpenAPI JSON。WebSocket 为自定义协议，在文档与 OpenAPI 扩展字段 x-websocket 中描述。管理 /api/* 接口使用账户会话，不接受外部调用 Key。
+
+## Cherry Studio
+
+本机已验证 API 地址 `http://127.0.0.1:3100/v1`，使用平台签发的 Key。旧的 3000 端口由 Grafana 使用。API 地址不要包含 `/chat/completions` 或 `/models`。标准获取模型列表访问 `/v1/models`，仅列出已配置的可调用模型；完整上游目录请调用 `/v1/models/all`。

@@ -1,6 +1,7 @@
 import {normalizeRequest,NORMALIZED,generationPaths,apiToken,anthropicPayload,responsesPayload,chatPayload,toChatResponse,clientResponse,clientError,contentParts} from './protocols.mjs';
 import {createClientStream} from './protocol-stream.mjs';
-import {flattenDiscovery,modelOpenAPI,callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
+import {platformOpenAPI} from './openapi.mjs';
+import {flattenDiscovery,callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
 import {safeFetch} from './network.mjs';
 import {UsageStore} from './usage-store.mjs';
 import {validatePrice,openRouterPrice,usageCost,normalizeUsage} from './pricing.mjs';
@@ -185,7 +186,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
     if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
     if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,safe());
-    if(req.method==='GET'&&url.pathname==='/v1/openapi.json')return json(res,200,modelOpenAPI);
+    if(req.method==='GET'&&url.pathname==='/v1/openapi.json')return json(res,200,platformOpenAPI);
     if(req.method==='GET'&&url.pathname==='/v1/models/all')return json(res,200,flattenDiscovery(await discovery.refresh(false)));
     if(req.method==='GET'&&url.pathname==='/v1/models'){const list=callableModels(state);return json(res,200,req.headers['anthropic-version']?anthropicModels(list):list);}
     if((req.method==='GET'&&url.pathname==='/v1/models/discover')||(req.method==='POST'&&url.pathname==='/api/models/discover'))return json(res,200,await discovery.refresh(url.pathname.startsWith('/api/')));
@@ -248,7 +249,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     throw fail('接口不存在',404);
    }
-   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js'};
+   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js'};
    if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}

@@ -9,7 +9,7 @@ let modelList=[],modelEpoch=0;
 let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer;
 const isManager=()=>['owner','admin'].includes(profile?.role);
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 接入',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录'};
+const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录'};
 async function api(url,data){const tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile?.tenantId!==tenantAtCall)throw Error('租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();throw Error(b.error?.message||'请求失败')}return b}
 function toast(s){clearTimeout(toastTimer);$('#toast').textContent=s;$('#toast').style.display='block';toastTimer=setTimeout(()=>$('#toast').style.display='none',4500)}
 function navigate(next){if(!names[next]||next===tab)return;tab=next;history.pushState(null,'','#'+tab);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
