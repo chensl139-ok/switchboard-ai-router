@@ -1,0 +1,6 @@
+{$GATEWAY_DOMAIN} {
+    reverse_proxy router:3000 {
+        # Flush each upstream chunk immediately. WebSocket upgrades are automatic.
+        flush_interval -1
+    }
+}

@@ -1,0 +1,36 @@
+services:
+  router:
+    build: .
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?请设置管理令牌}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?请设置调用令牌}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
+    volumes:
+      - router-data:/app/data
+    expose:
+      - "3000"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+  https:
+    image: caddy:2-alpine
+    environment:
+      GATEWAY_DOMAIN: ${GATEWAY_DOMAIN:?请设置已解析到服务器的域名}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      router:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  router-data:
+  caddy-data:
+  caddy-config:

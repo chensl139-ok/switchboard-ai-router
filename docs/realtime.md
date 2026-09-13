@@ -60,3 +60,32 @@ location / {
 跨域浏览器 WebSocket 需要设置精确的 `WS_ALLOWED_ORIGINS`（逗号分隔）；默认只接受同源和无 Origin 的客户端，所有连接仍须令牌认证。SSE 默认同源，不公开宽泛 CORS。
 
 实时网关目前保留单实例本地存储（30 秒请求总超时、每分钟 60 次、5 并发）。需要多副本时应先将配置和限流迁到共享存储。妙搭官方文档限制自建长连接，因此独立网关须部署到支持长连接的 Docker/VPS/Kubernetes 环境；当前任务没有提供此类服务器，尚未公网托管实时网关。
+
+## 对外 HTTPS/WSS 一键部署
+
+准备一台允许 80/443 入站的 Docker 服务器，以及指向该服务器的域名。
+在 `standalone/.env` 配置新的 ADMIN_TOKEN、GATEWAY_TOKEN 和 GATEWAY_DOMAIN（只填域名，不含协议），然后：
+
+```sh
+docker compose -f compose.public.yaml up -d --build
+```
+
+Caddy 自动申请 HTTPS 证书，SSE 禁用缓冲，WebSocket 自动升级。网关的 3000 端口只在容器网络中暴露。
+首次打开 `https://你的域名` 配置此独立网关的服务商与默认路由。
+
+外部地址：
+- SSE：`POST https://你的域名/v1/chat/completions`，`stream: true`
+- WebSocket：`wss://你的域名/v1/realtime`
+
+此处使用独立网关的 `GATEWAY_TOKEN`，不是妙搭开放 API 密钥。当前网关配置独立，auto 使用其本机路由设置，不会自动读取妙搭策略。
+
+可运行客户端示例：
+
+```sh
+export GATEWAY_URL=https://你的域名
+# 在环境中设置 GATEWAY_TOKEN，避免写入源代码或分享的命令历史。
+node examples/stream.mjs sse
+node examples/stream.mjs ws
+```
+
+示例校验完成事件，连接截断会报错；Ctrl+C 取消。未提供服务器和域名前，不存在可用的公网实时地址。
