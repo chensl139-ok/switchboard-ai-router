@@ -11,6 +11,8 @@ const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
  const accounts=new Accounts(dir,admin),engines=new Map(),limits=new Map();
+ let activeRequests=0;const globalLimit=Number(process.env.GLOBAL_MAX_CONCURRENCY)||20;
+ function acquireGlobal(){if(activeRequests>=globalLimit)throw fail('网关总并发已满，请稍后重试',429);activeRequests++;let released=false;return ()=>{if(!released){released=true;activeRequests--;}};}
  const derive=(purpose,id)=>createHmac('sha256',admin).update(purpose+':'+id).digest('hex');
  function engine(id){
   if(!accounts.state.tenants.some(t=>t.id===id))throw fail('租户不存在',404);
@@ -69,15 +71,16 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(req.method!=='GET'&&url.pathname.startsWith('/api/')&&url.pathname!=='/api/chat'){
      res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,'配置已更新'));}catch{console.error('audit_write_failed');}}});
     }
+    if(req.method==='POST'&&['/api/chat','/v1/chat/completions'].includes(url.pathname)){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
     engine(current.tenantId).emit('request',req,res);return;
    }
    engine('default').emit('request',req,res);
   }catch(error){if(!res.headersSent)json(res,error.status||500,{error:{message:error.status?error.message:'服务器内部错误'}});else res.end();}
  });
- installWebSocket(server,{originAllowed,authenticate:(token,req,expectedTenant)=>{try{const current=caller(req,token);if(expectedTenant&&expectedTenant!==current.tenantId)throw fail('租户已切换',409);return current;}catch{return false;}},execute:(input,options)=>{
+ installWebSocket(server,{originAllowed,authenticate:(token,req,expectedTenant)=>{try{const current=caller(req,token);if(expectedTenant&&expectedTenant!==current.tenantId)throw fail('租户已切换',409);return current;}catch{return false;}},execute:async(input,options)=>{
   const current=caller(options.request,options.token);if(current.tenantId!==options.authContext.tenantId)throw fail('租户已切换，请重新建立连接',403);
   if(current.role==='viewer')throw fail('只读角色不可调用模型',403);
-  return engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});
+  const release=acquireGlobal();try{return await engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});}finally{release();}
  }});
  server.on('close',()=>{for(const app of engines.values())app.closeStore();});
  return server;

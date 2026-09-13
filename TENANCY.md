@@ -52,4 +52,5 @@ SQLite 保存最近 90 天每次上游尝试的请求 ID、Key ID、调用者 ID
 - 公网必须使用 HTTPS；设置 COOKIE_SECURE=true。公共 Compose、Render、Fly 配置已启用。
 - 默认拒绝私网和保留地址上游，并在实际连接时固定经过检查的 DNS 结果。内部推理服务只能由部署管理员通过 UPSTREAM_ALLOWED_PRIVATE_HOSTS 精确授权，HTTP 还需 ALLOW_HTTP_UPSTREAM=true。
 - 若本机使用 Fake-IP 代理，可显式设置 UPSTREAM_PROXY_FAKE_IP=true；仅兼容预置官方服务域名的 198.18/15 虚拟地址，TLS 证书校验仍开启。自定义域名和普通私网不享受此例外。
+- 所有租户共享的网关总并发默认上限 20（GLOBAL_MAX_CONCURRENCY），各租户另有自己的并发限制。单次上游响应限制 8 MB。
 - 登录/注册有按来源 IP 的速率限制；代理后的多个用户可能共享来源限额。此版本未实现 MFA、SSO、邮箱验证、邮件找回密码、自定义角色或分布式限流。

@@ -2,7 +2,7 @@ import https from 'node:https';
 import http from 'node:http';
 import {lookup} from 'node:dns';
 import {isIP} from 'node:net';
-import {Readable} from 'node:stream';
+import {Readable,Transform} from 'node:stream';
 export function publicAddress(address){
  if(isIP(address)===6)return /^[23][0-9a-f]{3}:/i.test(address)&&!/^2001:(db8|0|20):/i.test(address)&&!/^2002:/i.test(address);
  if(isIP(address)!==4)return false;
@@ -26,7 +26,8 @@ export function safeFetch(value,options={}){
  return new Promise((resolveResponse,reject)=>{
   const request=protocol.request(url,{method:options.method||'GET',headers:options.headers,signal:options.signal,lookup:resolve},response=>{
    const headers=new Headers();for(const [name,value] of Object.entries(response.headers))if(value!==undefined)headers.set(name,Array.isArray(value)?value.join(','):value);
-   resolveResponse(new Response([204,205,304].includes(response.statusCode)?null:Readable.toWeb(response),{status:response.statusCode,statusText:response.statusMessage,headers}));
+   let bytes=0;const limited=new Transform({transform(chunk,encoding,callback){bytes+=chunk.length;if(bytes>8*1024*1024)return callback(Error('上游响应超过 8 MB 限制'));callback(null,chunk);}});response.on('error',error=>limited.destroy(error));limited.on('close',()=>response.destroy());response.pipe(limited);
+   resolveResponse(new Response([204,205,304].includes(response.statusCode)?null:Readable.toWeb(limited),{status:response.statusCode,statusText:response.statusMessage,headers}));
   });
   request.on('error',reject);if(options.body)request.write(options.body);request.end();
  });
