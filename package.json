@@ -1,6 +1,6 @@
 {
   "name": "switchboard-ai-router",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "setup": "node scripts/setup.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:public": "node scripts/deploy.mjs --public",
-    "check": "node --check platform.mjs && node --check server.mjs && node --check accounts.mjs && node --check pricing.mjs && node --check usage-store.mjs && node --check public/app.js"
+    "check": "node --check platform.mjs && node --check server.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js"
   },
   "engines": {
     "node": ">=22.13"
@@ -17,5 +17,9 @@
   "dependencies": {
     "ws": "^8.21.3"
   },
-  "description": "Independent multi-provider AI router with SSE, WebSocket and API key quotas"
+  "description": "Independent multi-provider AI router with SSE, WebSocket and API key quotas",
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "openai": "^7.15.0"
+  }
 }

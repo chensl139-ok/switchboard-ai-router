@@ -1,3 +1,4 @@
+import {renderModelCatalog,renderApiGuide} from './model-catalog.js';
 import {startAccountUI,showLogin,accountRequest,renderMembers,renderAccount} from './accounts.js';
 import {renderAnalytics,renderLogs} from './analytics.js';
 import {renderPrices} from './prices.js';
@@ -8,7 +9,7 @@ let modelList=[],modelEpoch=0;
 let token='',profile=null,state,tab='overview';
 const isManager=()=>['owner','admin'].includes(profile?.role);
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 接入',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户'};
+const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 接入',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录'};
 async function api(url,data){const tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile?.tenantId!==tenantAtCall)throw Error('租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();throw Error(b.error?.message||'请求失败')}return b}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3500)}
 const ready=p=>p.enabled&&p.hasKey&&p.model;
@@ -23,9 +24,11 @@ function render(){
  if(tab==='providers')html=heading('你的模型网络','预置主流服务商，也支持任意 OpenAI 兼容接口。','<button id="add-provider" class="primary">＋ 自定义服务商</button>')+cards()+'<div class="info">配置服务商时可点击「获取所有模型」并搜索选择；同一服务商可保存多个模型，在卡片下拉框直接切换，共用一份密钥。启用只表示配置完整，实际连通性请在实验室验证。</div>';
  if(tab==='legacy-logs')html=heading('请求日志','仅记录路由元数据，不保存对话正文和密钥。','<button id="refresh">↻ 刷新</button>')+`<div class="panel">${logs(state.logs)}</div>`;
 
- if(tab==='api')html=heading('一个 API，所有模型','将现有应用的 Base URL 指向此网关，即可在后台切换模型。')+`<div class="panel"><h2>统一调用入口</h2><p>Base URL：<code>${esc(location.origin)}/v1</code></p><p>在「API Key 管理」创建应用专用密钥，可设置次数配额和有效期。</p><pre>${esc(`curl ${location.origin}/v1/chat/completions \\\n  -H "Authorization: Bearer YOUR_GATEWAY_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"auto","messages":[{"role":"user","content":"你好"}],"stream":false}'`)}</pre><div class="info">model="auto" 使用后台路由策略；指定服务商路由 ID 可固定调用。当前支持文本多轮对话、max_tokens 和 temperature，支持 SSE / WebSocket 流式；暂不支持工具调用、图像及音频。切换不会迁移第三方聊天产品中的历史记录。</div></div>`;
+
  if(tab!=='playground')stopPlayground();
  $('#content').innerHTML=html;
+ if(tab==='api')renderApiGuide({esc});
+ if(tab==='models')renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;}});
  if(tab==='members')void renderMembers({profile,esc,toast});
  if(tab==='account')void renderAccount({profile,esc,toast,onReady:accountReady});
  if(tab==='analytics')void renderAnalytics({api,esc});

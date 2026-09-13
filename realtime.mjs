@@ -1,10 +1,10 @@
 import {WebSocketServer, WebSocket} from 'ws';
 import {once} from 'node:events';
 
-export async function consumeSSE(response, protocol, model, emit, signal, onUsage=()=>{}) {
+export async function consumeSSE(response, protocol, model, emit, signal, onUsage=()=>{}, onNative=null) {
   if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw Error('上游未返回 SSE');
   const reader = response.body.getReader(), decoder = new TextDecoder();
-  let buffer='',done=false,tokens=0,inputTokens=0,outputTokens=0;
+  let buffer='',done=false,tokens=0,inputTokens=0,outputTokens=0;const toolBlocks=new Map();
   const id='chatcmpl-'+crypto.randomUUID();
   const chunk=(delta,finish=null)=>({id,object:'chat.completion.chunk',created:Math.floor(Date.now()/1000),model,
     choices:[{index:0,delta,finish_reason:finish}]});
@@ -14,14 +14,28 @@ export async function consumeSSE(response, protocol, model, emit, signal, onUsag
     if(data==='[DONE]'){done=true;return;}
     const parsed=JSON.parse(data);
     if(parsed.error||parsed.type==='error')throw Error('上游流式请求失败');
+    if(protocol==='responses'){
+      if(parsed.type==='response.failed'||parsed.type==='error')throw Error('Responses 上游失败');
+      if(parsed.type==='response.created')await emit(chunk({role:'assistant',content:''}));
+      if(parsed.type==='response.output_text.delta')await emit(chunk({content:parsed.delta}));
+      if(parsed.type==='response.reasoning_summary_text.delta')await emit(chunk({reasoning_content:parsed.delta}));
+      if(parsed.type==='response.output_item.added'&&parsed.item?.type==='function_call'){const index=toolBlocks.size;toolBlocks.set(parsed.item.id,index);await emit(chunk({tool_calls:[{index,id:parsed.item.call_id,type:'function',function:{name:parsed.item.name,arguments:parsed.item.arguments||''}}]}));}
+      if(parsed.type==='response.function_call_arguments.delta'){const index=toolBlocks.get(parsed.item_id);if(index===undefined)throw Error('工具流顺序错误');await emit(chunk({tool_calls:[{index,function:{arguments:parsed.delta}}]}));}
+      if(['response.completed','response.incomplete'].includes(parsed.type)){const u=parsed.response?.usage;inputTokens=u?.input_tokens||0;outputTokens=u?.output_tokens||0;tokens=u?.total_tokens||inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:!!u});await emit({...chunk({},parsed.type==='response.incomplete'?'length':toolBlocks.size?'tool_calls':'stop'),usage:{prompt_tokens:inputTokens,completion_tokens:outputTokens,total_tokens:tokens}});done=true;}
+      return;
+    }
     if(protocol!=='anthropic'){
       if(!parsed.choices&&!parsed.usage)throw Error('无效流式事件');
       if(parsed.usage){inputTokens=parsed.usage.prompt_tokens??0;outputTokens=parsed.usage.completion_tokens??0;tokens=parsed.usage.total_tokens??inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:Number.isFinite(parsed.usage.prompt_tokens)&&Number.isFinite(parsed.usage.completion_tokens)});}await emit(parsed);return;
     }
+    if(onNative)await onNative(parsed);
     if(parsed.type==='message_start'){inputTokens=(parsed.message?.usage?.input_tokens||0)+(parsed.message?.usage?.cache_read_input_tokens||0)+(parsed.message?.usage?.cache_creation_input_tokens||0);tokens=inputTokens;await emit(chunk({role:'assistant',content:''}));}
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='text_delta')await emit(chunk({content:parsed.delta.text}));
     if(parsed.type==='content_block_delta'&&parsed.delta?.type==='thinking_delta')await emit(chunk({reasoning_content:parsed.delta.thinking}));
-    if(parsed.type==='message_delta'){outputTokens=parsed.usage?.output_tokens||0;tokens=inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:true});await emit(chunk({},parsed.delta?.stop_reason==='max_tokens'?'length':'stop'));}
+    if(parsed.type==='content_block_start'&&parsed.content_block?.type==='tool_use'){const index=toolBlocks.size;const initial=parsed.content_block.input&&Object.keys(parsed.content_block.input).length?JSON.stringify(parsed.content_block.input):'';toolBlocks.set(parsed.index,{index,args:initial});await emit(chunk({tool_calls:[{index,id:parsed.content_block.id,type:'function',function:{name:parsed.content_block.name,arguments:initial}}]}));}
+    if(parsed.type==='content_block_delta'&&parsed.delta?.type==='input_json_delta'){const tool=toolBlocks.get(parsed.index);if(!tool)throw Error('工具流顺序错误');tool.args+=parsed.delta.partial_json;await emit(chunk({tool_calls:[{index:tool.index,function:{arguments:parsed.delta.partial_json}}]}));}
+    if(parsed.type==='content_block_stop'&&toolBlocks.has(parsed.index)){const tool=toolBlocks.get(parsed.index);if(!tool.args)await emit(chunk({tool_calls:[{index:tool.index,function:{arguments:'{}'}}]}));}
+    if(parsed.type==='message_delta'){outputTokens=parsed.usage?.output_tokens||0;tokens=inputTokens+outputTokens;onUsage({inputTokens,outputTokens,totalTokens:tokens,known:true});await emit(chunk({},parsed.delta?.stop_reason==='tool_use'?'tool_calls':parsed.delta?.stop_reason==='max_tokens'?'length':'stop'));}
     if(parsed.type==='message_stop')done=true;
   }
   try {
@@ -40,7 +54,7 @@ export async function consumeSSE(response, protocol, model, emit, signal, onUsag
 }
 
 export function installWebSocket(server, {authenticate, execute, originAllowed}) {
-  const wss=new WebSocketServer({noServer:true,maxPayload:256*1024,perMessageDeflate:false});
+  const wss=new WebSocketServer({noServer:true,maxPayload:10*1024*1024,perMessageDeflate:false});
   server.on('upgrade',(req,socket,head)=>{
     if(req.url!=='/v1/realtime'||!originAllowed(req.headers.origin,req.headers.host)){
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');socket.destroy();return;
@@ -73,7 +87,7 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
   server.on('close',()=>{for(const ws of wss.clients)ws.close(1001,'服务关闭');wss.close();});
   return wss;
 }
-export async function writeSSE(res, value, signal) {
+export async function writeSSE(res, value, signal, event=null) {
   if(res.destroyed)throw Error('客户端连接已关闭');
-  if(!res.write(`data: ${typeof value==='string'?value:JSON.stringify(value)}\n\n`))await once(res,'drain',{signal});
+  if(!res.write(`${event?`event: ${event}\n`:''}data: ${typeof value==='string'?value:JSON.stringify(value)}\n\n`))await once(res,'drain',{signal});
 }

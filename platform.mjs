@@ -1,3 +1,4 @@
+import {generationPaths,apiToken,clientError} from './protocols.mjs';
 import {safeFetch} from './network.mjs';
 import http from 'node:http';
 import path from 'node:path';
@@ -64,18 +65,18 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     throw fail('接口不存在',404);
    }
    if(url.pathname.startsWith('/api/')||url.pathname.startsWith('/v1/')){
-    const token=req.headers.authorization?.replace(/^Bearer\s+/i,'').trim();
+    const token=apiToken(req.headers);
     const current=url.pathname.startsWith('/api/')?session(req):caller(req,token);
     if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已切换，请刷新后重试',409);
     req.principal=current;
     if(req.method!=='GET'&&url.pathname.startsWith('/api/')&&url.pathname!=='/api/chat'){
      res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,'配置已更新'));}catch{console.error('audit_write_failed');}}});
     }
-    if(req.method==='POST'&&['/api/chat','/v1/chat/completions'].includes(url.pathname)){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
+    if(req.method==='POST'&&(generationPaths[url.pathname]||url.pathname==='/v1/messages/count_tokens')){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
     engine(current.tenantId).emit('request',req,res);return;
    }
    engine('default').emit('request',req,res);
-  }catch(error){if(!res.headersSent)json(res,error.status||500,{error:{message:error.status?error.message:'服务器内部错误'}});else res.end();}
+  }catch(error){if(!res.headersSent)json(res,error.status||500,clientError(req.url.startsWith('/v1/messages')?'messages':'chat',error));else res.end();}
  });
  installWebSocket(server,{originAllowed,authenticate:(token,req,expectedTenant)=>{try{const current=caller(req,token);if(expectedTenant&&expectedTenant!==current.tenantId)throw fail('租户已切换',409);return current;}catch{return false;}},execute:async(input,options)=>{
   const current=caller(options.request,options.token);if(current.tenantId!==options.authContext.tenantId)throw fail('租户已切换，请重新建立连接',403);

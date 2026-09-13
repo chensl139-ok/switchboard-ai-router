@@ -3,7 +3,7 @@ RUN apk add --no-cache su-exec
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY server.mjs platform.mjs accounts.mjs pricing.mjs usage-store.mjs network.mjs realtime.mjs key-store.mjs routing.mjs thinking.mjs docker-entrypoint.sh ./
+COPY protocols.mjs protocol-stream.mjs model-catalog.mjs server.mjs platform.mjs accounts.mjs pricing.mjs usage-store.mjs network.mjs realtime.mjs key-store.mjs routing.mjs thinking.mjs docker-entrypoint.sh ./
 COPY public ./public
 RUN mkdir -p /app/data && chown node:node /app/data && chmod +x /app/docker-entrypoint.sh
 ENV HOST=0.0.0.0 PORT=3000 NODE_ENV=production DATA_DIR=/app/data

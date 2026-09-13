@@ -1,12 +1,15 @@
+import {plainText,contentParts} from './protocols.mjs';
 import {usablePrice,priceEstimate} from './pricing.mjs';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  const available=state.providers.filter(p=>p.enabled&&p.secret&&p.model);
  if(input.model&&input.model!=='auto'){
-  const p=available.find(p=>p.id===input.model);
-  if(!p)throw fail('指定服务商尚未启用或不存在',503);
-  const model=input.upstream_model||p.model;
+  const split=input.model.indexOf('::');let p,model;
+  if(split>=0){p=available.find(p=>p.id===input.model.slice(0,split));model=input.model.slice(split+2);if(input.upstream_model&&input.upstream_model!==model)throw fail('模型 ID 与 upstream_model 冲突');}
+  else {p=available.find(p=>p.id===input.model);if(!p){const matches=available.filter(v=>v.models.includes(input.model));if(matches.length>1)throw fail('模型名称对应多个服务商，请使用 provider::model');p=matches[0];model=input.model;}}
+  if(!p)throw fail('指定服务商尚未启用或模型未注册',503);
+  model=input.upstream_model||model||p.model;
   if(!p.models.includes(model))throw fail('模型未加入服务商可切换列表');
   return [{...p,model,routeReason:'显式指定服务商与模型'}];
  }
@@ -17,6 +20,7 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
   return !(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);
  });
  if(state.strategy==='economy'){
+  if(input.messages.some(m=>contentParts(m.content).some(p=>p.type==='image_url')))throw fail('经济优先尚不估算图片费用，请显式指定模型或选择其他策略');
   const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||2048;
   const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget)})));
   priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
@@ -40,8 +44,9 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  }
  candidates=candidates.map(p=>({...p,routeReason:reason}));
  if(state.strategy==='rules'){
-  const text=[...input.messages].reverse().find(m=>m.role==='user')?.content.toLowerCase()||'';
-  const rule=(state.rules||[]).find(r=>r.keywords.some(word=>text.includes(word.toLowerCase())));
+  const text=[...input.messages].reverse().find(m=>m.role==='user')?.content;
+  const query=plainText(text||'').toLowerCase();
+  const rule=(state.rules||[]).find(r=>r.keywords.some(word=>query.includes(word.toLowerCase())));
   const provider=rule&&candidates.find(p=>p.id===rule.providerId);
   if(provider&&provider.models.includes(rule.model))candidates.unshift({...provider,model:rule.model,routeReason:`匹配规则：${rule.name}`});
  }

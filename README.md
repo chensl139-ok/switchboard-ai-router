@@ -10,7 +10,8 @@
 ## 功能
 
 - 服务商：硅基流动、DeepSeek、OpenAI、Anthropic、Gemini、百炼，以及自定义兼容接口。
-- 在线获取模型列表；同服务商多模型切换；六种路由：固定、故障转移、加权轮询、最低延迟、关键词规则、经济优先。
+- 一键跨服务商查询模型目录，使用 provider::model 统一 ID；同服务商多模型切换；六种路由：固定、故障转移、加权轮询、最低延迟、关键词规则、经济优先。
+- OpenAI Chat/Responses/Completions 与 Anthropic Messages 兼容入口；文本、图片输入、函数工具及结果回传。
 - HTTP、SSE、WebSocket；流式失败不拼接其他模型的回复；取消、心跳和基础背压保护。
 - 产品侧 API Key 管理：一次性展示明文、哈希存储、生效/过期、停用/启用、总次数/每日次数/RPM 限制。
 - 模型实验室：独立运行参数面板、增量回复、折叠思考区、显示/隐藏思考、思考开关、停止生成、Enter 发送。
@@ -94,6 +95,10 @@ Railway/Fly/通用容器平台必须设置 `ADMIN_TOKEN`、`GATEWAY_TOKEN`（各
 
 **边界：**“跨平台部署”指支持上述 Node/Docker 环境，不包括无持久磁盘、禁止长连接的环境；不支持直接部署为 GitHub Pages、纯静态网站或普通 Vercel/Netlify Functions。不能用同一按钮自动开通所有云厂商账号。本仓库提供可用配置与入口，除本地及 CI 外，云厂商配置尚未逐一实机部署验收。
 
+## 多协议、图片与工具
+
+详细接口矩阵、一键模型查询、SDK 示例和兼容范围见 [统一 API 说明](API.md)。服务商上游可选 OpenAI Chat、OpenAI Responses 或 Anthropic Messages，所有入口共用租户与配额。
+
 ## 外部调用
 
 非流式：`POST /v1/chat/completions`，`stream: false`。
@@ -106,7 +111,7 @@ curl -N http://127.0.0.1:3000/v1/chat/completions \
   -d '{"model":"auto","messages":[{"role":"user","content":"你好"}],"stream":true}'
 ```
 
-`model: "auto"` 跟随当前策略；`model: "siliconflow"` 固定服务商；`upstream_model` 可指定该服务商已保存模型。`GET /v1/models` 返回可用路由 ID。
+`model: "auto"` 跟随当前策略；`model: "siliconflow"` 固定服务商；`upstream_model` 可指定该服务商已保存模型。`GET /v1/models` 返回可用路由 ID 和 provider::model 模型 ID；`GET /v1/models/discover` 查询已启用服务商的全部模型目录。
 
 WebSocket 连接 `/v1/realtime`，5 秒内发送：
 
@@ -134,7 +139,7 @@ WebSocket 连接 `/v1/realtime`，5 秒内发送：
 - 若其他模型无视关闭参数并返回 reasoning_content，HTTP 返回 422，SSE/WebSocket 返回错误并中断，不把隐藏输出当作关闭推理。
 - 未适配服务商的开关请求会明确失败；仍可以选择模型默认并显示它返回的思考。
 - `max_tokens` 可能同时包含思考与回答；只有思考、没有正文时，检查模型设置并提高上限。
-- 思考和对话只保留在当前浏览器页面内存，不写入服务端日志。支持文本多轮，不支持工具调用、多模态或音频。
+- 思考和对话只保留在当前浏览器页面内存，不写入服务端日志。支持文本、图片和函数工具多轮；音频、视频及内置工具暂不支持。
 
 模型能力依据：[GLM-5.3 官方说明](https://docs.z.ai/guides/llm/glm-5.3)。
 
