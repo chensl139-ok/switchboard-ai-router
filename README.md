@@ -15,7 +15,7 @@
 | 模型目录 | 一键查询服务商模型、搜索并加入调用列表；通过 `provider::model` 指定渠道与模型 |
 | 兼容 API | Chat Completions、Responses、Legacy Completions、Anthropic Messages；JSON、SSE、自建 WebSocket |
 | 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
-| 模型实验室 | Enter 发送、Shift + Enter 换行、直接粘贴图片、附件预览、停止生成、草稿保留、回复复制 |
+| 模型实验室 | 单模型对话；2–4 个模型同题对比、耗时与 Token 用量、失败原因、JSON 导出；Enter 发送、Shift + Enter 换行、图片附件、停止生成、草稿保留、回复复制 |
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
 | 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频提交与轮询，内置限额与任务归属追踪 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
@@ -53,7 +53,9 @@ npm start
 
 1. 使用 `.env` 中的 `ADMIN_TOKEN` 创建首个所有者账户，之后通过邮箱和密码登录。
 2. 在「服务商管理」填写上游地址与密钥，获取模型并启用服务商。
+   同一服务商的模型若使用不同协议，可在「模型协议覆盖」按 `模型 ID = openai / responses / anthropic` 逐行设置；未列出的模型使用默认协议。Anthropic 兼容网关若要求 `Authorization: Bearer`，可选择对应鉴权方式。
 3. 在「模型实验室」验证模型，按需要设置路由策略与价格。
+   同一服务商可分别保存 Subscription 与 Metered 密钥，并在「模型计费渠道」逐个指定使用哪一把；未指定的模型默认走 Subscription。Metered 单价不适用于 Subscription 调用。价格可分别录入输入、输出、缓存读取和缓存写入费用，未知缓存写入价格时不会伪造该次调用费用。
 4. 在「API Key 管理」创建业务调用 Key，并设置额度和有效时间。
 5. 打开侧栏「API 文档」查看示例，或访问 `/#api`。
 
@@ -66,6 +68,7 @@ npm start
 | `HOST` / `PORT` | `127.0.0.1` / `3000` | 监听地址与端口 |
 | `ADMIN_TOKEN` / `GATEWAY_TOKEN` | setup 生成 | 初始化令牌，各至少 24 字符 |
 | `UPSTREAM_PROXY_FAKE_IP` | `false` | 本机使用 Fake-IP 代理（Surge / Clash 等）时设为 `true`，放行官方上游域名的 198.18/15 虚拟地址 |
+| `UPSTREAM_PROXY_FAKE_IP_HOSTS` | 空 | 在启用上项时，精确列出也需要放行 Fake-IP 的自定义 HTTPS 服务商域名，逗号分隔；不接受通配符 |
 | `UPSTREAM_ALLOWED_PRIVATE_HOSTS` | 空 | 私有推理服务须精确授权域名/IP，逗号分隔 |
 | `ALLOW_HTTP_UPSTREAM` | `false` | 默认禁止 HTTP 上游，仅访问受信任的本地推理服务时开启 |
 | `COOKIE_SECURE` | `false` | HTTPS 反代场景设为 `true` |
@@ -176,6 +179,10 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 ## 思考、图片与工具的边界
 
 实验室支持图片附件和直接粘贴截图，最多 4 张、单张不超过 4 MB；包含历史及 Base64 的总请求上限为 10 MB。选择具备视觉能力的上游模型后才能处理图片。
+
+在「多模型对比」中可选择 2–4 个不同模型，对同一文本问题进行独立调用。对比界面显示协议和密钥渠道、每个模型的回答、耗时、上游报告的 Token 用量与失败原因，并可导出 JSON。最多同时发出 2 个请求；每个请求单独计费。未返回用量时显示“未知”，不会估算为 0。
+
+重构后的模块边界、数据流与部署取舍参见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 "显示思考"仅影响界面；`thinking_mode: "disabled"` 控制实际推理。不支持关闭的模型会明确拒绝，不能通过隐藏文字减少推理费用。模型返回的思考会占用输出预算。
 

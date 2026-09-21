@@ -1,0 +1,14 @@
+services:
+  switchboard:
+    build: .
+    container_name: switchboard-ai-router
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:3100:3000"
+    volumes:
+      - ./data:/app/data

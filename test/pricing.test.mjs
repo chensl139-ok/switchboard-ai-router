@@ -30,6 +30,15 @@ test('缓存命中价格区分未知和免费，按实际命中量扣除普通�
  assert.equal(openRouterPrice({pricing:{prompt:'0.000002',completion:'0.000008'}}).cachedInputPerMillion,undefined);
 });
 
+test('缓存写入按单独价格计费，缺失价格时不伪造费用',async()=>{
+ const {normalizeUsage}=await import('../pricing.mjs');
+ const price=validatePrice({currency:'USD',inputPerMillion:3,outputPerMillion:15,cachedInputPerMillion:0.3,cacheWritePerMillion:3.75});
+ const usage=normalizeUsage({prompt_tokens:1000000,completion_tokens:100000,prompt_tokens_details:{cached_tokens:200000,cache_creation_tokens:300000}});
+ assert.equal(usageCost({prices:{m:price}},'m',usage).estimatedCost,4.185);
+ assert.equal(usageCost({prices:{m:{...price,cacheWritePerMillion:undefined}}},'m',usage).estimatedCost,null);
+ assert.throws(()=>validatePrice({...price,cacheWritePerMillion:-1}),/非负/);
+});
+
 test('HTTP 与 SSE 三种上游协议保留缓存命中用量',async()=>{
  const {normalizeUsage}=await import('../pricing.mjs');const {toChatResponse}=await import('../protocols.mjs');const {consumeSSE}=await import('../realtime.mjs');
  const anthropic={id:'m',content:[],usage:{input_tokens:20,cache_read_input_tokens:80,output_tokens:10}};

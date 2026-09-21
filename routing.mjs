@@ -1,17 +1,18 @@
 import {plainText,contentParts} from './protocols.mjs';
 import {usablePrice,priceEstimate,priceAt} from './pricing.mjs';
+import {credentialFor,hasCredential,channelFor} from './provider-key.mjs';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
- const available=state.providers.filter(p=>p.enabled&&p.secret&&p.model);
+ const available=state.providers.filter(p=>p.enabled&&p.model&&hasCredential(p));
  if(input.model&&input.model!=='auto'){
-  const split=input.model.indexOf('::');let p,model;
-  if(split>=0){p=available.find(p=>p.id===input.model.slice(0,split));model=input.model.slice(split+2);if(input.upstream_model&&input.upstream_model!==model)throw fail('模型 ID 与 upstream_model 冲突');}
-  else {p=available.find(p=>p.id===input.model);if(!p){const matches=available.filter(v=>v.models.includes(input.model));if(matches.length>1)throw fail('模型名称对应多个服务商，请使用 provider::model');p=matches[0];model=input.model;}}
+  const split=input.model.indexOf('::');let p,model,channelOverride;
+  if(split>=0){const id=input.model.slice(0,split),alias=state.providerAliases?.[id];p=available.find(p=>p.id===(alias?.id||id));channelOverride=alias?.channel;model=input.model.slice(split+2);if(input.upstream_model&&input.upstream_model!==model)throw fail('模型 ID 与 upstream_model 冲突');}
+  else {const alias=state.providerAliases?.[input.model];p=available.find(p=>p.id===(alias?.id||input.model));channelOverride=alias?.channel;if(!p){const matches=available.filter(v=>v.models.includes(input.model));if(matches.length>1)throw fail('模型名称对应多个服务商，请使用 provider::model');p=matches[0];model=input.model;}}
   if(!p)throw fail('指定服务商尚未启用或模型未注册',503);
   model=input.upstream_model||model||p.model;
-  if(!p.models.includes(model))throw fail('模型未加入服务商可切换列表');
-  return [{...p,model,routeReason:'显式指定服务商与模型'}];
+  if(!p.models.includes(model)||!credentialFor(p,model,channelOverride))throw fail('模型未加入服务商可切换列表，或所属渠道尚未配置密钥');
+  return [{...p,model,channelOverride,routeReason:'显式指定服务商与模型'}];
  }
  let candidates=[...available].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
  if(state.strategy==='manual')candidates=candidates.filter(p=>p.id===state.active);
@@ -22,7 +23,7 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  if(state.strategy==='economy'){
   if(input.messages.some(m=>contentParts(m.content).some(p=>p.type==='image_url')))throw fail('经济优先尚不估算图片费用，请显式指定模型或选择其他策略');
   const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||2048;
-  const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
+  const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return credentialFor(p,model)&&(!p.meteredSecret||channelFor(p,model)==='metered')&&usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
   priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
   if(!priced.length)throw fail('没有同币种且价格有效的候选模型，请同步或录入价格；未知价格不会当作免费',503);
   return priced.slice(0,state.routing.maxAttempts);
@@ -48,7 +49,7 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
   const query=plainText(text||'').toLowerCase();
   const rule=(state.rules||[]).find(r=>r.keywords.some(word=>query.includes(word.toLowerCase())));
   const provider=rule&&candidates.find(p=>p.id===rule.providerId);
-  if(provider&&provider.models.includes(rule.model))candidates.unshift({...provider,model:rule.model,routeReason:`匹配规则：${rule.name}`});
+  if(provider&&provider.models.includes(rule.model)&&credentialFor(provider,rule.model))candidates.unshift({...provider,model:rule.model,routeReason:`匹配规则：${rule.name}`});
  }
  candidates=candidates.filter((p,index,all)=>all.findIndex(v=>v.id===p.id&&v.model===p.model)===index);
  if(!candidates.length)throw fail('没有可用路由，请启用服务商并选择默认模型；熔断中的路由需等待 60 秒',503);
@@ -57,7 +58,7 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
 export function validateRouting(body,providers){
  if(!body||!strategies.includes(body.strategy))throw fail('路由策略无效');
  const active=body.active||'';
- if(active&&!providers.some(p=>p.id===active&&p.enabled&&p.secret&&p.model))throw fail('默认服务商未完成配置或尚未启用');
+ if(active&&!providers.some(p=>p.id===active&&p.enabled&&hasCredential(p)))throw fail('默认服务商未完成配置或尚未启用');
  if(body.strategy==='manual'&&!active)throw fail('固定模式必须选择默认服务商');
  const rules=body.rules??[];
  if(!Array.isArray(rules)||rules.length>30)throw fail('规则最多 30 条');

@@ -1,16 +1,21 @@
 import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
 import {modelCapabilities} from './model-capability.js';
-let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
+import {renderModelCompare} from './model-compare.js';
+let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
 export function stopPlayground(){if(controller){controller.abort();controller=null;for(const message of history)if(message.status==='生成中')message.status='已停止';}}
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
 export function renderPlayground({state,token,tenantId,esc,refresh}){
  const root=document.querySelector('#content');
- const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),label:p.name+' / '+model,model}))).filter(item=>modelCapabilities(item.model).chat);
+ const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),providerId:p.id,label:p.name+' / '+model,model,protocol:p.modelProtocols?.[model]||p.protocol,channel:p.modelChannels?.[model]||'subscription'}))).filter(item=>modelCapabilities(item.model).chat);
+ if(view==='compare'){
+  renderModelCompare({root,choices,token,tenantId,esc,onSwitch:()=>{view='chat';renderPlayground({state,token,tenantId,esc,refresh});}});
+  return;
+ }
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
- root.innerHTML=`<div class="heading lab-heading"><div><div class="eyebrow">MODEL PLAYGROUND</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>从一次对话开始，比较模型的回答与思考表现。</p></div><button id="lab-clear" class="subtle">清空对话</button></div>
+ root.innerHTML=`<div class="heading lab-heading"><div><div class="eyebrow">MODEL PLAYGROUND</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>从一次对话开始，比较模型的回答与思考表现。</p></div><div class="compare-heading-actions"><button id="lab-compare" class="subtle">多模型对比</button><button id="lab-clear" class="subtle">清空对话</button></div></div>
  <div class="lab-layout"><section class="lab-main"><div class="lab-toolbar"><span>${spark}对话测试</span><span class="lab-state" id="lab-state">准备就绪</span></div>
  <div class="lab-messages" id="lab-messages" aria-live="polite"></div><div id="lab-error" class="lab-error" role="alert"></div>
  <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><div id="lab-images" class="lab-images"></div><form id="lab-form" class="lab-composer"><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="3" placeholder="输入问题，或直接粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span>Enter 发送 <i>·</i> Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
@@ -22,6 +27,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh}){
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
  <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>本次调用</span><strong id="lab-target-label"></strong><p>固定选择模型时，不会改变后台默认模型。</p></div></aside></div>`;
  const $=selector=>root.querySelector(selector);
+ $('#lab-compare').onclick=()=>{controller?.abort();controller=null;view='compare';renderPlayground({state,token,tenantId,esc,refresh});};
  $('#lab-prompt').value=draft;
  const resizePrompt=()=>{const el=$('#lab-prompt');el.style.height='auto';el.style.height=Math.min(180,el.scrollHeight)+'px';};
  $('#lab-prompt').oninput=()=>{draft=$('#lab-prompt').value;resizePrompt();};resizePrompt();

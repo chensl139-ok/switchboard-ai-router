@@ -3,18 +3,21 @@ import {existsSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
 import {once} from 'node:events';
 import {priceAt,normalizeUsage,usageCost} from './pricing.mjs';
+import {credentialFor,channelFor} from './provider-key.mjs';
 export const mediaPaths=new Set(['/v1/images/generations','/v1/images/edits','/v1/audio/speech','/v1/audio/transcriptions','/v1/audio/translations','/v1/video/submit','/v1/video/status','/v1/embeddings','/v1/rerank']);
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const owner=caller=>caller.apiKeyId?'key:'+caller.apiKeyId:caller.userId?'user:'+caller.userId:caller.admin?'admin':'legacy';
 const sf=p=>['api.siliconflow.cn','api.siliconflow.com'].includes(new URL(p.baseUrl).hostname);
 export function mediaProvider(state,model){
  if(typeof model!=='string'||!model||model==='auto')throw fail('媒体调用需指定已配置模型，建议使用 provider::model，不支持 auto');
- const available=state.providers.filter(p=>p.enabled&&p.secret&&p.protocol!=='anthropic');
+ const available=state.providers.filter(p=>p.enabled&&(p.secret||p.meteredSecret));
  const split=model.indexOf('::');let p,upstream;
  if(split>=0){p=available.find(p=>p.id===model.slice(0,split));upstream=model.slice(split+2);}
  else{p=available.find(p=>p.id===model);if(p)upstream=p.model;else{const matches=available.filter(p=>p.models.includes(model));if(matches.length>1)throw fail('模型名称重复，请使用 provider::model');p=matches[0];upstream=model;}}
  if(!p||!p.models.includes(upstream))throw fail('媒体模型未配置或服务商未启用，请先在模型目录中加入对应模型',404);
- return {...p,model:upstream};
+ if(!credentialFor(p,upstream))throw fail('媒体模型所属渠道尚未配置密钥',404);
+ if((p.modelProtocols?.[upstream]||p.protocol)==='anthropic')throw fail('该模型的 Anthropic 协议不支持此媒体接口',501);
+ return {...p,model:upstream,secret:credentialFor(p,upstream),prices:channelFor(p,upstream)==='metered'||!p.meteredSecret?p.prices:{}};
 }
 async function readBody(req){
  const type=req.headers['content-type']||'',multipart=type.startsWith('multipart/form-data');let length=0;const chunks=[];
@@ -30,7 +33,7 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
  return async(req,res,caller)=>{
   const pathname=new URL(req.url,'http://local').pathname,poll=pathname==='/v1/video/status';
   const {data,form}=await readBody(req);let p,job;
-  if(poll){if(typeof data.requestId!=='string'||!Object.hasOwn(jobs,data.requestId))throw fail('视频任务不存在或不属于当前调用方',404);job=jobs[data.requestId];if(!job||job.expiresAt<Date.now()||(!(caller.admin||['owner','admin'].includes(caller.role))&&job.owner!==owner(caller)))throw fail('视频任务不存在或不属于当前调用方',404);p=state.providers.find(p=>p.id===job.providerId&&p.enabled&&p.secret&&p.baseUrl===job.baseUrl);if(!p)throw fail('任务对应服务商配置已改变或未启用',409);p={...p,model:job.model};}
+  if(poll){if(typeof data.requestId!=='string'||!Object.hasOwn(jobs,data.requestId))throw fail('视频任务不存在或不属于当前调用方',404);job=jobs[data.requestId];if(!job||job.expiresAt<Date.now()||(!(caller.admin||['owner','admin'].includes(caller.role))&&job.owner!==owner(caller)))throw fail('视频任务不存在或不属于当前调用方',404);p=state.providers.find(p=>p.id===job.providerId&&p.enabled&&p.baseUrl===job.baseUrl&&credentialFor(p,job.model));if(!p)throw fail('任务对应服务商配置已改变或未启用',409);p={...p,model:job.model,secret:credentialFor(p,job.model),prices:channelFor(p,job.model)==='metered'||!p.meteredSecret?p.prices:{}};}
   else p=mediaProvider(state,data.model);
   if(pathname.startsWith('/v1/video/')&&!sf(p))throw fail('视频任务协议当前支持硅基流动，其他服务商视频协议尚未适配',501);
   if(form&&!['/v1/images/edits','/v1/audio/transcriptions','/v1/audio/translations'].includes(pathname))throw fail('此接口仅接受 JSON');

@@ -9,17 +9,21 @@ export function publicAddress(address){
  const [a,b]=address.split('.').map(Number);
  return !(a===0||a===10||a===127||a>=224||(a===169&&b===254)||(a===172&&b>=16&&b<=31)||(a===192&&(b===168||b===0))||(a===100&&b>=64&&b<=127)||(a===198&&[18,19,51].includes(b))||(a===203&&b===0));
 }
+export function proxyAddressAllowed(host,address,protocol='https:'){
+ if(process.env.UPSTREAM_PROXY_FAKE_IP!=='true'||protocol!=='https:'||!/^198\.(18|19)\./.test(address))return false;
+ const officialHosts=['s3.siliconflow.cn','api.siliconflow.cn','api.siliconflow.com','api.deepseek.com','api.openai.com','api.anthropic.com','generativelanguage.googleapis.com','dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','openrouter.ai'];
+ const customHosts=(process.env.UPSTREAM_PROXY_FAKE_IP_HOSTS||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+ return officialHosts.includes(host)||customHosts.includes(host);
+}
 export function safeFetch(value,options={}){
  const url=new URL(value);const host=url.hostname.replace(/^\[|\]$/g,'');
- const officialHosts=['s3.siliconflow.cn','api.siliconflow.cn','api.siliconflow.com','api.deepseek.com','api.openai.com','api.anthropic.com','generativelanguage.googleapis.com','dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','openrouter.ai'];
- const proxyAddressAllowed=address=>process.env.UPSTREAM_PROXY_FAKE_IP==='true'&&url.protocol==='https:'&&officialHosts.includes(host)&&/^198\.(18|19)\./.test(address);
  const allowedPrivate=(process.env.UPSTREAM_ALLOWED_PRIVATE_HOSTS||'').split(',').map(s=>s.trim()).includes(host);
  if(url.username||url.password||!['https:','http:'].includes(url.protocol))return Promise.reject(Error('上游 URL 无效'));
  if(url.protocol==='http:'&&process.env.ALLOW_HTTP_UPSTREAM!=='true')return Promise.reject(Error('HTTP 上游未允许'));
  if(isIP(host)&&!publicAddress(host)&&!allowedPrivate)return Promise.reject(Error('私网目标未允许'));
  const resolve=(hostname,opts,callback)=>lookup(hostname,{all:true},(error,addresses)=>{
   if(error)return callback(error,'');
-  if(!addresses.length||(!allowedPrivate&&addresses.some(a=>!publicAddress(a.address)&&!proxyAddressAllowed(a.address))))return callback(Error('私网目标未允许'),'');
+  if(!addresses.length||(!allowedPrivate&&addresses.some(a=>!publicAddress(a.address)&&!proxyAddressAllowed(host,a.address,url.protocol))))return callback(Error('私网目标未允许'),'');
   callback(null,opts.all?addresses:addresses[0].address,addresses[0].family);
  });
  const protocol=url.protocol==='https:'?https:http;

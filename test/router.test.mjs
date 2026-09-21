@@ -7,7 +7,7 @@ import {createApp} from '../server.mjs';
 const admin='a'.repeat(32),gateway='g'.repeat(32);
 test('完整网关流程：鉴权、加密、切换、回退、重启与协议适配',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'router-test-'));let calls=[];
- const fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body),headers:opts.headers});if(url.includes('bad.example'))return new Response('{}',{status:503});if(url.includes('claude.example'))return Response.json({id:'msg1',model:'claude-test',content:[{type:'text',text:'你好'}],stop_reason:'end_turn',usage:{input_tokens:3,output_tokens:4}});return Response.json({id:'test',choices:[{message:{role:'assistant',content:'ok'},finish_reason:'stop'}],usage:{total_tokens:7}})};
+ const fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body),headers:opts.headers});if(url.includes('bad.example'))return new Response('{}',{status:503});if(url.includes('claude.example'))return Response.json({id:'msg1',model:'claude-test',content:[{type:'text',text:'你好'}],stop_reason:'end_turn',usage:{input_tokens:3,output_tokens:4}});if(url.endsWith('/responses'))return Response.json({id:'resp1',model:'test-model',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'ok'}]}],usage:{input_tokens:3,output_tokens:4}});return Response.json({id:'test',choices:[{message:{role:'assistant',content:'ok'},finish_reason:'stop'}],usage:{total_tokens:7}})};
  let app=createApp({dir,admin,gateway,fetcher});await new Promise(r=>app.listen(0,'127.0.0.1',r));let base=`http://127.0.0.1:${app.address().port}`;
  const request=async(url,data,token=admin)=>{const r=await fetch(base+url,{method:data?'POST':'GET',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});return {status:r.status,data:await r.json(),headers:r.headers}};
  const provider=(id,baseUrl,protocol='openai')=>({id,name:id,baseUrl,protocol,model:'test-model',priority:50,enabled:true,apiKey:'secret-upstream-key'});
@@ -40,6 +40,19 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  assert.equal((await request('/api/provider/switch-model',{id:'good',model:'second/model'})).status,200);
  calls=[];await request('/v1/chat/completions',{...chat,model:'good'},gateway);assert.equal(calls[0].body.model,'second/model');
  calls=[];await request('/v1/chat/completions',{...chat,model:'good',upstream_model:'test-model'},gateway);assert.equal(calls[0].body.model,'test-model');
+ await request('/api/provider',{...provider('good','https://good.example/v1'),model:'second/model',apiKey:'',models:['test-model','second/model'],modelProtocols:{'test-model':'responses'}});
+ calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::test-model'},gateway)).status,200);
+ assert.equal(calls[0].url,'https://good.example/v1/responses');
+ calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::second/model'},gateway)).status,200);
+ assert.equal(calls[0].url,'https://good.example/v1/chat/completions');
+ await request('/api/provider',{...provider('good','https://good.example/v1'),model:'second/model',apiKey:'',meteredApiKey:'metered-secret-key',models:['test-model','second/model'],modelProtocols:{'test-model':'responses'},modelChannels:{'test-model':'metered'}});
+ calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::test-model'},gateway)).status,200);
+ assert.equal(calls[0].headers.authorization,'Bearer metered-secret-key');
+ calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::second/model'},gateway)).status,200);
+ assert.equal(calls[0].headers.authorization,'Bearer secret-upstream-key');
+ assert.equal((await request('/api/state')).data.providers.find(p=>p.id==='good').hasMeteredKey,true);
+ assert.ok(!JSON.stringify((await request('/api/state')).data).includes('metered-secret-key'));
+ assert.equal((await request('/api/provider',{...provider('good','https://good.example/v1'),apiKey:'',models:['test-model'],modelProtocols:{unknown:'anthropic'}})).status,400);
  assert.equal((await request('/api/state')).data.providers.find(p=>p.id==='good').model,'second/model');
  assert.equal((await request('/v1/chat/completions',{...chat,model:'good',upstream_model:'unknown'},gateway)).status,400);
  assert.equal((await request('/v1/chat/completions',{...chat,upstream_model:'test-model'},gateway)).status,400);

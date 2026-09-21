@@ -17,6 +17,13 @@ test('独立策略：固定、回退、权重、延迟、规则、熔断',()=>{
  s.strategy='fallback';s.logs=Array.from({length:3},()=>({providerId:'a',model:'main',status:503,time:new Date().toISOString()}));assert.equal(selectRoutes(s,input)[0].id,'b');
  assert.throws(()=>validateRouting({strategy:'manual',active:''},s.providers));
 });
+test('合并服务商按模型选择密钥渠道，并兼容旧 Metered 路由 ID',()=>{
+ const s=makeState();s.providers=[{id:'mosi',name:'moss',model:'gpt-5.4',models:['gpt-5.4','claude-haiku-4-5'],enabled:true,secret:'subscription',meteredSecret:'metered',modelChannels:{'claude-haiku-4-5':'metered'}}];
+ s.providerAliases={'mosi-metered':{id:'mosi',channel:'metered'}};
+ assert.equal(selectRoutes(s,{model:'mosi::claude-haiku-4-5'})[0].model,'claude-haiku-4-5');
+ assert.equal(selectRoutes(s,{model:'mosi-metered::gpt-5.4'})[0].channelOverride,'metered');
+ assert.equal(selectRoutes(s,{model:'mosi'})[0].model,'gpt-5.4');
+});
 test('初始化重复执行不改变任何已有令牌',()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'setup-'));
  try{copyFileSync(new URL('../.env.example',import.meta.url),path.join(dir,'.env.example'));assert.equal(setup(dir),true);const before=readFileSync(path.join(dir,'.env'),'utf8');assert.match(before,/ADMIN_TOKEN=[a-f0-9]{64}/);assert.equal(setup(dir),false);assert.equal(readFileSync(path.join(dir,'.env'),'utf8'),before);}finally{rmSync(dir,{recursive:true,force:true});}
