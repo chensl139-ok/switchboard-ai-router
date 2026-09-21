@@ -10,7 +10,7 @@
     "setup": "node scripts/setup.mjs",
     "build:web": "vite build",
     "typecheck": "tsc -p tsconfig.server.json && vue-tsc -p tsconfig.web.json",
-    "check": "node --check platform.mjs && node --check server.mjs && node --check upstream-adapter.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js && node --check public/model-compare.js && node --check openapi.mjs && node --check public/api-docs.js && node --check media.mjs && node --check public/media-lab.js && npm run typecheck && npm run build:web"
+    "check": "node --check platform.mjs && node --check server.mjs && node --check upstream-adapter.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js && node --check public/lab-composer.js && node --check public/model-compare.js && node --check openapi.mjs && node --check public/api-docs.js && node --check media.mjs && node --check public/media-lab.js && npm run typecheck && npm run build:web"
   },
   "engines": {
     "node": ">=22.18"

@@ -182,6 +182,8 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 
 在「多模型对比」中可选择 2–4 个不同模型，对同一文本问题进行独立调用。对比界面显示协议和密钥渠道、每个模型的回答、耗时、上游报告的 Token 用量与失败原因，并可导出 JSON。最多同时发出 2 个请求；每个请求单独计费。未返回用量时显示“未知”，不会估算为 0。
 
+单模型对话生成回复时仍可在输入框编写下一条草稿。生成中不会发送第二个请求；完成或停止后草稿保留，可再按 Enter 发送。生成时 Enter 插入换行，Shift + Enter 也可换行。
+
 开发栈采用渐进迁移：网关保留 Node.js 原生 HTTP/SSE/WebSocket 传输层；服务商密钥路由和模型实验请求已使用 TypeScript，模型对比界面使用 Vue 3 + Vite。其余控制台页面仍是 ES Modules，后续可逐页迁移，避免一次性重写影响现有租户和 API。`npm run typecheck` 检查 TypeScript/Vue，`npm run build:web` 生成可部署的控制台资源。
 
 重构后的模块边界、数据流与部署取舍参见 [ARCHITECTURE.md](ARCHITECTURE.md)。

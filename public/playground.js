@@ -2,6 +2,7 @@ import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
 import {modelCapabilities} from './model-capability.js';
 import {renderModelCompare,stopModelCompare} from './model-compare.js';
+import {setLabBusy} from './lab-composer.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
@@ -19,7 +20,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh}){
  root.innerHTML=`<div class="heading lab-heading"><div><div class="eyebrow">MODEL PLAYGROUND</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>从一次对话开始，比较模型的回答与思考表现。</p></div><div class="compare-heading-actions"><button id="lab-compare" class="subtle">多模型对比</button><button id="lab-clear" class="subtle">清空对话</button></div></div>
  <div class="lab-layout"><section class="lab-main"><div class="lab-toolbar"><span>${spark}对话测试</span><span class="lab-state" id="lab-state">准备就绪</span></div>
  <div class="lab-messages" id="lab-messages" aria-live="polite"></div><div id="lab-error" class="lab-error" role="alert"></div>
- <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><div id="lab-images" class="lab-images"></div><form id="lab-form" class="lab-composer"><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="3" placeholder="输入问题，或直接粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span>Enter 发送 <i>·</i> Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
+ <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><div id="lab-images" class="lab-images"></div><form id="lab-form" class="lab-composer"><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="3" aria-describedby="lab-compose-hint" placeholder="输入问题，或直接粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span id="lab-compose-hint" aria-live="polite">Enter 发送 · Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
  <div class="lab-privacy">对话仅保留在当前页面内存中 · 调用按服务商规则计费</div></section>
  <aside class="lab-settings"><div class="lab-settings-heading">运行配置<span>PARAMETERS</span></div><label>服务商与模型<select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label>
  <label>传输方式<select id="lab-transport"><option value="sse">SSE · 增量输出</option><option value="ws">WebSocket · 实时连接</option><option value="http">HTTP · 完整响应</option></select></label>
@@ -47,7 +48,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh}){
   list.querySelectorAll('[data-thought]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.thought)];if(m)m.thinkingOpen=el.open;}));
   if(nearBottom)list.scrollTop=list.scrollHeight;$('#lab-jump').hidden=list.scrollHeight-list.scrollTop-list.clientHeight<100;
  }
- const busy=value=>{for(const id of ['lab-model','lab-transport','lab-thinking','lab-max-tokens','lab-clear','lab-prompt','lab-send','lab-tools','lab-image-button','lab-image-input'])if($('#'+id))$('#'+id).disabled=value;if($('#lab-stop'))$('#lab-stop').hidden=!value;if($('#lab-send'))$('#lab-send').hidden=value;if($('#lab-state')){$('#lab-state').textContent=value?'正在生成':'准备就绪';$('#lab-state').classList.toggle('running',value);}};
+ const busy=value=>setLabBusy(root,value);
  function drawImages(){const el=$('#lab-images');if(el)el.innerHTML=pendingImages.map((image,index)=>`<span><img src="${image.url}" alt="待发送图片"><button type="button" data-remove-image="${index}" aria-label="移除图片">×</button></span>`).join('');}
  targetLabel();draw();drawImages();busy(!!controller);
  $('#lab-tools').oninput=()=>settings.tools=$('#lab-tools').value;
@@ -85,7 +86,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh}){
  $('#lab-clear').onclick=()=>{if(!controller){history=[];pendingImages=[];draft='';$('#lab-prompt').value='';resizePrompt();drawImages();draw();$('#lab-error').textContent='';}};
  $('#lab-stop').onclick=()=>controller?.abort();
  $('#lab-messages').addEventListener('click',async e=>{const copy=e.target.closest('[data-copy-reply]');if(copy){try{await navigator.clipboard.writeText(history[Number(copy.dataset.copyReply)]?.content||'');copy.textContent='已复制';}catch{$('#lab-error').textContent='无法访问剪贴板，请手动选中回复复制';}return;}const button=e.target.closest('[data-example]');if(button){$('#lab-prompt').value=button.dataset.example;draft=button.dataset.example;resizePrompt();$('#lab-prompt').focus();}});
- $('#lab-prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){e.preventDefault();if(!e.repeat&&!controller)$('#lab-form').requestSubmit();}});
+ $('#lab-prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229&&!controller){e.preventDefault();if(!e.repeat)$('#lab-form').requestSubmit();}});
  $('#lab-form').onsubmit=async e=>{
   e.preventDefault();e.stopPropagation();if(controller)return;if(addingImages){$('#lab-error').textContent='图片正在读取，请稍后发送';return;}
   const prompt=$('#lab-prompt').value.trim();if(!prompt&&!pendingImages.length)return;if(!choices.length){$('#lab-error').textContent='请先在服务商管理中配置密钥、添加模型并启用服务商';return;}if(!Number.isInteger(settings.maxTokens)||settings.maxTokens<1||settings.maxTokens>131072){$('#lab-error').textContent='最大输出 Tokens 需为 1 至 131072 的整数';return;}
