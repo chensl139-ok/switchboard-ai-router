@@ -27,7 +27,7 @@
 
 ## 快速开始
 
-需要 **Node.js >= 22.13**，适用于 Windows、macOS 和 Linux。
+需要 **Node.js >= 22.18**，适用于 Windows、macOS 和 Linux。`npm start` 会先构建控制台；Docker 构建会在独立阶段打包前端，不会把开发依赖带入运行镜像。
 
 ```sh
 git clone https://github.com/chensl139-ok/switchboard-ai-router.git
@@ -181,6 +181,8 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 实验室支持图片附件和直接粘贴截图，最多 4 张、单张不超过 4 MB；包含历史及 Base64 的总请求上限为 10 MB。选择具备视觉能力的上游模型后才能处理图片。
 
 在「多模型对比」中可选择 2–4 个不同模型，对同一文本问题进行独立调用。对比界面显示协议和密钥渠道、每个模型的回答、耗时、上游报告的 Token 用量与失败原因，并可导出 JSON。最多同时发出 2 个请求；每个请求单独计费。未返回用量时显示“未知”，不会估算为 0。
+
+开发栈采用渐进迁移：网关保留 Node.js 原生 HTTP/SSE/WebSocket 传输层；服务商密钥路由和模型实验请求已使用 TypeScript，模型对比界面使用 Vue 3 + Vite。其余控制台页面仍是 ES Modules，后续可逐页迁移，避免一次性重写影响现有租户和 API。`npm run typecheck` 检查 TypeScript/Vue，`npm run build:web` 生成可部署的控制台资源。
 
 重构后的模块边界、数据流与部署取舍参见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 

@@ -1,14 +1,15 @@
 import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
 import {modelCapabilities} from './model-capability.js';
-import {renderModelCompare} from './model-compare.js';
+import {renderModelCompare,stopModelCompare} from './model-compare.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
-export function stopPlayground(){if(controller){controller.abort();controller=null;for(const message of history)if(message.status==='生成中')message.status='已停止';}}
+export function stopPlayground(){stopModelCompare();if(controller){controller.abort();controller=null;for(const message of history)if(message.status==='生成中')message.status='已停止';}}
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
 export function renderPlayground({state,token,tenantId,esc,refresh}){
  const root=document.querySelector('#content');
+ stopModelCompare();
  const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),providerId:p.id,label:p.name+' / '+model,model,protocol:p.modelProtocols?.[model]||p.protocol,channel:p.modelChannels?.[model]||'subscription'}))).filter(item=>modelCapabilities(item.model).chat);
  if(view==='compare'){
   renderModelCompare({root,choices,token,tenantId,esc,onSwitch:()=>{view='chat';renderPlayground({state,token,tenantId,esc,refresh});}});

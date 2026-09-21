@@ -1,4 +1,4 @@
-import {credentialFor,hasCredential} from './provider-key.mjs';
+import {credentialFor,hasCredential} from './provider-key.ts';
 export function callableModels(state){
  const data=[{id:'auto',object:'model',created:0,owned_by:'router',name:'自动路由'}];
  for(const p of state.providers.filter(p=>p.enabled&&hasCredential(p))){

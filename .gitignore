@@ -7,5 +7,6 @@ node_modules/
 *.pid
 .DS_Store
 coverage/
+public/build/
 .local-api-key
 .workbuddy/

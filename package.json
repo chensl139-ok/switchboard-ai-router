@@ -4,13 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prestart": "npm run build:web",
     "start": "node --env-file-if-exists=.env platform.mjs",
     "test": "node --test test/*.test.mjs",
     "setup": "node scripts/setup.mjs",
-    "check": "node --check platform.mjs && node --check server.mjs && node --check upstream-adapter.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js && node --check public/lab-request.js && node --check public/model-compare.js && node --check openapi.mjs && node --check public/api-docs.js && node --check media.mjs && node --check public/media-lab.js"
+    "build:web": "vite build",
+    "typecheck": "tsc -p tsconfig.server.json && vue-tsc -p tsconfig.web.json",
+    "check": "node --check platform.mjs && node --check server.mjs && node --check upstream-adapter.mjs && node --check protocols.mjs && node --check protocol-stream.mjs && node --check model-catalog.mjs && node --check public/app.js && node --check public/model-catalog.js && node --check public/playground.js && node --check public/model-compare.js && node --check openapi.mjs && node --check public/api-docs.js && node --check media.mjs && node --check public/media-lab.js && npm run typecheck && npm run build:web"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.18"
   },
   "dependencies": {
     "ws": "^8.21.3"
@@ -18,6 +21,12 @@
   "description": "Switchboard — 独立部署的多服务商 AI 智能路由网关（SSE / WebSocket / API Key 配额）",
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
-    "openai": "^7.15.0"
+    "@types/node": "^24.13.6",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "openai": "^7.15.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vue": "^3.5.43",
+    "vue-tsc": "^3.3.11"
   }
 }

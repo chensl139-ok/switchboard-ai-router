@@ -1,6 +1,6 @@
 import {plainText,contentParts} from './protocols.mjs';
 import {usablePrice,priceEstimate,priceAt} from './pricing.mjs';
-import {credentialFor,hasCredential,channelFor} from './provider-key.mjs';
+import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){

@@ -9,7 +9,7 @@ import {validatePrice,openRouterPrice,usageCost,normalizeUsage} from './pricing.
 import {assertThinkingDisabled} from './thinking.mjs';
 import {createUpstreamAdapter} from './upstream-adapter.mjs';
 import {selectRoutes,validateRouting} from './routing.mjs';
-import {credentialFor,hasCredential,channelFor} from './provider-key.mjs';
+import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
 import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
@@ -259,7 +259,18 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     throw fail('接口不存在',404);
    }
-   const files={'/':'index.html','/app.js':'app.js','/routing.js':'routing.js','/playground.js':'playground.js','/lab-request.js':'lab-request.js','/model-compare.js':'model-compare.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
+   if(req.method==='GET'&&url.pathname==='/app.js'){
+    const built=path.join(root,'public/build/app.js');
+    if(!existsSync(built))throw fail('前端资源未构建，请运行 npm run build:web',503);
+    res.setHeader('content-type','text/javascript; charset=utf-8');return res.end(readFileSync(built));
+   }
+   if(req.method==='GET'&&/^\/build\/assets\/[A-Za-z0-9._-]+\.(js|css)$/.test(url.pathname)){
+    const built=path.join(root,'public',url.pathname.slice(1));
+    if(!existsSync(built))throw fail('页面资源不存在',404);
+    res.setHeader('content-type',built.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8');
+    res.setHeader('cache-control','public, max-age=31536000, immutable');return res.end(readFileSync(built));
+   }
+   const files={'/':'index.html','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
  
    if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));

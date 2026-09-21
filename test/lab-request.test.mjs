@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildExperimentRequest,experimentResult,runExperiment} from '../public/lab-request.js';
+import {buildExperimentRequest,experimentResult,runExperiment} from '../public/lab-request.ts';
 
 const choice={providerId:'mosi',model:'claude-haiku-4-5'};
 

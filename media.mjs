@@ -3,7 +3,7 @@ import {existsSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
 import {once} from 'node:events';
 import {priceAt,normalizeUsage,usageCost} from './pricing.mjs';
-import {credentialFor,channelFor} from './provider-key.mjs';
+import {credentialFor,channelFor} from './provider-key.ts';
 export const mediaPaths=new Set(['/v1/images/generations','/v1/images/edits','/v1/audio/speech','/v1/audio/transcriptions','/v1/audio/translations','/v1/video/submit','/v1/video/status','/v1/embeddings','/v1/rerank']);
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const owner=caller=>caller.apiKeyId?'key:'+caller.apiKeyId:caller.userId?'user:'+caller.userId:caller.admin?'admin':'legacy';
