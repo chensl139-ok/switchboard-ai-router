@@ -4,6 +4,7 @@ import path from 'node:path';
 import {once} from 'node:events';
 import {priceAt,normalizeUsage,usageCost} from './pricing.mjs';
 import {credentialFor,channelFor} from './provider-key.ts';
+import {protocolForModel} from './model-protocol.mjs';
 export const mediaPaths=new Set(['/v1/images/generations','/v1/images/edits','/v1/audio/speech','/v1/audio/transcriptions','/v1/audio/translations','/v1/video/submit','/v1/video/status','/v1/embeddings','/v1/rerank']);
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const owner=caller=>caller.apiKeyId?'key:'+caller.apiKeyId:caller.userId?'user:'+caller.userId:caller.admin?'admin':'legacy';
@@ -16,7 +17,7 @@ export function mediaProvider(state,model){
  else{p=available.find(p=>p.id===model);if(p)upstream=p.model;else{const matches=available.filter(p=>p.models.includes(model));if(matches.length>1)throw fail('模型名称重复，请使用 provider::model');p=matches[0];upstream=model;}}
  if(!p||!p.models.includes(upstream))throw fail('媒体模型未配置或服务商未启用，请先在模型目录中加入对应模型',404);
  if(!credentialFor(p,upstream))throw fail('媒体模型所属渠道尚未配置密钥',404);
- if((p.modelProtocols?.[upstream]||p.protocol)==='anthropic')throw fail('该模型的 Anthropic 协议不支持此媒体接口',501);
+ if(protocolForModel(p,upstream)==='anthropic')throw fail('该模型的 Anthropic 协议不支持此媒体接口',501);
  return {...p,model:upstream,secret:credentialFor(p,upstream),prices:channelFor(p,upstream)==='metered'||!p.meteredSecret?p.prices:{}};
 }
 async function readBody(req){

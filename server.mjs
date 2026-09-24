@@ -10,6 +10,7 @@ import {assertThinkingDisabled} from './thinking.mjs';
 import {createUpstreamAdapter} from './upstream-adapter.mjs';
 import {selectRoutes,validateRouting} from './routing.mjs';
 import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
+import {modelProtocolMap,protocolForModel} from './model-protocol.mjs';
 import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
@@ -43,7 +44,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  const file=path.join(dir,'state.json');
  let state=existsSync(file)?JSON.parse(readFileSync(file,'utf8')):{providers:structuredClone(presets),active:'',strategy:'fallback',logs:[]};
  if(!state.providers.some(p=>p.id==='openrouter')&&state.providers.length<30)state.providers.push(structuredClone(presets.find(p=>p.id==='openrouter')));
- for(const p of state.providers)p.models=[...new Set([...(p.models||[]),...(p.model?[p.model]:[])])];
+ for(const p of state.providers){p.models=[...new Set([...(p.models||[]),...(p.model?[p.model]:[])])];p.modelProtocols=modelProtocolMap(p,p.models);}
  usageStore.migrate(state.logs);
  state.rules??=[];state.routing??={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5};
  for(const p of state.providers)p.weight??=1;
@@ -125,7 +126,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(input.max_tokens!==undefined&&(!Number.isInteger(input.max_tokens)||input.max_tokens<1||input.max_tokens>131072))throw fail('max_tokens 无效');
   if(input.upstream_model!==undefined&&(typeof input.upstream_model!=='string'||!input.model||input.model==='auto'))throw fail('指定模型需要同时指定服务商路由 ID');
   const explicit=input.model&&input.model!=='auto';
-  let candidates=selectRoutes(state,input,{sequence:sequence++}).map(p=>({...p,protocol:p.modelProtocols?.[p.model]||p.protocol,routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
+  let candidates=selectRoutes(state,input,{sequence:sequence++}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
   payloadFor(candidates[0],input);
   candidates=candidates.filter(p=>{try{payloadFor(p,input);return true;}catch{return false;}}).map(p=>({...p,prices:structuredClone(p.prices||{})}));
   if(input.messages.some(m=>m.reasoning_content!==undefined&&typeof m.reasoning_content!=='string'))throw fail('reasoning_content 必须为文本');
@@ -205,7 +206,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     if(req.method==='POST'&&url.pathname==='/v1/messages/count_tokens'){
      const input=normalizeRequest('messages',{...await body(req),max_tokens:2048});const [p]=selectRoutes(state,input);
-     if((p.modelProtocols?.[p.model]||p.protocol)!=='anthropic')throw fail('该路由不支持原生 Anthropic Token 计数，请选择 Anthropic 上游',501);
+     if(protocolForModel(p,p.model)!=='anthropic')throw fail('该路由不支持原生 Anthropic Token 计数，请选择 Anthropic 上游',501);
      const payload=anthropicPayload(input,p.model);delete payload.stream;delete payload.max_tokens;delete payload.temperature;delete payload.top_p;
      const r=await fetcher(p.baseUrl+'/messages/count_tokens',{method:'POST',headers:{'content-type':'application/json',...(p.anthropicAuth==='bearer'?{authorization:'Bearer '+unseal(credentialFor(p,p.model,p.channelOverride))}:{'x-api-key':unseal(credentialFor(p,p.model,p.channelOverride))}),'anthropic-version':'2023-06-01'},body:JSON.stringify(payload),redirect:'error',signal:AbortSignal.timeout(15000)});
      if(!r.ok)throw fail('上游 Token 计数失败（'+r.status+'）',502);const result=await r.json();if(!Number.isSafeInteger(result.input_tokens)||result.input_tokens<0)throw fail('Token 计数响应无效',502);return json(res,200,{input_tokens:result.input_tokens});
@@ -228,8 +229,9 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      const entries=b.models??old?.models??[];
      if(!Array.isArray(entries)||entries.length>500||entries.some(m=>typeof m!=='string'||!m.trim()||m.length>200))throw fail('模型列表最多 500 个，每个模型 ID 长度为 1–200');
      const models=[...new Set([...entries.map(m=>m.trim()),...(b.model.trim()?[b.model.trim()]:[])])];
-     const modelProtocols=b.modelProtocols??old?.modelProtocols??{};
-     if(!modelProtocols||typeof modelProtocols!=='object'||Array.isArray(modelProtocols)||Object.keys(modelProtocols).some(m=>!models.includes(m)||!['openai','responses','anthropic'].includes(modelProtocols[m])))throw fail('模型协议配置无效；只能为已配置模型指定支持的协议');
+     const suppliedProtocols=b.modelProtocols??old?.modelProtocols??{};
+     if(!suppliedProtocols||typeof suppliedProtocols!=='object'||Array.isArray(suppliedProtocols)||Object.entries(suppliedProtocols).some(([m,protocol])=>(b.modelProtocols!==undefined&&!models.includes(m))||(models.includes(m)&&!['openai','responses','anthropic'].includes(protocol))))throw fail('模型协议配置无效');
+     const modelProtocols=modelProtocolMap({...old,...b,modelProtocols:Object.fromEntries(Object.entries(suppliedProtocols).filter(([model])=>models.includes(model)))},models);
      const modelChannels=b.modelChannels??old?.modelChannels??{};
      if(!modelChannels||typeof modelChannels!=='object'||Array.isArray(modelChannels)||Object.keys(modelChannels).some(m=>!models.includes(m)||!['subscription','metered'].includes(modelChannels[m])))throw fail('模型渠道配置无效；只能为已配置模型指定 subscription 或 metered');
      if(b.meteredApiKey!==undefined&&(typeof b.meteredApiKey!=='string'||b.meteredApiKey.length>4096))throw fail('计量密钥格式无效');

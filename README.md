@@ -55,7 +55,7 @@ npm start
 
 1. 使用 `.env` 中的 `ADMIN_TOKEN` 创建首个所有者账户，之后通过邮箱和密码登录。
 2. 在「服务商管理」填写上游地址与密钥，获取模型并启用服务商。
-   同一服务商的模型若使用不同协议，可在「模型协议覆盖」按 `模型 ID = openai / responses / anthropic` 逐行设置；未列出的模型使用默认协议。Anthropic 兼容网关若要求 `Authorization: Bearer`，可选择对应鉴权方式。
+   直接选择模型即可，系统会自动匹配 OpenAI Chat Completions、Responses 或 Anthropic Messages 协议；无法识别的模型使用服务商默认协议。Anthropic 兼容网关若要求 `Authorization: Bearer`，可选择对应鉴权方式。
 3. 在「模型实验室」验证模型，按需要设置路由策略与价格。
    同一服务商可分别保存 Subscription 与 Metered 密钥，并在「模型计费渠道」逐个指定使用哪一把；未指定的模型默认走 Subscription。Metered 单价不适用于 Subscription 调用。价格可分别录入输入、输出、缓存读取和缓存写入费用，未知缓存写入价格时不会伪造该次调用费用。
 4. 在「API Key 管理」创建业务调用 Key，并设置额度和有效时间。
