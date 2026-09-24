@@ -4,7 +4,7 @@ import {mkdtempSync,writeFileSync,readFileSync,rmSync,copyFileSync} from 'node:f
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {setup} from '../scripts/setup.mjs';
-import {selectRoutes,validateRouting} from '../routing.mjs';
+import {selectRoutes,validateRouting,routeHealth} from '../routing.mjs';
 import {thinkingOptions} from '../thinking.mjs';
 import {createApp} from '../server.mjs';
 const makeState=()=>({providers:[{id:'a',name:'A',model:'main',models:['main','code'],enabled:true,secret:'s',priority:10,weight:1},{id:'b',name:'B',model:'main',models:['main','code'],enabled:true,secret:'s',priority:20,weight:3}],active:'a',strategy:'fallback',logs:[],rules:[],routing:{maxAttempts:3}});
@@ -31,6 +31,13 @@ test('故障转移把同一服务商的其他模型加入候选链',()=>{
  const exact=selectRoutes(s,{model:'mosi::backup',messages:[]});assert.deepEqual(exact.map(route=>route.model),['backup','backup']);assert.deepEqual(exact.map(route=>route.channelOverride),['subscription','metered']);
  s.logs=Array.from({length:3},()=>({providerId:'mosi',model:'backup',status:503,time:new Date().toISOString()}));
  assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','metered','primary']);
+});
+test('路由健康状态只熔断可重试故障，并按时间而非数组顺序计算',()=>{
+ const s=makeState(),now=Date.now(),provider=s.providers[0];
+ s.logs=[503,200,503,503].map((status,index)=>({providerId:'a',model:'main',status,latency:20,time:new Date(now-(index===1?5000:index*1000)).toISOString()}));
+ assert.equal(routeHealth(s,provider,'main',now).circuitOpen,true);
+ s.logs=Array.from({length:3},(_,index)=>({providerId:'a',model:'main',status:422,time:new Date(now-index*1000).toISOString()}));
+ assert.equal(routeHealth(s,provider,'main',now).circuitOpen,false);
 });
 test('初始化重复执行不改变任何已有令牌',()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'setup-'));

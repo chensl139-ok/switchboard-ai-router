@@ -24,3 +24,9 @@ test('模型实验室突出直接选模型、运行摘要和生成中草稿',()=
  assert.match(source,/协议自动适配/);assert.match(source,/lab-response-meta/);
  assert.match(source,/id="lab-draft-state"/);assert.match(composer,/draftState\.hidden=!value/);
 });
+
+test('模型路由展示执行阶段并使用紧凑工作区密度',()=>{
+ const routing=read('public/routing.js'),css=read('public/style.css');
+ assert.match(routing,/routing-flow/);assert.match(routing,/健康过滤/);assert.match(routing,/routing-guardrails/);
+ assert.match(css,/Compact workspace density/);assert.match(css,/\.routing-config-grid/);
+});

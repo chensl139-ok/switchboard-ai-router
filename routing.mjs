@@ -3,15 +3,28 @@ import {usablePrice,priceEstimate,priceAt} from './pricing.mjs';
 import {credentialFor,hasCredential,channelFor,credentialChannels} from './provider-key.ts';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
-const recentlyFailed=(state,provider,model,now)=>{
- const last=state.logs.filter(log=>(log.providerId===provider.id||(!log.providerId&&log.provider===provider.name))&&log.model===model).slice(0,3);
- return last.length===3&&last.every(log=>log.status>=400)&&now-Date.parse(last[0].time)<60000;
-};
+const retryableStatuses=new Set([401,403,408,429,500,502,503,504,529]);
+const matchesRoute=(log,provider,model)=>(log.providerId===provider.id||(!log.providerId&&log.provider===provider.name))&&log.model===model;
+const routeLogs=(state,provider,model)=>state.logs.filter(log=>matchesRoute(log,provider,model)).sort((a,b)=>Date.parse(b.time)-Date.parse(a.time));
+export function routeHealth(state,provider,model,now=Date.now()){
+ const logs=routeLogs(state,provider,model),latest=logs[0];let consecutiveFailures=0;
+ for(const log of logs){if(!retryableStatuses.has(Number(log.status)))break;consecutiveFailures++;}
+ const successful=logs.filter(log=>log.status===200&&now-Date.parse(log.time)<3600000).slice(0,20);
+ return {circuitOpen:consecutiveFailures>=3&&latest&&now-Date.parse(latest.time)<60000,consecutiveFailures,samples:successful.length,averageLatency:successful.length>=3?successful.reduce((sum,log)=>sum+Number(log.latency||0),0)/successful.length:Infinity};
+}
+const recentlyFailed=(state,provider,model,now)=>routeHealth(state,provider,model,now).circuitOpen;
 const credentialRoutes=(provider,model,routeReason,channelOverride)=>{
  const channels=channelOverride?[channelOverride]:credentialChannels(provider,model);
  return channels.map((channel,index)=>({...provider,model,channelOverride:channel,routeReason:index?`${routeReason} · 备用密钥`:routeReason}));
 };
 const hasModelCredential=(provider,model,channelOverride)=>channelOverride?Boolean(credentialFor(provider,model,channelOverride)):credentialChannels(provider,model).length>0;
+const uniqueRoutes=routes=>routes.filter((route,index,all)=>all.findIndex(item=>item.id===route.id&&item.model===route.model&&item.channelOverride===route.channelOverride)===index);
+const weightedFirst=(candidates,sequence)=>{
+ let position=sequence%candidates.reduce((sum,provider)=>sum+(provider.weight||1),0),first=candidates[0];
+ for(const provider of candidates){if(position<(provider.weight||1)){first=provider;break;}position-=provider.weight||1;}
+ return [first,...candidates.filter(provider=>provider.id!==first.id)];
+};
+const latencyScore=(state,provider,now)=>routeHealth(state,provider,provider.model,now).averageLatency;
 const modelRoutes=(state,provider,firstModel,now,channelOverride)=>[firstModel,...provider.models.filter(model=>model!==firstModel)]
  .filter((model,index)=>hasModelCredential(provider,model,channelOverride)&&(index===0||!recentlyFailed(state,provider,model,now)))
  .map((model,index)=>credentialRoutes(provider,model,index===0?'显式起始模型':'同服务商模型故障转移',channelOverride))
@@ -41,15 +54,9 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  }
  let reason='默认服务商优先，失败时按优先级回退';
  if(state.strategy==='weighted'&&candidates.length){
-  let position=sequence%candidates.reduce((n,p)=>n+(p.weight||1),0),first=candidates[0];
-  for(const p of candidates){if(position<(p.weight||1)){first=p;break;}position-=p.weight||1;}
-  candidates=[first,...candidates.filter(p=>p.id!==first.id)];reason='按服务商权重轮询';
+  candidates=weightedFirst(candidates,sequence);reason='按服务商权重轮询';
  }else if(state.strategy==='latency'){
-  const score=p=>{
-   const samples=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===p.model&&l.status===200&&now-Date.parse(l.time)<3600000).slice(0,20);
-   return samples.length>=3?samples.reduce((n,l)=>n+l.latency,0)/samples.length:Infinity;
-  };
-  candidates.sort((a,b)=>score(a)-score(b)||a.priority-b.priority);
+  candidates.sort((a,b)=>latencyScore(state,a,now)-latencyScore(state,b,now)||a.priority-b.priority);
   reason='近一小时至少 3 条成功样本的平均耗时，无样本按优先级';
  }else{
   candidates.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active));
@@ -69,7 +76,7 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  if(!['fallback','economy'].includes(state.strategy)){
   const groups=candidates.map(p=>credentialRoutes(p,p.model,p.routeReason,p.channelOverride));candidates=[...groups.map(group=>group[0]),...groups.flatMap(group=>group.slice(1))];
  }
- candidates=candidates.filter((p,index,all)=>all.findIndex(v=>v.id===p.id&&v.model===p.model&&v.channelOverride===p.channelOverride)===index);
+ candidates=uniqueRoutes(candidates);
  if(!candidates.length)throw fail('没有可用路由，请启用服务商并选择默认模型；熔断中的路由需等待 60 秒',503);
  return candidates.slice(0,state.routing.maxAttempts);
 }
