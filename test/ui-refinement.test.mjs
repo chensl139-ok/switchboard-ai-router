@@ -44,3 +44,10 @@ test('服务商卡片使用紧凑密度且侧栏收起前后保持同一行',()=
  assert.match(css,/\.sidebar-compact \.sidebar \.nav-item\{min-height:40px;justify-content:flex-start;padding:8px 12px 8px 19px\}/);
  assert.match(css,/\.sidebar-toggle\{top:50%;transform:translateY\(-50%\)\}/);
 });
+
+test('侧栏开关与导航图标共用固定轴且展开收起不横跳',()=>{
+ const css=read('public/style.css');
+ assert.match(css,/Collapse control shares the navigation icon axis in both states/);
+ assert.match(css,/\.sidebar-toggle\{position:fixed;left:16px;right:auto;top:auto;bottom:16px/);
+ assert.match(css,/\.sidebar-compact \.sidebar-toggle\{left:12px;width:55px;padding-left:19px;justify-content:flex-start\}/);
+});
