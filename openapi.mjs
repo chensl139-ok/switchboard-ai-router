@@ -5,7 +5,7 @@ const common={model:{type:'string',default:'auto',description:'auto、服务商 
 const error={description:'失败，检查 error.message；流开始后错误通过 SSE 事件返回',content:{'application/json':{schema:object}}};
 const responses={200:{description:'完整生成结果或 SSE 事件流',headers:{'x-request-id':{description:'关联生成日志的请求 ID',schema:{type:'string'}}},content:{'application/json':{schema:object},'text/event-stream':{schema:{type:'string'}}}},400:error,401:error,403:error,404:error,429:error,500:error,502:error,501:error};
 export const platformOpenAPI=structuredClone(modelOpenAPI);
-platformOpenAPI.info={title:'Switchboard Platform API',version:'2.0.0',description:'租户隔离的统一模型 API。支持 OpenAI / Anthropic、SSE、图片和函数工具。WebSocket 使用自定义协议，请参阅产品 API 文档。'};
+platformOpenAPI.info={title:'Switchboard Platform API',version:'2.0.1',description:'租户隔离的统一模型 API。支持 OpenAI / Anthropic、SSE、图片和函数工具。WebSocket 使用自定义协议，请参阅产品 API 文档。'};
 for(const [path,name,properties,required,example] of [
  ['/v1/chat/completions','createChatCompletion',{...common,messages},['messages'],{model:'auto',messages:[{role:'user',content:'你好'}],stream:false}],
  ['/v1/messages','createMessage',{...common,messages,system:{oneOf:[{type:'string'},{type:'array',items:object}]},thinking:object},['messages','max_tokens'],{model:'auto',max_tokens:512,messages:[{role:'user',content:'你好'}]}],
