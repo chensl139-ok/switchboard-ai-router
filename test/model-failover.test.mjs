@@ -26,6 +26,23 @@ test('同一服务商内起始模型失败后切换到备用模型',async()=>{
  }finally{await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
 });
 
+test('401 不重复尝试同一密钥，媒体模型不进入对话回退，预算留给其他服务商',async()=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'auth-failover-')),admin='a'.repeat(32),gateway='g'.repeat(32),calls=[];
+ const fetcher=async(url,options)=>{const model=JSON.parse(options.body).model;calls.push(model);return url.includes('siliconflow.example')?new Response('{}',{status:401}):Response.json({model,choices:[{message:{role:'assistant',content:'ok'}}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}});};
+ const app=createApp({dir,admin,gateway,fetcher});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${app.address().port}`;
+ const post=async(url,data,token=admin)=>{const response=await fetch(base+url,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(data)});return {status:response.status,data:await response.json(),headers:response.headers};};
+ try{
+  await post('/api/provider',{id:'siliconflow',name:'硅基流动',baseUrl:'https://siliconflow.example/v1',protocol:'openai',model:'zai-org/GLM-5.2',models:['zai-org/GLM-5.2','baidu/ERNIE-Image-Turbo','zai-org/GLM-5.3'],priority:1,enabled:true,apiKey:'expired-key'});
+  await post('/api/provider',{id:'backup',name:'备用',baseUrl:'https://backup.example/v1',protocol:'openai',model:'chat',models:['chat'],priority:2,enabled:true,apiKey:'working-key'});
+  await post('/api/routing',{active:'siliconflow',strategy:'fallback',routing:{timeoutMs:9000,maxAttempts:2,requestsPerMinute:60,concurrency:5}});
+  const input={model:'siliconflow',upstream_model:'zai-org/GLM-5.2',allow_fallback:true,messages:[{role:'user',content:'ping'}]};
+  const response=await post('/api/chat',input,gateway);
+  assert.equal(response.status,200);assert.deepEqual(calls,['zai-org/GLM-5.2','chat']);assert.equal(response.headers.get('x-router-attempt'),'2');
+  calls.length=0;const media=await post('/api/chat',{model:'siliconflow::baidu/ERNIE-Image-Turbo',messages:input.messages},gateway);
+  assert.equal(media.status,400);assert.match(media.data.error.message,/媒体实验室/);assert.equal(calls.length,0);
+ }finally{await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
+
 test('自动路由先尝试同服务商备用模型，再跨服务商；能力筛选不占尝试额度',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'route-chain-')),admin='a'.repeat(32),gateway='g'.repeat(32),calls=[];
  let failPrimary=false,failBackup=false;

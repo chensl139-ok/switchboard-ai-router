@@ -5,7 +5,7 @@ import {platformOpenAPI} from './openapi.mjs';
 import {flattenDiscovery,callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
 import {safeFetch} from './network.mjs';
 import {UsageStore} from './usage-store.mjs';
-import {validatePrice,openRouterPrice,usageCost,normalizeUsage} from './pricing.mjs';
+import {validatePrice,openRouterPrice,matchOpenRouterModel,canImportOpenRouterPrice,usageCost,normalizeUsage} from './pricing.mjs';
 import {assertThinkingDisabled} from './thinking.mjs';
 import {createUpstreamAdapter} from './upstream-adapter.mjs';
 import {createRouter,validateRouting} from './routing.mjs';
@@ -127,10 +127,11 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  const {payloadFor,requestFor}=createUpstreamAdapter({unseal});
  function planRoutes(input,{sequenceValue=sequence,now=Date.now()}={}){
   const planned=selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
+  if(input.model&&input.model!=='auto'&&planned[0]&&!modelCapabilities(planned[0].model).chat)throw fail('所选模型不是对话模型，请在媒体实验室使用',400);
   if(input.model&&input.model!=='auto')payloadFor(planned[0],input);
   const compatible=[],excluded=[];
   for(const candidate of planned){
-   if((!input.model||input.model==='auto')&&!modelCapabilities(candidate.model).chat){excluded.push({providerId:candidate.id,model:candidate.model,reason:'自动对话路由跳过媒体或非对话模型',status:400});continue;}
+   if(!modelCapabilities(candidate.model).chat){excluded.push({providerId:candidate.id,model:candidate.model,reason:'对话路由跳过媒体或非对话模型',status:400});continue;}
    try{payloadFor(candidate,input);compatible.push(candidate);}catch(error){excluded.push({providerId:candidate.id,model:candidate.model,reason:error.message,status:error.status||400});}
   }
   if((!input.model||input.model==='auto')&&['fallback','latency','weighted'].includes(state.strategy)&&compatible.length>1){
@@ -156,15 +157,21 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   const explicit=input.model&&input.model!=='auto';
   const {compatible,excluded}=planRoutes(input,{sequenceValue:sequence++});
   if(!compatible.length)throw fail(excluded[0]?.reason||'没有与请求能力匹配的可用模型',excluded[0]?.status||503);
-  const candidates=compatible.slice(0,state.routing.maxAttempts).map(p=>({...p,prices:structuredClone(p.prices||{})}));
+  // 401 makes all models using the same saved key ineligible for this request.
+  // Keep later providers available so skipped duplicates do not consume the attempt budget.
+  const candidates=compatible;
   if(input.messages.some(m=>m.reasoning_content!==undefined&&typeof m.reasoning_content!=='string'))throw fail('reasoning_content 必须为文本');
   if(apiKeyId)apiKeys.admit(apiKeyId);
   let succeeded=false,usedTokens=0;const requestId=requestIdentifier||crypto.randomUUID();
   const canFallback=candidates.length>1;
-  inFlight++;const routeStarted=Date.now(),timeout=AbortSignal.timeout(state.routing.timeoutMs),requestSignal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false;
+  inFlight++;const routeStarted=Date.now(),timeout=AbortSignal.timeout(state.routing.timeoutMs),requestSignal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false,attempted=0,authFailedName='';const rejectedCredentials=new Set();
   try{
   for(let candidateIndex=0;candidateIndex<candidates.length;candidateIndex++){
-   const p=candidates[candidateIndex],remaining=Math.max(1,state.routing.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=candidates.length-candidateIndex;
+   if(attempted>=state.routing.maxAttempts)break;
+   const candidate=candidates[candidateIndex];
+   if(rejectedCredentials.has(candidate.id+':'+candidate.routeSecret))continue;
+   const p={...candidate,prices:structuredClone(candidate.prices||{})},remaining=Math.max(1,state.routing.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=state.routing.maxAttempts-attempted;
+   const attempt=++attempted;
    const attemptTimeout=AbortSignal.timeout(Math.max(1,Math.floor(remaining/attemptsLeft))),signal=AbortSignal.any([requestSignal,attemptTimeout]);
    const started=Date.now();let status=502,pendingBytes=0;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};const pendingChunks=[];
    try{
@@ -172,7 +179,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     const resp=await fetcher(upstream.url,upstream.options);
     status=resp.status;
     if(!resp.ok)throw fail(`上游返回 HTTP ${status}`,status);
-    const routeInfo={providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt:candidateIndex+1,fallback:candidateIndex>0};
+    const routeInfo={providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt,fallback:attempt>1};
     if(onRouteSelected)await onRouteSelected(routeInfo);
     if(input.stream){
      const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{
@@ -197,12 +204,13 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     succeeded=true;usedTokens=usage.totalTokens;return {data,native,converted,provider:p.id,model:p.model,route:routeInfo};
    }catch(e){
     record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0,usageKnown:false});
+    if(e.status===401){rejectedCredentials.add(p.id+':'+p.routeSecret);authFailedName=p.name;}
     if(e.status===422)throw e;
     const retryable=[401,403,408,429,500,502,503,504,529].includes(e.status||502)||(e.status===400&&(!explicit||input.allow_fallback));
-    if(committed||requestSignal.aborted||(explicit&&!canFallback)||!retryable)throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
+    if(committed||requestSignal.aborted||(explicit&&!canFallback)||!retryable)throw fail(e.status===401?`服务商 ${p.name} 密钥验证失败（401），请更新 API Key`:`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
    }
   }
-  throw fail('所有候选服务商均调用失败，请查看请求日志',502);
+  throw fail(authFailedName&&attempted===1?`服务商 ${authFailedName} 密钥验证失败（401），请更新 API Key`:'所有候选服务商均调用失败，请查看请求日志',502);
   }finally{inFlight--;if(apiKeyId){try{apiKeys.complete(apiKeyId,succeeded,usedTokens);}catch{console.error('API Key usage persistence failed');}}}
  }
  const handleMedia=createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acquire:()=>{if(Date.now()-windowStart>=60000){windowStart=Date.now();windowUsed=0;}if(++windowUsed>state.routing.requestsPerMinute)throw fail('每分钟请求数已达上限',429);if(inFlight>=state.routing.concurrency)throw fail('并发请求已满',429);inFlight++;return ()=>{inFlight--;};}});
@@ -260,10 +268,26 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
 
     if(req.method==='POST'&&url.pathname==='/api/prices') {const b=await body(req),p=state.providers.find(p=>p.id===b.providerId);if(!p||(!p.models.includes(b.model)&&!Object.hasOwn(p.prices||{},b.model)))throw fail('模型未配置');p.prices={...(p.prices||{}),[b.model]:validatePrice(b)};save();return json(res,200,safe());}
     if(req.method==='POST'&&url.pathname==='/api/prices/sync'){
-     const b=await body(req),p=state.providers.find(p=>p.id===b.providerId);if(!p||p.baseUrl!=='https://openrouter.ai/api/v1')throw fail('目前仅支持 OpenRouter 官方价格接口；其他平台请手动录入');
-     const response=await fetcher(p.baseUrl+'/models',{headers:p.secret?{authorization:'Bearer '+unseal(p.secret)}:{},redirect:'error',signal:AbortSignal.timeout(15000)});if(!response.ok)throw fail('价格同步失败（上游 HTTP '+response.status+'）',502);const body=await response.json();if(!Array.isArray(body.data))throw fail('价格接口格式无效',502);
-     const prices=Object.create(null);for(const row of body.data){if(p.models.includes(row.id)){const price=openRouterPrice(row);if(price)prices[row.id]=price;}}
-     p.prices={...Object.fromEntries(Object.entries(p.prices||{}).filter(([,price])=>price.source==='manual')),...prices};save();return json(res,200,{state:safe(),count:Object.keys(prices).length});
+     const b=await body(req),p=state.providers.find(p=>p.id===b.providerId);if(!p)throw fail('服务商不存在');
+     if(b.modelId!==undefined&&(!p.models.includes(b.modelId)||typeof b.openRouterModelId!=='string'||!b.openRouterModelId.trim()||b.openRouterModelId.length>200))throw fail('请为已配置模型填写有效的 OpenRouter 模型 ID');
+     if(b.openRouterModelId!==undefined&&b.modelId===undefined)throw fail('请先选择本地模型');
+     const sourceProvider=state.providers.find(item=>item.baseUrl==='https://openrouter.ai/api/v1'&&item.secret);
+     const headers=sourceProvider?{authorization:'Bearer '+unseal(sourceProvider.secret)}:{};
+     const response=await fetcher('https://openrouter.ai/api/v1/models',{headers,redirect:'error',signal:AbortSignal.timeout(15000)});
+     if(!response.ok)throw fail(response.status===401||response.status===403?'OpenRouter 价格接口需要有效的 OpenRouter 密钥，请先配置 OpenRouter 服务商':'价格同步失败（OpenRouter HTTP '+response.status+'）',502);
+     const catalog=await response.json();if(!Array.isArray(catalog.data))throw fail('价格接口格式无效',502);
+     const rows=catalog.data.filter(row=>typeof row?.id==='string');
+     const explicitRow=b.modelId?rows.find(row=>row.id.toLowerCase()===b.openRouterModelId.trim().toLowerCase()):null;
+     if(b.modelId&&!explicitRow)throw fail('OpenRouter 目录中找不到指定模型 ID；请填写准确的模型 ID');
+     const prices={...(p.prices||{})};let count=0,skippedManual=0,unmatched=0;
+     for(const model of p.models){
+      if(!canImportOpenRouterPrice(prices[model])){skippedManual++;continue;}
+      const chosen=model===b.modelId?explicitRow:matchOpenRouterModel(model,rows);
+      if(!chosen){unmatched++;continue;}
+      let price;try{price=openRouterPrice(chosen);}catch{price=null;}if(!price){unmatched++;continue;}
+      prices[model]={...price,source:p.baseUrl==='https://openrouter.ai/api/v1'?'openrouter':'openrouter-reference',referenceModel:chosen.id};count++;
+     }
+     p.prices=prices;save();return json(res,200,{state:safe(),count,skippedManual,unmatched});
     }
     if(req.method==='POST'&&url.pathname==='/api/provider/models')return json(res,200,await listModels(await body(req)));
     if(req.method==='POST'&&url.pathname==='/api/provider'){
@@ -284,7 +308,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      if(b.meteredApiKey!==undefined&&(typeof b.meteredApiKey!=='string'||b.meteredApiKey.length>4096))throw fail('计量密钥格式无效');
      const weight=b.weight??old?.weight??1;if(!Number.isInteger(weight)||weight<1||weight>100)throw fail('权重需为 1–100 的整数');
      if(b.apiKey||b.clearKey||b.meteredApiKey||b.clearMeteredKey||old?.baseUrl!==baseUrl||old?.protocol!==b.protocol){if(state.catalog)delete state.catalog[b.id];}
-     const p={prices:old?.prices||{},weight,models,modelProtocols,modelChannels,anthropicAuth:b.anthropicAuth??old?.anthropicAuth??'x-api-key',id:b.id,name:b.name,baseUrl,model:b.model.trim(),protocol:b.protocol,priority,enabled:!!b.enabled,secret:b.clearKey?undefined:b.apiKey?seal(b.apiKey):old?.secret,meteredSecret:b.clearMeteredKey?undefined:b.meteredApiKey?seal(b.meteredApiKey):old?.meteredSecret};
+     const p={prices:old?.prices||{},weight,models,modelProtocols,modelChannels,anthropicAuth:b.anthropicAuth??old?.anthropicAuth??'x-api-key',id:b.id,name:b.name,baseUrl,model:b.model.trim(),protocol:b.protocol,priority,enabled:!!b.enabled&&!(b.clearKey&&b.clearMeteredKey),secret:b.clearKey?undefined:b.apiKey?seal(b.apiKey):old?.secret,meteredSecret:b.clearMeteredKey?undefined:b.meteredApiKey?seal(b.meteredApiKey):old?.meteredSecret};
      if(p.enabled&&(!p.model||!hasCredential(p)))throw fail('启用前请填写默认模型所属渠道的 API Key');
      if(state.rules.some(r=>r.providerId===p.id&&!p.models.includes(r.model)))throw fail('模型仍被规则引用，请先修改规则');
      if(old)state.providers[state.providers.indexOf(old)]=p;else state.providers.push(p);if(!state.active&&p.enabled)state.active=p.id;ensureActiveProvider();save();return json(res,200,safe());

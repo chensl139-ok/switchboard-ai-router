@@ -1,6 +1,28 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {openRouterPrice,validatePrice,usageCost} from '../pricing.mjs';
+import {openRouterPrice,validatePrice,usageCost,canImportOpenRouterPrice,matchOpenRouterModel} from '../pricing.mjs';
+test('OpenRouter 参考价优先级低于手动价和服务商原生价格',()=>{
+ assert.equal(canImportOpenRouterPrice(undefined),true);
+ assert.equal(canImportOpenRouterPrice({source:'openrouter-reference'}),true);
+ assert.equal(canImportOpenRouterPrice({source:'openrouter'}),true);
+ for(const source of ['manual','provider-official','aigw-pricing',undefined])assert.equal(canImportOpenRouterPrice({source}),false);
+});
+test('OpenRouter 采集时间与平台七天复核期限分别保存',()=>{
+ const price=openRouterPrice({pricing:{prompt:'0.000001',completion:'0.000002'}});
+ const duration=Date.parse(price.expiresAt)-Date.parse(price.observedAt);
+ assert.ok(duration>=7*86400000-1000&&duration<=7*86400000+1000);
+ assert.equal(validatePrice({currency:'USD',inputPerMillion:1,outputPerMillion:2}).expiresAt,null);
+});
+test('OpenRouter 导入保留精度并通过 Hugging Face ID 匹配硅基流动模型',()=>{
+ const price=openRouterPrice({pricing:{prompt:'0.0000006496',completion:'0.0000020416',input_cache_read:'0.00000012064',input_cache_write:'0.0000006496'}});
+ assert.equal(price.inputPerMillion,0.6496);assert.equal(price.outputPerMillion,2.0416);
+ assert.equal(price.cachedInputPerMillion,0.12064);assert.equal(price.cacheWritePerMillion,0.6496);
+ const rows=[{id:'z-ai/glm-5.3',hugging_face_id:'zai-org/GLM-5.3'},{id:'z-ai/glm-5.3:free',hugging_face_id:'zai-org/GLM-5.3'},{id:'z-ai/glm-5.2',hugging_face_id:'zai-org/GLM-5.2'}];
+ assert.equal(matchOpenRouterModel('zai-org/GLM-5.3',rows)?.id,'z-ai/glm-5.3');
+ assert.equal(matchOpenRouterModel('zai-org/GLM-5.2',rows)?.id,'z-ai/glm-5.2');
+ assert.equal(matchOpenRouterModel('zai-org/GLM-5.4',rows),null);
+ assert.equal(matchOpenRouterModel('z-ai/glm-5.3:free',rows)?.id,'z-ai/glm-5.3:free');
+});
 import {selectRoutes} from '../routing.mjs';
 test('价格来源、币种、过期、未知价格与经济路由',()=>{
  const price=openRouterPrice({pricing:{prompt:'0.000001',completion:'0.000002',request:'0'}});assert.equal(price.inputPerMillion,1);assert.equal(price.outputPerMillion,2);assert.equal(price.currency,'USD');

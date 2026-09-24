@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.1](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.1) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.2](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.2) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -27,7 +27,7 @@
 
 上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。
 
-控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。侧栏主入口标出二级模块，折叠后保留同一图标轴，租户切换列表从头像侧边弹出。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。模型实验室对话页将模型选择、路由状态、对话和输入区放在同一工作区，生成期间仍可编辑下一条草稿。
+控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。侧栏主入口标出二级模块，折叠前后的开关、导航图标和租户头像保持同一轴线，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。模型实验室对话页将模型选择、状态、对话和输入区放在同一工作区，生成期间仍可编辑下一条草稿；媒体页按任务类型展示表单和结果，避免重复摘要。
 
 模型实验室的 Tokens/s 表示“端到端输出吞吐”：以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表模型纯解码速度。上游没有提供逐 Token 时间戳时不展示推测的 TPOT；缺少可信输出 Token 用量时也不显示 Tokens/s。
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.1
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.2
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.1
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.2
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.1-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.1 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.2-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.2 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -94,7 +94,7 @@ SWITCHBOARD_VERSION=2.0.1 docker compose up -d
 ### 首次配置
 
 1. 使用 `.env` 中的 `ADMIN_TOKEN` 创建首个所有者账户，之后通过邮箱和密码登录。
-2. 在「服务商管理」填写上游地址与密钥，获取模型并启用服务商。
+2. 在「服务商与模型」填写上游地址与密钥，获取模型后勾选所需模型；搜索结果支持同一个按钮全选或取消全选，保存后启用服务商。
    直接选择模型即可，系统会自动匹配 OpenAI Chat Completions、Responses 或 Anthropic Messages 协议；无法识别的模型使用服务商默认协议。Anthropic 兼容网关若要求 `Authorization: Bearer`，可选择对应鉴权方式。
 3. 在「模型实验室」验证模型，按需要设置路由策略与价格。
    同一服务商可保存主密钥与备用密钥。模型发现会自动合并两把密钥可见的模型，调用失败时自动尝试可用备用密钥，不需要维护模型计费渠道。价格可分别录入输入、输出、缓存读取和缓存写入费用，未知缓存写入价格时不会伪造该次调用费用。
@@ -227,13 +227,14 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 
 ## 价格与经济优先
 
-- 按调用渠道分别维护价格，支持 CNY / USD。相同模型在不同服务商的价格互不替代。
+- 按服务商与模型分别维护价格，支持 CNY / USD。相同模型在不同服务商的价格互不替代。
 - 录入普通输入、输出、缓存命中输入的每百万 Tokens 价格及每次请求固定费用。缓存价留空表示未知，`0` 表示已确认免费。
 - 支持最多 8 个高峰／空闲时段，设置 IANA 时区及生效星期；可跨午夜，开始时间包含、结束时间不包含。
 - 经济优先只比较同币种、价格有效的已配置模型，按选路时的时段价格及输出上限估算。
-- OpenRouter 可同步价格，默认有效 7 天；手动价格默认有效 30 天。
+- 任意服务商可批量导入 OpenRouter USD 参考价，无需逐个指定模型。导入时记录采集时间，默认设 7 天后的平台复核期限；这不是 OpenRouter 官方报价的有效期承诺。手动价格未填写到期时间时长期有效。自动匹配相同模型 ID、唯一同名模型或唯一的 Hugging Face 原始 ID（例如硅基流动的 `zai-org/GLM-5.3` 对应 OpenRouter 的 `z-ai/glm-5.3`）；不匹配时仍可单独指定映射。手动价格、服务商自身报价及其他非 OpenRouter 价格优先于导入参考价，不会被覆盖。
 
-价格数据属于部署实例。费用为参考估算，不作为供应商账单或计费结算凭据。
+OpenRouter 参考价只是经济路由和用量展示的估算依据，**不代表其他服务商的合同价、优惠价或实际账单**。应优先手动录入实际采购价格；不同币种不混合比较。价格数据属于部署实例，费用不作为计费结算凭据。
+自动导入使用 OpenRouter 模型目录中的基础 Token 报价和已提供的缓存读写价，不涵盖阶梯价、多模态、套餐或供应商折扣；不适合直接用于结算。
 
 ## 思考、图片与工具的边界
 
@@ -294,8 +295,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.1
-SWITCHBOARD_VERSION=2.0.1 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.2
+SWITCHBOARD_VERSION=2.0.2 docker compose up -d
 docker compose ps
 ```
 

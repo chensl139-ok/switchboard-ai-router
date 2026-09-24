@@ -12,6 +12,11 @@ import {installWebSocket} from './realtime.mjs';
 import {FeishuOAuth,feishuConfig} from './feishu-auth.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
+const configAuditActions=new Map([
+ ['/api/keys','签发 API Key'],['/api/keys/update','修改 API Key'],['/api/keys/toggle','切换 API Key 状态'],['/api/keys/delete','删除 API Key'],['/api/keys/legacy','切换旧版调用令牌'],
+ ['/api/models/register','加入模型调用列表'],['/api/prices','修改模型价格'],['/api/prices/sync','导入参考价格'],
+ ['/api/provider','保存服务商配置'],['/api/provider/switch-model','切换服务商模型'],['/api/provider/reorder','调整服务商顺序'],['/api/provider/delete','删除服务商'],['/api/routing','修改路由策略']
+]);
 export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfig()}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
  const accounts=new Accounts(dir,admin),oauth=new FeishuOAuth(oauthConfig,{fetcher:identityFetcher}),engines=new Map(),limits=new Map();
@@ -93,8 +98,8 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     const current=url.pathname.startsWith('/api/')?session(req):caller(req,token);
     if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已切换，请刷新后重试',409);
     req.principal=current;
-    if(req.method!=='GET'&&url.pathname.startsWith('/api/')&&url.pathname!=='/api/chat'){
-     res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,'配置已更新'));}catch{console.error('audit_write_failed');}}});
+    if(req.method==='POST'&&configAuditActions.has(url.pathname)){
+     res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,configAuditActions.get(url.pathname)));}catch{console.error('audit_write_failed');}}});
     }
     if(req.method==='POST'&&(generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
     engine(current.tenantId).emit('request',req,res);return;

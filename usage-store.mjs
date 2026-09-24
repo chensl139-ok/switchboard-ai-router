@@ -24,11 +24,12 @@ export class UsageStore {
   this.routeQueue=this.routeQueue.then(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeCache.clear();}).catch(()=>{});
  }
  migrate(logs){if(this.db.prepare("SELECT value FROM metadata WHERE key='legacy_import'").get())return;for(const log of logs)this.record({...log,usageKnown:false});this.db.prepare("INSERT INTO metadata VALUES('legacy_import','done')").run();}
- logs({page=1,limit=50,provider='',status='',apiKeyId=''}={}){
+ logs({page=1,limit=50,provider='',status='',apiKeyId='',q=''}={}){
   page=Math.max(1,Math.min(10000,Math.trunc(Number(page))||1));limit=Math.max(1,Math.min(100,Math.trunc(Number(limit))||50));
   const clauses=['1=1'],args=[];
   if(provider){clauses.push('provider_id = ?');args.push(provider);}
   if(apiKeyId){clauses.push('api_key_id = ?');args.push(apiKeyId);}
+  if(q){clauses.push('instr(lower(model), lower(?)) > 0');args.push(String(q).trim().slice(0,200));}
   if(status==='success')clauses.push('status = 200');else if(status==='error')clauses.push('status <> 200');
   const where=clauses.join(' AND ');const total=this.db.prepare(`SELECT count(*) AS total FROM calls WHERE ${where}`).get(...args).total;
   const items=this.db.prepare(`SELECT * FROM calls WHERE ${where} ORDER BY time DESC, id DESC LIMIT ? OFFSET ?`).all(...args,limit,(page-1)*limit);

@@ -11,21 +11,21 @@ const headerValue=(response,name)=>{const value=response.headers.get(name);if(!v
 const responseRoute=response=>{const model=headerValue(response,'x-router-model');if(!model)return null;return {providerId:headerValue(response,'x-router-provider'),provider:headerValue(response,'x-router-provider-name'),model,protocol:headerValue(response,'x-router-protocol'),reason:headerValue(response,'x-router-reason'),attempt:Number(headerValue(response,'x-router-attempt'))||1,fallback:headerValue(response,'x-router-fallback')==='true'}};
 export function stopPlayground(){stopModelCompare();if(controller){controller.abort();controller=null;for(const message of history)if(message.status==='生成中')message.status='已停止';}}
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
-export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView}){
+export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView,navigate}){
  const root=document.querySelector('#content');
  stopModelCompare();
  const choices=state.providers.filter(p=>p.enabled&&(p.hasKey||p.hasMeteredKey)).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),providerId:p.id,label:p.name+' / '+model,model}))).filter(item=>modelCapabilities(item.model).chat);
  if(view==='compare'){
-  renderModelCompare({root,choices,token,tenantId,esc,embedded,onSwitch:()=>{view='chat';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh,embedded});}});
+  renderModelCompare({root,choices,token,tenantId,esc,embedded,onSwitch:()=>{view='chat';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh,embedded});},onMedia:()=>{view='chat';navigate?.('media');}});
   return;
  }
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
  if(!embedded)root.insertAdjacentHTML('beforeend',`<div class="heading lab-heading"><div><div class="eyebrow">MODEL LAB</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>选一个模型直接对话；需要横向评估时，再进入多模型对比。</p></div><div class="compare-heading-actions"><button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="primary">多模型对比 →</button></div></div>`);
  if(embedded){
-  const actions=document.createElement('div');actions.className='lab-embedded-toolbar';
+  const actions=root.querySelector('#lab-page-actions')||document.createElement('div');
+  actions.className='lab-embedded-toolbar';
   actions.innerHTML='<button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="primary">多模型对比 →</button>';
-  const tabs=root.querySelector('.page-tabs');
-  if(tabs){const row=document.createElement('div');row.className='lab-nav-row';tabs.before(row);row.append(tabs,actions);}else root.append(actions);
+  if(!actions.isConnected)root.append(actions);
  }
  root.insertAdjacentHTML('beforeend',`<div class="lab-session-summary" aria-label="当前实验状态"><div><small>运行状态</small><strong class="lab-state" id="lab-state">准备就绪</strong></div><div><small>上下文</small><strong id="lab-turn-count">0 轮</strong></div><div><small>响应方式</small><strong id="lab-transport-label">SSE 流式</strong></div><div><small>实际路由</small><strong id="lab-route-label">等待首次调用</strong></div></div>
  <div class="lab-layout"><section class="lab-main"><div class="lab-toolbar"><label class="lab-model-quick"><span>${spark}运行模型</span><select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label><span class="lab-context-note">协议自动适配</span></div>
@@ -39,6 +39,14 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
  <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><label class="lab-switch"><span>详尽统计<small>TTFT / 端到端输出速率（需上游用量）</small></span><input id="lab-verbose" type="checkbox" role="switch"></label></aside></div>`);
  const $=selector=>root.querySelector(selector);
+ $('.lab-toolbar').after($('.lab-session-summary'));
+ const settingsPanel=$('.lab-settings'),settingsHeading=settingsPanel.querySelector('.lab-settings-heading');
+ settingsHeading.insertAdjacentHTML('beforeend','<button type="button" id="lab-settings-toggle" class="subtle" aria-expanded="true" aria-controls="lab-settings-body">收起</button>');
+ const settingsBody=document.createElement('div');settingsBody.id='lab-settings-body';settingsBody.className='lab-settings-body';
+ while(settingsHeading.nextSibling)settingsBody.append(settingsHeading.nextSibling);settingsPanel.append(settingsBody);
+ const setSettingsOpen=open=>{settingsPanel.classList.toggle('is-collapsed',!open);$('#lab-settings-toggle').setAttribute('aria-expanded',String(open));$('#lab-settings-toggle').textContent=open?'收起':'展开设置';settingsBody.hidden=!open;};
+ setSettingsOpen(!matchMedia('(max-width:900px)').matches);
+ $('#lab-settings-toggle').onclick=()=>setSettingsOpen(settingsBody.hidden);
  $('#lab-compare').onclick=()=>{controller?.abort();controller=null;view='compare';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh});};
  $('#lab-prompt').value=draft;
  const resizePrompt=()=>{const el=$('#lab-prompt');el.style.height='auto';el.style.height=Math.min(180,el.scrollHeight)+'px';};
@@ -51,7 +59,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   }
   const [id,model]=JSON.parse(settings.target);return thinkingCapability({...state.providers.find(p=>p.id===id),model});
  }
- function updateSummary(){const turns=history.filter(m=>m.role==='user').length;$('#lab-turn-count').textContent=`${turns} 轮`;const names={sse:'SSE 流式',ws:'WebSocket',http:'HTTP 完整'};$('#lab-transport-label').textContent=names[settings.transport]||settings.transport;const latest=[...history].reverse().find(m=>m.role==='assistant'&&m.route)?.route;$('#lab-route-label').textContent=latest?`${latest.provider||latest.providerId} / ${latest.model}`:controller?'自动路由选择中…':'等待首次调用';}
+ function updateSummary(){const turns=history.filter(m=>m.role==='user').length;$('#lab-turn-count').textContent=`${turns} 轮`;const names={sse:'SSE 流式',ws:'WebSocket',http:'HTTP 完整'};$('#lab-transport-label').textContent=names[settings.transport]||settings.transport;const current=controller&&history.at(-1)?.role==='assistant'?history.at(-1):null;const latest=current||[...history].reverse().find(m=>m.role==='assistant'&&m.route);const route=latest?.route;$('#lab-route-label').textContent=route?`${route.provider||route.providerId} / ${route.model}`:current?'本次路由选择中…':'等待首次调用';}
  function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';const capability=selectedCapability();$('#lab-thinking').querySelector('option[value=disabled]').disabled=capability?.canDisable===false;$('#lab-thinking-help').textContent=capability?.reason||'按实际选中的模型校验关闭能力；不支持的默认目标会拒绝请求。';updateSummary();}
  function statLine(m){
   const parts=[esc(m.label||'自动路由')];
@@ -66,7 +74,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  }
  function draw(){const list=$('#lab-messages');if(!list)return;const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
   list.innerHTML=history.length?history.map((m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&settings.streamingVerbose&&m.status==='生成中'&&m.stats?`<span class="lab-live-stats">${esc(statLine({stats:m.stats}))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${m.route?`<div class="lab-route-result"><span>实际路由</span><strong>${esc(m.route.provider||m.route.providerId)}<i>→</i>${esc(m.route.model)}</strong><div><em>${esc(m.route.protocol||'自动协议')}</em><em>${esc(m.route.reason||'自动策略')}</em>${m.route.fallback?`<em class="warning">故障转移 · 第 ${m.route.attempt} 次命中</em>`:'<em>首选命中</em>'}</div></div>`:''}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer">${esc((typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text').map(p=>p.text).join('\n'):'')|| (m.status==='生成中'?'':m.tool_calls?.length?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':''))}</div>${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'?`<div class="lab-response-meta"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`).join(''):
-  `<div class="lab-empty"><span class="lab-empty-icon">${spark}</span><h2>选一个模型，开始测试</h2><p>协议与服务商连接会自动适配，直接输入你的问题即可。</p><div class="lab-prompts"><button type="button" data-example="用一个生活中的例子解释什么是 API。"><small>解释</small>讲清一个概念</button><button type="button" data-example="用 Python 编写一个带注释的快速排序函数。"><small>代码</small>完成编程任务</button><button type="button" data-example="给一个 AI 模型路由平台写三条简洁的产品介绍。"><small>创意</small>探索产品表达</button></div></div>`;
+  `<div class="lab-empty"><span class="lab-empty-icon">${spark}</span><h2>开始一段模型对话</h2><p>可直接使用自动路由，或在上方指定服务商与模型。</p><div class="lab-prompts"><button type="button" data-example="用一个生活中的例子解释什么是 API。"><small>解释</small>讲清一个概念</button><button type="button" data-example="用 Python 编写一个带注释的快速排序函数。"><small>代码</small>完成编程任务</button><button type="button" data-example="给一个 AI 模型路由平台写三条简洁的产品介绍。"><small>创意</small>探索产品表达</button></div></div>`;
   list.querySelectorAll('[data-thought]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.thought)];if(m)m.thinkingOpen=el.open;}));
   updateSummary();if(nearBottom)list.scrollTop=list.scrollHeight;$('#lab-jump').hidden=list.scrollHeight-list.scrollTop-list.clientHeight<100;
  }

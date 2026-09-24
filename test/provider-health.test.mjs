@@ -16,3 +16,13 @@ test('轮询日志时仅更新卡片健康区域，保留搜索与模型选择�
  assert.match(markup,/健康/);assert.match(markup,/近 1 次成功率 100%/);
  assert.equal(providerHealth(provider,[]).label,'待验证');
 });
+
+test('最近调用 401 明确提示密钥问题，模型选项区分媒体类型',()=>{
+ const provider={id:'siliconflow',name:'硅基流动',model:'zai-org/GLM-5.2',models:['zai-org/GLM-5.2','Wan-AI/Wan2.2-T2V-A14B'],enabled:true,hasKey:true};
+ const logs=[{provider_id:'siliconflow',model:provider.model,status:401,latency:20},{provider_id:'siliconflow',model:provider.model,status:200,latency:100}];
+ assert.equal(providerHealth(provider,logs).label,'鉴权失败');
+ assert.equal(providerHealth(provider,[{provider_id:'siliconflow',status:200,latency:100},...logs]).label,'恢复中');
+ const html=providerCards({state:{providers:[provider],active:'siliconflow',logs},esc:String,isManager:true});
+ assert.match(html,/请更新 API Key/);
+ assert.match(html,/Wan-AI\/Wan2\.2-T2V-A14B · 非对话/);
+});

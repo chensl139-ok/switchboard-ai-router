@@ -7,7 +7,7 @@ export function validatePrice(input,source='manual'){
  if(input.billingUnit!==undefined&&!['tokens','image','video','audio'].includes(input.billingUnit))throw fail('不支持的计价单位');
  for(const field of ['inputPerMillion','outputPerMillion','cachedInputPerMillion','cacheWritePerMillion','perRequest','perImage','perVideo','perThousandChars'])if(input[field]!==undefined&&(!Number.isFinite(input[field])||input[field]<0||input[field]>1000000))throw fail('价格须为非负有限数值');
  if(!['image','video','audio'].includes(input.billingUnit)&&(input.inputPerMillion===undefined||input.outputPerMillion===undefined))throw fail('需同时填写输入与输出价格');
- const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||(source==='openrouter'?new Date(Date.now()+7*86400000).toISOString():null);
+ const observedAt=new Date().toISOString();const expiresAt=input.expiresAt||(['openrouter','openrouter-reference'].includes(source)?new Date(Date.now()+7*86400000).toISOString():null);
  if(expiresAt!==null&&(!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=Date.now()))throw fail('价格有效期需晚于当前时间');
  if(input.billingUnit==='image'){if(input.perImage===undefined)throw fail('需填写每张图片价格');if(input.periods?.length)throw fail('图片计价暂不支持分时价格');return {billingUnit:'image',currency:input.currency,perImage:input.perImage,source,observedAt,expiresAt};}
  if(input.billingUnit==='video'){if(input.perVideo===undefined)throw fail('需填写每个视频价格');if(input.periods?.length)throw fail('视频计价暂不支持分时价格');return {billingUnit:'video',currency:input.currency,perVideo:input.perVideo,source,observedAt,expiresAt};}
@@ -20,9 +20,27 @@ export function openRouterPrice(row){
  const p=row?.pricing;if(!p)return null;
  const values=[p.prompt,p.completion,p.request??'0'];
  if(values.some(v=>typeof v!=='string'||v.trim()===''||!Number.isFinite(Number(v))||Number(v)<0))return null;
- const cache=p.input_cache_read;const cachedInputPerMillion=typeof cache==='string'&&cache.trim()!==''&&Number.isFinite(Number(cache))&&Number(cache)>=0?Number(cache)*1000000:undefined;
- return validatePrice({cachedInputPerMillion,currency:'USD',inputPerMillion:Number(p.prompt)*1000000,outputPerMillion:Number(p.completion)*1000000,perRequest:Number(p.request||0)},'openrouter');
+ const perMillion=value=>Number((Number(value)*1000000).toPrecision(12));
+ const optionalRate=value=>typeof value==='string'&&value.trim()!==''&&Number.isFinite(Number(value))&&Number(value)>=0?perMillion(value):undefined;
+ return validatePrice({cachedInputPerMillion:optionalRate(p.input_cache_read),cacheWritePerMillion:optionalRate(p.input_cache_write),currency:'USD',inputPerMillion:perMillion(p.prompt),outputPerMillion:perMillion(p.completion),perRequest:Number(Number(p.request||0).toPrecision(12))},'openrouter');
 }
+export function matchOpenRouterModel(model,rows){
+ const normalized=String(model||'').trim().toLowerCase();
+ if(!normalized)return null;
+ const exact=rows.filter(row=>typeof row?.id==='string'&&row.id.toLowerCase()===normalized);
+ if(exact.length===1)return exact[0];
+ if(exact.length>1)return null;
+ // 硅基流动等平台常使用 Hugging Face 原始 ID，如 zai-org/GLM-5.3；
+ // OpenRouter 则使用 z-ai/glm-5.3。只接受非 free/batch 变体的唯一精确别名。
+ const standard=rows.filter(row=>typeof row?.id==='string'&&!row.id.includes(':'));
+ const huggingFace=standard.filter(row=>typeof row.hugging_face_id==='string'&&row.hugging_face_id.toLowerCase()===normalized);
+ if(huggingFace.length===1)return huggingFace[0];
+ if(huggingFace.length>1||normalized.includes('/'))return null;
+ const suffix=standard.filter(row=>row.id.toLowerCase().endsWith('/'+normalized));
+ return suffix.length===1?suffix[0]:null;
+}
+// 合同/官方/手动价格都属于该服务商自身的数据，参考价只能填补空缺或刷新旧参考价。
+export function canImportOpenRouterPrice(current){return !current||['openrouter','openrouter-reference'].includes(current.source);}
 export function usablePrice(price,currency,now=Date.now()){return !!price&&price.billingUnit!=='image'&&price.currency===currency&&Number.isFinite(price.inputPerMillion)&&Number.isFinite(price.outputPerMillion)&&price.inputPerMillion>=0&&price.outputPerMillion>=0&&(price.expiresAt==null||Date.parse(price.expiresAt)>now);}
 export function priceAt(price,now=Date.now()){
  if(!price?.periods?.length)return price;

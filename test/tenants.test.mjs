@@ -9,7 +9,7 @@ import {createPlatform} from '../platform.mjs';
 const admin='a'.repeat(32),gateway='g'.repeat(32),password='correct-password-12345';
 test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'tenant-platform-'));let calls=0;
- const app=createPlatform({dir,admin,gateway,fetcher:async()=>{calls++;return Response.json({choices:[{message:{role:'assistant',content:'ok'}}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}});}});
+ const app=createPlatform({dir,admin,gateway,fetcher:async(url)=>{if(url.endsWith('/models'))return Response.json({data:[{id:'model'}]});calls++;return Response.json({choices:[{message:{role:'assistant',content:'ok'}}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}});}});
  await new Promise(r=>app.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.address().port}`;
  const request=async(url,data,{cookie='',token='',headers={}}={})=>{const res=await fetch(base+url,{method:data?'POST':'GET',headers:{'content-type':'application/json',...(cookie?{cookie}:{}),...(token?{authorization:'Bearer '+token}:{}),...headers},...(data?{body:JSON.stringify(data)}:{})});return {status:res.status,body:await res.json(),cookie:res.headers.get('set-cookie')?.split(';')[0]};};
  try{
@@ -20,6 +20,12 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   assert.equal((await request('/api/state',null,{token:admin})).status,401);
   const provider={id:'alpha',name:'Tenant A',baseUrl:'https://api.deepseek.com/v1',protocol:'openai',model:'model',models:['model'],enabled:true,priority:1,apiKey:'tenant-a-secret'};
   assert.equal((await request('/api/provider',provider,{cookie:owner})).status,200);
+  const beforePreview=(await request('/api/account/audit',null,{cookie:owner})).body.items;
+  assert.equal(beforePreview[0].action,'/api/provider');
+  assert.equal(beforePreview[0].target,'保存服务商配置');
+  assert.equal((await request('/api/routing/preview',{model:'auto'},{cookie:owner})).status,200);
+  assert.equal((await request('/api/provider/models',{id:'alpha',baseUrl:provider.baseUrl,protocol:'openai'},{cookie:owner})).status,200);
+  assert.equal((await request('/api/account/audit',null,{cookie:owner})).body.items.length,beforePreview.length,'只读路由预览与模型获取不得被记为配置变更');
   const keyA=(await request('/api/keys',{name:'a',totalLimit:5},{cookie:owner})).body;
   const tenantB=(await request('/api/account/tenants',{name:'Tenant B'},{cookie:owner})).body;
   await request('/api/account/switch',{tenantId:tenantB.id},{cookie:owner});
