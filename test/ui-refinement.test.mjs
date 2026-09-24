@@ -41,6 +41,6 @@ test('服务商卡片使用紧凑密度且侧栏收起前后保持同一行',()=
  const css=read('public/style.css');
  assert.match(css,/Compact provider cards and stable collapse row/);
  assert.match(css,/\.provider-card\{min-height:242px;padding:15px;gap:9px\}/);
- assert.match(css,/\.sidebar-compact \.sidebar \.nav-item\{min-height:40px;padding-top:8px;padding-bottom:8px\}/);
+ assert.match(css,/\.sidebar-compact \.sidebar \.nav-item\{min-height:40px;justify-content:flex-start;padding:8px 12px 8px 19px\}/);
  assert.match(css,/\.sidebar-toggle\{top:50%;transform:translateY\(-50%\)\}/);
 });
