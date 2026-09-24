@@ -172,3 +172,22 @@ test('模型实验室显示自动路由实际命中的服务商、模型与故�
  assert.match(source,/x-router-model/);assert.match(stream,/x-router-provider-name/);assert.match(stream,/m\.route\|\|route/);
  assert.match(css,/Model lab route visibility/);assert.match(css,/\.lab-session-summary\{grid-template-columns:repeat\(4/);
 });
+
+test('全站页边距和标题统一，二级标签置于标题后，输入框聚焦不出现双层描边',()=>{
+ const css=read('public/workspaces.css'),app=read('public/app.js'),accounts=read('public/accounts.js');
+ assert.match(css,/#content \{ max-width: 1800px; padding: 18px var\(--page-gutter\) 24px; \}/);
+ assert.match(css,/#content\.chat-workspace \.lab-composer textarea:focus-visible \{ outline: none; box-shadow: none;/);
+ assert.match(css,/:root \{ --page-gutter: 12px; \}/);
+ assert.match(app,/root\.querySelector\('\.heading'\)\?\.insertAdjacentHTML\('afterend',analyticsTabs\)/);
+ assert.match(app,/root\.querySelector\('\.heading'\)\?\.insertAdjacentHTML\('afterend',membersTabs\)/);
+ assert.match(accounts,/<\/div>\$\{prefix\}/);
+});
+
+test('API Key 编辑弹窗固定标题和操作栏，仅表单正文滚动',()=>{
+ const source=read('public/api-keys.js'),css=read('public/interface.css');
+ assert.match(source,/class="key-editor-body"/);
+ assert.match(source,/class="key-editor-actions"/);
+ assert.match(css,/#key-editor \.modal-title \{ flex: none;/);
+ assert.match(css,/#key-editor \.key-editor-body \{ flex: 1 1 auto; min-height: 0; overflow-y: auto;/);
+ assert.match(css,/#key-editor \.key-editor-actions \{ display: flex; flex: none;/);
+});

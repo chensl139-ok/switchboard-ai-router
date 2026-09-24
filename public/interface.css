@@ -457,10 +457,22 @@ dialog, body.theme-dark dialog { background: var(--ui-surface); border-color: va
 #edit .modal-title { flex: none; margin: 0; padding: 24px 28px 14px; background: var(--ui-surface); border-bottom: 1px solid var(--ui-border); }
 #edit .provider-form-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 28px 20px; }
 #edit .dialog-actions { position: static; flex: none; margin: 0; padding: 16px 28px; background: var(--ui-surface); border-top: 1px solid var(--ui-border); }
+#key-editor { width: min(600px,calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; background: var(--ui-surface); }
+#key-form { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 32px); }
+#key-editor .modal-title { flex: none; margin: 0; padding: 20px 24px 14px; border-bottom: 1px solid var(--ui-border); background: var(--ui-surface); }
+#key-editor .modal-title h2 { margin: 0; }
+#key-editor #close-key { width: 32px; min-height: 32px; padding: 0; font-size: 20px; }
+#key-editor .key-editor-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 24px 18px; }
+#key-editor .key-editor-actions { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 24px 16px; border-top: 1px solid var(--ui-border); background: var(--ui-surface); }
+#key-editor #key-error { flex: 1; margin: 0; color: var(--ui-danger); }
+#key-editor #key-error:empty { display: none; }
 @media (max-width: 720px) {
-  #edit .modal-title { padding: 20px 22px 14px; }
-  #edit .provider-form-body { padding: 0 22px 18px; }
-  #edit .dialog-actions { padding: 14px 22px; }
+ #edit .modal-title { padding: 20px 22px 14px; }
+ #edit .provider-form-body { padding: 0 22px 18px; }
+ #edit .dialog-actions { padding: 14px 22px; }
+ #key-editor .modal-title { padding: 16px 18px 12px; }
+ #key-editor .key-editor-body { padding: 4px 18px 14px; }
+ #key-editor .key-editor-actions { padding: 12px 18px; }
 }
 
 /* API Key 页：搜索与创建是同一操作组。 */

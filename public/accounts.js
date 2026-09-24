@@ -1,3 +1,4 @@
+import {renderAuditEvents} from './audit-events.js';
 let tenantHint='';
 let accountStatus={sso:{feishu:{enabled:false}}};
 export async function accountRequest(path,data){
@@ -23,7 +24,7 @@ export function showLogin(mode='login'){
 }
 export async function renderMembers({profile,esc,toast,prefix=''}){
  const root=document.querySelector('#content');let data;try{data=await accountRequest('members');}catch(e){root.textContent=e.message;return;}
- root.innerHTML=`${prefix}<div class="heading"><div><div class="eyebrow">MEMBERS & ROLES</div><h1>成员与角色</h1><p>当前租户的角色独立生效，移除成员后下一次请求即失效。</p></div></div>
+ root.innerHTML=`<div class="heading"><div><div class="eyebrow">MEMBERS & ROLES</div><h1>成员与角色</h1><p>当前租户的角色独立生效，移除成员后下一次请求即失效。</p></div></div>${prefix}
  <div class="panel"><h2>租户成员</h2><div class="table-wrap"><table><thead><tr><th>姓名</th><th>邮箱</th><th>角色</th><th>操作</th></tr></thead><tbody>${data.members.map(m=>`<tr><td>${esc(m.name)}${m.userId===profile.user.id?'（你）':''}</td><td>${esc(m.email)}</td><td><select data-role-user="${m.userId}" ${m.role==='owner'&&profile.role!=='owner'?'disabled':''}>${['owner','admin','member','viewer'].map(role=>`<option value="${role}" ${role===m.role?'selected':''} ${role==='owner'&&profile.role!=='owner'?'disabled':''}>${{owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[role]}</option>`).join('')}</select></td><td><button data-remove-member="${m.userId}" ${m.userId===profile.user.id||m.role==='owner'&&profile.role!=='owner'?'disabled':''}>移除</button></td></tr>`).join('')}</tbody></table></div></div>
  <div class="panel section-space"><h2>邀请成员</h2><form id="invite-form"><div class="form-grid"><label>邮箱<input name="email" type="email" required></label><label>角色<select name="role">${['member','viewer','admin',...(profile.role==='owner'?['owner']:[])].map(role=>`<option value="${role}">${{owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[role]}</option>`).join('')}</select></label></div><button class="primary">生成邀请</button></form><div id="invite-result"></div><p class="muted">邀请有效 72 小时，仅绑定邮箱可使用。通过你选择的安全渠道发送邀请码；系统不自动发送邮件。</p></div>
  <div class="panel section-space"><h2>待处理邀请</h2>${data.invites.filter(i=>i.expiresAt>Date.now()).map(i=>`<p>${esc(i.email)} · ${esc(i.role)} <button data-revoke="${i.id}" ${i.role==='owner'&&profile.role!=='owner'?'disabled':''}>撤销邀请</button></p>`).join('')||'<p class="muted">暂无有效邀请</p>'}</div><div class="info">所有者：全部权限与所有者管理。管理员：服务商、路由、Key、价格和普通成员管理。成员：查看配置和用量、调用模型。只读：查看配置、用量和日志，不可调用或修改。</div>`;
@@ -55,5 +56,5 @@ export async function renderAccount({profile,esc,toast,onReady}){
   root.append(box);
  }
  for(const [id,route] of [['new-tenant','tenants'],['accept-invite','accept-invite'],['change-password','password']])root.querySelector('#'+id).onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await accountRequest(route,Object.fromEntries(new FormData(e.target)));e.target.reset();toast('操作成功');await onReady(await accountRequest('me'));}catch(error){toast(error.message);}finally{button.disabled=false;}};
- if(['owner','admin'].includes(profile.role)){try{const audit=await accountRequest('audit');const section=document.createElement('section');section.className='panel section-space';section.innerHTML='<h2>租户操作审计</h2>'+audit.items.slice(0,50).map(a=>`<p class="muted">${esc(new Date(a.time).toLocaleString())} · ${esc(a.action)} · ${esc(a.target)}</p>`).join('');root.append(section);}catch(error){toast(error.message);}}
+ if(['owner','admin'].includes(profile.role)){const section=document.createElement('section');section.className='panel section-space audit-events-panel';root.append(section);await renderAuditEvents({root:section,request:accountRequest,esc});}
 }

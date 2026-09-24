@@ -2,6 +2,7 @@ import {existsSync,readFileSync,writeFileSync,renameSync,mkdirSync} from 'node:f
 import {randomBytes,randomUUID,createHash,scrypt,timingSafeEqual} from 'node:crypto';
 import {promisify} from 'node:util';
 import path from 'node:path';
+import {auditAction} from './public/audit-format.js';
 const derive=promisify(scrypt);
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&timingSafeEqual(Buffer.from(hash(a)),Buffer.from(hash(b)));
@@ -139,5 +140,15 @@ export class Accounts {
   this.validateUser({name:user.name,email:user.email,password:input.newPassword});const password=await this.passwordHash(input.newPassword);
   return this.mutate(()=>{const current=this.state.users.find(u=>u.id===caller.userId);if(current.password!==previous)throw fail('密码已发生变化，请重新登录',409);current.password=password;this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);this.event(caller.tenantId,user.id,'account.password','密码已更改');return this.session(user.id,caller.tenantId);});
  }
- audit(caller){this.requireAdmin(caller);return this.state.audit.filter(a=>a.tenantId===caller.tenantId).slice(0,200).map(item=>{const actor=this.state.users.find(user=>user.id===item.actorId);return {...item,actorName:actor?.name||'未知成员',actorEmail:actor?.email||''};});}
+ audit(caller){this.requireAdmin(caller);return this.state.audit.filter(a=>a.tenantId===caller.tenantId).map(item=>{const actor=this.state.users.find(user=>user.id===item.actorId),targetUser=this.state.users.find(user=>user.id===item.target);return {...item,actorName:actor?.name||'未知成员',actorEmail:actor?.email||'',targetName:item.target==='配置已更新'?'旧版记录 · 未记录具体对象':targetUser?.name||item.target,...auditAction(item.action)};});}
+ auditPage(caller,{page=1,limit=25,days='',actor='',category='',q=''}={}){
+  const all=this.audit(caller);
+  const actors=[...new Map(all.map(item=>[item.actorId,{id:item.actorId,name:item.actorName}])).values()];
+  const period=Math.max(0,Math.min(365,Math.trunc(Number(days))||0)),since=period?this.now()-period*86400000:0;
+  const query=String(q).trim().toLowerCase().slice(0,200);
+  const rows=all.filter(item=>(!since||Date.parse(item.time)>=since)&&(!actor||item.actorId===actor)&&(!category||item.category===category)&&(!query||[item.actorName,item.actorEmail,item.action,item.label,item.target,item.targetName,item.id].some(value=>String(value||'').toLowerCase().includes(query))));
+  limit=Math.max(1,Math.min(100,Math.trunc(Number(limit))||25));
+  page=Math.min(Math.max(1,Math.trunc(Number(page))||1),Math.max(1,Math.ceil(rows.length/limit)));
+  return {items:rows.slice((page-1)*limit,page*limit),total:rows.length,page,limit,actors};
+ }
 }

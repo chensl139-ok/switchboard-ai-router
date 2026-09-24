@@ -131,10 +131,10 @@ function renderPage(root){
   case 'media':renderMediaLab({state,tenantId:profile?.tenantId,esc,embedded:true});break;
   case 'api':renderApiGuide({esc,toast});break;
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;
-  case 'audit':void renderAudit({esc});root.insertAdjacentHTML('afterbegin',membersTabs);break;
+  case 'audit':void renderAudit({esc});root.querySelector('.heading')?.insertAdjacentHTML('afterend',membersTabs);break;
   case 'account':void renderAccount({profile,esc,toast,onReady:accountReady});break;
-  case 'analytics':void renderAnalytics({api,esc});root.insertAdjacentHTML('afterbegin',analyticsTabs);break;
-  case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.insertAdjacentHTML('afterbegin',analyticsTabs);break;
+  case 'analytics':void renderAnalytics({api,esc});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
+  case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'logs':void renderLogs({api,esc,state});break;
   case 'routing':renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});break;
   case 'keys':void renderApiKeys({api,esc,toast});break;
@@ -147,6 +147,7 @@ function render(){
  if(!canOpen(tab))tab='overview';
  history.replaceState(null,'','#'+tab);document.title=names[tab]+' · Switchboard';
  const root=document.createElement('section');root.id='content';root.tabIndex=-1;
+ if(groups.playground.includes(tab))root.classList.add('lab-page');
  $('#content').replaceWith(root);
  syncNavigation();
  root.innerHTML=initialPageHtml();

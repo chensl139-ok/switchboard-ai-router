@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.2](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.2) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.3](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.3) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -17,17 +17,17 @@
 | 模型目录 | 一键合并主/备用密钥的模型目录、搜索并加入调用列表；通过 `provider::model` 精确指定服务商与模型 |
 | 兼容 API | Chat Completions、Responses、Legacy Completions、Anthropic Messages；JSON、SSE、自建 WebSocket |
 | 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
-| 模型实验室 | 单模型对话与 2–4 个模型同题对比；显示自动路由实际命中的服务商、模型、协议、策略和故障转移次数；支持耗时、Token、失败原因、JSON 导出、图片、工具和生成中草稿 |
+| 模型实验室 | 自适应对话工作区与按需展开的生成设置、2–4 个模型同题对比；显示实际路由、故障转移、耗时、Token、失败原因，并支持图片、工具和生成中草稿 |
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
 | 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频生成与自动进度刷新，内置限额与任务归属追踪 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
 | 多租户 | 邮箱密码与飞书 OAuth 登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
 | 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张价格 |
-| 观测与文档 | 调用日志、连续日期趋势、上游成功率、服务商与模型明细、费用估算、操作审计、产品内 API 文档和 OpenAPI JSON 下载 |
+| 观测与文档 | 请求日志组合筛选、故障转移请求追踪；租户审计按成员、类型、时间和关键字检索；用量趋势、费用估算、产品内 API 文档与 OpenAPI JSON 下载 |
 
 上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。
 
-控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。侧栏主入口标出二级模块，折叠前后的开关、导航图标和租户头像保持同一轴线，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。模型实验室对话页将模型选择、状态、对话和输入区放在同一工作区，生成期间仍可编辑下一条草稿；媒体页按任务类型展示表单和结果，避免重复摘要。
+控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。全站标题层级、外层边距与二级标签栏位置统一，模型实验室的对话与媒体页共用标题和边界。侧栏主入口标出二级模块，折叠前后的开关、导航图标和租户头像保持同一轴线，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。对话页让消息区随窗口伸缩，输入区贴底并可继续编辑下一条草稿；输入框聚焦保持单层反馈，生成设置按需展开，在窄屏以侧边浮层呈现。
 
 模型实验室的 Tokens/s 表示“端到端输出吞吐”：以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表模型纯解码速度。上游没有提供逐 Token 时间戳时不展示推测的 TPOT；缺少可信输出 Token 用量时也不显示 Tokens/s。
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.2
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.3
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.2
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.3
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.2-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.2 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.3-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.3 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -131,7 +131,7 @@ SWITCHBOARD_VERSION=2.0.2 docker compose up -d
 
 ### 组织用量审计
 
-所有者和管理员可在「组织审计」按 7／30／90 天查看每位成员的请求数、上游尝试、成功率、输入／输出 Token、费用估算和最近使用时间。控制台调用直接归属登录成员；新建 API Key 自动归属创建人。升级前创建的 Key 和旧版环境令牌无法可靠推断个人身份，因此保留为“未归属”，不会伪造审计关系。管理配置变更和飞书登录事件也会记录操作者。
+所有者和管理员可在「组织审计」按 7／30／90 天查看每位成员的请求数、上游尝试、成功率、输入／输出 Token、费用估算和最近使用时间。租户操作记录支持按操作人、类型、时间范围和关键字组合筛选，服务端分页覆盖所有保留事件，并展示原始事件标识。控制台调用直接归属登录成员；新建 API Key 自动归属创建人。升级前创建的 Key 和旧版环境令牌无法可靠推断个人身份，因此保留为“未归属”，不会伪造审计关系。管理配置变更和飞书登录事件也会记录操作者。
 
 ### 忘记密码（owner 账号）
 
@@ -295,8 +295,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.2
-SWITCHBOARD_VERSION=2.0.2 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.3
+SWITCHBOARD_VERSION=2.0.3 docker compose up -d
 docker compose ps
 ```
 

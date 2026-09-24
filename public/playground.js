@@ -4,7 +4,7 @@ import {modelCapabilities} from './model-capability.js';
 import {renderModelCompare,stopModelCompare} from './model-compare.js';
 import {setLabBusy} from './lab-composer.js';
 import {createLabTiming} from './lab-performance.js';
-let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,streamingVerbose:false,maxTokens:2048,tools:'[]'};
+let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,streamingVerbose:false,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
 const headerValue=(response,name)=>{const value=response.headers.get(name);if(!value)return '';try{return decodeURIComponent(value)}catch{return value}};
@@ -20,6 +20,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   return;
  }
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
+ root.classList.add('chat-workspace');
  if(!embedded)root.insertAdjacentHTML('beforeend',`<div class="heading lab-heading"><div><div class="eyebrow">MODEL LAB</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>选一个模型直接对话；需要横向评估时，再进入多模型对比。</p></div><div class="compare-heading-actions"><button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="primary">多模型对比 →</button></div></div>`);
  if(embedded){
   const actions=root.querySelector('#lab-page-actions')||document.createElement('div');
@@ -28,11 +29,11 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   if(!actions.isConnected)root.append(actions);
  }
  root.insertAdjacentHTML('beforeend',`<div class="lab-session-summary" aria-label="当前实验状态"><div><small>运行状态</small><strong class="lab-state" id="lab-state">准备就绪</strong></div><div><small>上下文</small><strong id="lab-turn-count">0 轮</strong></div><div><small>响应方式</small><strong id="lab-transport-label">SSE 流式</strong></div><div><small>实际路由</small><strong id="lab-route-label">等待首次调用</strong></div></div>
- <div class="lab-layout"><section class="lab-main"><div class="lab-toolbar"><label class="lab-model-quick"><span>${spark}运行模型</span><select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label><span class="lab-context-note">协议自动适配</span></div>
+ <div class="lab-layout chat-canvas"><section class="lab-main"><div class="lab-toolbar"><label class="lab-model-quick"><span>${spark}运行模型</span><select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label><button type="button" id="lab-settings-toggle" aria-expanded="false" aria-controls="lab-settings-panel">${icon('<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>')}<span>生成设置</span></button></div>
  <div class="lab-messages" id="lab-messages" aria-live="polite"></div><div id="lab-error" class="lab-error" role="alert"></div>
- <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><div id="lab-images" class="lab-images"></div><form id="lab-form" class="lab-composer"><div id="lab-draft-state" class="lab-draft-state" hidden><span></span>模型正在回复，你可以继续写下一条</div><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="3" aria-describedby="lab-compose-hint" placeholder="给模型发消息，或直接粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 添加图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span id="lab-compose-hint" aria-live="polite">Enter 发送 · Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
+ <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><div id="lab-images" class="lab-images"></div><form id="lab-form" class="lab-composer"><div id="lab-draft-state" class="lab-draft-state" hidden><span></span>模型正在回复，你可以继续写下一条</div><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="2" aria-describedby="lab-compose-hint" placeholder="发送消息，或粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 添加图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span id="lab-compose-hint" aria-live="polite">Enter 发送 · Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
  <div class="lab-privacy">页面刷新后自动清除 · 请求内容不写入平台日志</div></section>
- <aside class="lab-settings"><div class="lab-settings-heading">生成设置<span>ADVANCED</span></div><div class="lab-settings-note">模型协议由平台自动匹配，无需手动选择。</div>
+ <aside class="lab-settings" id="lab-settings-panel" aria-label="生成设置" hidden><div class="lab-settings-heading">生成设置<button type="button" id="lab-settings-close" aria-label="关闭生成设置">×</button></div><div class="lab-settings-note">仅影响本次对话 · 协议自动适配</div>
  <label>响应方式<select id="lab-transport"><option value="sse">SSE · 流式输出</option><option value="ws">WebSocket · 实时连接</option><option value="http">HTTP · 完整响应</option></select></label>
  <div class="lab-settings-divider"></div><label>模型思考<select id="lab-thinking"><option value="auto">模型默认</option><option value="enabled">开启思考</option><option value="disabled">关闭思考</option></select></label><p class="lab-help" id="lab-thinking-help">思考开关控制模型推理，不只是隐藏显示。</p>
  <label class="lab-switch"><span>思考区可见性<small>仅调整界面，独立于模型思考开关</small></span><input id="lab-show-thinking" type="checkbox" role="switch"></label>
@@ -41,12 +42,13 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  const $=selector=>root.querySelector(selector);
  $('.lab-toolbar').after($('.lab-session-summary'));
  const settingsPanel=$('.lab-settings'),settingsHeading=settingsPanel.querySelector('.lab-settings-heading');
- settingsHeading.insertAdjacentHTML('beforeend','<button type="button" id="lab-settings-toggle" class="subtle" aria-expanded="true" aria-controls="lab-settings-body">收起</button>');
  const settingsBody=document.createElement('div');settingsBody.id='lab-settings-body';settingsBody.className='lab-settings-body';
  while(settingsHeading.nextSibling)settingsBody.append(settingsHeading.nextSibling);settingsPanel.append(settingsBody);
- const setSettingsOpen=open=>{settingsPanel.classList.toggle('is-collapsed',!open);$('#lab-settings-toggle').setAttribute('aria-expanded',String(open));$('#lab-settings-toggle').textContent=open?'收起':'展开设置';settingsBody.hidden=!open;};
- setSettingsOpen(!matchMedia('(max-width:900px)').matches);
- $('#lab-settings-toggle').onclick=()=>setSettingsOpen(settingsBody.hidden);
+ const setSettingsOpen=open=>{settingsOpen=open;settingsPanel.hidden=!open;$('.chat-canvas').classList.toggle('settings-open',open);$('#lab-settings-toggle').setAttribute('aria-expanded',String(open));};
+ setSettingsOpen(settingsOpen);
+ $('#lab-settings-toggle').onclick=()=>setSettingsOpen(!settingsOpen);
+ $('#lab-settings-close').onclick=()=>{setSettingsOpen(false);$('#lab-settings-toggle').focus();};
+ settingsPanel.addEventListener('keydown',event=>{if(event.key==='Escape'){$('#lab-settings-close').click();}});
  $('#lab-compare').onclick=()=>{controller?.abort();controller=null;view='compare';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh});};
  $('#lab-prompt').value=draft;
  const resizePrompt=()=>{const el=$('#lab-prompt');el.style.height='auto';el.style.height=Math.min(180,el.scrollHeight)+'px';};

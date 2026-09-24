@@ -23,6 +23,8 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   const beforePreview=(await request('/api/account/audit',null,{cookie:owner})).body.items;
   assert.equal(beforePreview[0].action,'/api/provider');
   assert.equal(beforePreview[0].target,'保存服务商配置');
+  const filteredAudit=await request('/api/account/audit?category=provider&q=Owner&limit=1',null,{cookie:owner});
+  assert.equal(filteredAudit.status,200);assert.equal(filteredAudit.body.total,1);assert.equal(filteredAudit.body.items[0].label,'保存服务商');
   assert.equal((await request('/api/routing/preview',{model:'auto'},{cookie:owner})).status,200);
   assert.equal((await request('/api/provider/models',{id:'alpha',baseUrl:provider.baseUrl,protocol:'openai'},{cookie:owner})).status,200);
   assert.equal((await request('/api/account/audit',null,{cookie:owner})).body.items.length,beforePreview.length,'只读路由预览与模型获取不得被记为配置变更');
@@ -42,6 +44,7 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   const register=await request('/api/account/register',{name:'Member',email:'member@example.com',password,inviteCode:invite.code});const member=register.cookie;assert.equal(register.status,200);
   assert.equal((await request('/api/account/register',{name:'Again',email:'member@example.com',password,inviteCode:invite.code})).status,400);
   assert.equal((await request('/api/provider',provider,{cookie:member})).status,403);
+  assert.equal((await request('/api/account/audit?category=provider',null,{cookie:member})).status,403);
   assert.equal((await request('/api/keys',null,{cookie:member})).status,403);
   assert.equal((await request('/api/account/switch',{tenantId:tenantB.id},{cookie:member})).status,403);
   assert.equal((await request('/api/account/invite',{email:'evil@example.com',role:'owner'},{cookie:member})).status,403);

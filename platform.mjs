@@ -68,7 +68,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     const current=session(req);if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已在其他页面切换，请刷新后重试',409);
     if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
     if(req.method==='GET'&&route==='members')return json(res,200,accounts.members(current));
-    if(req.method==='GET'&&route==='audit')return json(res,200,{items:accounts.audit(current)});
+    if(req.method==='GET'&&route==='audit')return json(res,200,accounts.auditPage(current,Object.fromEntries(url.searchParams)));
     if(req.method==='GET'&&route==='usage-audit'){
      accounts.requireAdmin(current);const report=engine(current.tenantId).usageAudit(url.searchParams.get('days'));
      const tenantMembers=accounts.state.members.filter(member=>member.tenantId===current.tenantId),users=new Map(accounts.state.users.map(user=>[user.id,user]));
