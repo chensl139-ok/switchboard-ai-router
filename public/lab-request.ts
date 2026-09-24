@@ -25,7 +25,7 @@ export function buildExperimentRequest(choice: Pick<ExperimentChoice, 'providerI
  if (!choice || typeof choice.providerId !== 'string' || typeof choice.model !== 'string') throw Error('请选择有效模型');
  if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 10000) throw Error('问题需为 1–10000 个字符');
  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 131072) throw Error('最大输出 Tokens 需为 1–131072');
- return {model: choice.providerId, upstream_model: choice.model, messages: [{role: 'user', content: prompt.trim()}], max_tokens: maxTokens};
+ return {model: choice.providerId, upstream_model: choice.model, allow_fallback: true, messages: [{role: 'user', content: prompt.trim()}], max_tokens: maxTokens};
 }
 
 export function experimentResult(data: GatewayResponse, elapsedMs: number): ExperimentResult {

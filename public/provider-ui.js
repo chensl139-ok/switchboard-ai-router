@@ -1,7 +1,7 @@
 export const providerReady=provider=>Boolean(provider.enabled&&provider.model&&(provider.hasKey||provider.hasMeteredKey));
 
 function providerHealth(provider,logs){
- const rows=logs.filter(log=>log.providerId===provider.id).slice(0,20);
+ const rows=(logs||[]).filter(log=>(log.providerId??log.provider_id)===provider.id).slice(0,20);
  if(!rows.length)return {label:'待验证',tone:'',detail:'尚无调用样本'};
  const successes=rows.filter(log=>log.status===200),rate=Math.round(successes.length/rows.length*100);
  const latency=successes.length?Math.round(successes.reduce((sum,log)=>sum+log.latency,0)/successes.length):0;

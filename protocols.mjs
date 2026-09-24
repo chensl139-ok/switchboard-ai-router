@@ -111,6 +111,7 @@ export function normalizeRequest(kind,raw){
  input.messages=chatMessages(input.messages);
  if(raw.max_completion_tokens!==undefined)input._maxCompletionTokens=true;
  if(raw.upstream_model!==undefined)input.upstream_model=text(raw.upstream_model);
+ if(raw.allow_fallback!==undefined){if(typeof raw.allow_fallback!=='boolean')throw protocolError('allow_fallback 必须为布尔值');input.allow_fallback=raw.allow_fallback;}
  for(const field of ['temperature','top_p','thinking_mode'])if(raw[field]!==undefined)input[field]=raw[field];
  const stop=raw.stop??raw.stop_sequences;if(stop!==undefined){const values=typeof stop==='string'?[stop]:stop;if(!Array.isArray(values)||values.length>4||values.some(s=>typeof s!=='string'||!s||s.length>1000))throw protocolError('stop 最多四个非空字符串');input.stop=values;}
  if(raw.thinking!==undefined){if(kind!=='messages'||!['enabled','disabled'].includes(raw.thinking?.type))throw protocolError('thinking 格式不支持');input.thinking_mode=raw.thinking.type;input._nativeThinking=raw.thinking;if(raw.thinking.type==='enabled'&&(!Number.isInteger(raw.thinking.budget_tokens)||raw.thinking.budget_tokens<1024||raw.thinking.budget_tokens>=input.max_tokens))throw protocolError('thinking budget_tokens 需至少 1024 且小于 max_tokens');}

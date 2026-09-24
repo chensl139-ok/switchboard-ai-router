@@ -1,11 +1,11 @@
 import {modelOpenAPI} from './model-catalog.mjs';
 const object={type:'object',additionalProperties:true};
 const messages={type:'array',minItems:1,maxItems:100,items:{type:'object',required:['role','content'],properties:{role:{type:'string',enum:['system','developer','user','assistant','tool']},content:{oneOf:[{type:'string'},{type:'array',items:object},{type:'null'}]},tool_calls:{type:'array',items:object},tool_call_id:{type:'string'}}}};
-const common={model:{type:'string',default:'auto',description:'auto、服务商 ID 或 provider::model'},stream:{type:'boolean',default:false},max_tokens:{type:'integer',minimum:1,maximum:131072,default:2048},temperature:{type:'number'},top_p:{type:'number',minimum:0,maximum:1},thinking_mode:{type:'string',enum:['auto','enabled','disabled']},tools:{type:'array',items:object},tool_choice:{oneOf:[{type:'string'},object]}};
+const common={model:{type:'string',default:'auto',description:'auto、服务商 ID 或 provider::model'},upstream_model:{type:'string',description:'与服务商 ID 配合指定起始模型'},allow_fallback:{type:'boolean',default:false,description:'指定起始模型失败时扩展到同服务商其他模型与其他服务商；provider::model 始终固定模型'},stream:{type:'boolean',default:false},max_tokens:{type:'integer',minimum:1,maximum:131072,default:2048},temperature:{type:'number'},top_p:{type:'number',minimum:0,maximum:1},thinking_mode:{type:'string',enum:['auto','enabled','disabled']},tools:{type:'array',items:object},tool_choice:{oneOf:[{type:'string'},object]}};
 const error={description:'失败，检查 error.message；流开始后错误通过 SSE 事件返回',content:{'application/json':{schema:object}}};
 const responses={200:{description:'完整生成结果或 SSE 事件流',headers:{'x-request-id':{description:'关联生成日志的请求 ID',schema:{type:'string'}}},content:{'application/json':{schema:object},'text/event-stream':{schema:{type:'string'}}}},400:error,401:error,403:error,404:error,429:error,500:error,502:error,501:error};
 export const platformOpenAPI=structuredClone(modelOpenAPI);
-platformOpenAPI.info={title:'Switchboard Platform API',version:'3.2.0',description:'租户隔离的统一模型 API。支持 OpenAI / Anthropic、SSE、图片和函数工具。WebSocket 使用自定义协议，请参阅产品 API 文档。'};
+platformOpenAPI.info={title:'Switchboard Platform API',version:'2.0.0',description:'租户隔离的统一模型 API。支持 OpenAI / Anthropic、SSE、图片和函数工具。WebSocket 使用自定义协议，请参阅产品 API 文档。'};
 for(const [path,name,properties,required,example] of [
  ['/v1/chat/completions','createChatCompletion',{...common,messages},['messages'],{model:'auto',messages:[{role:'user',content:'你好'}],stream:false}],
  ['/v1/messages','createMessage',{...common,messages,system:{oneOf:[{type:'string'},{type:'array',items:object}]},thinking:object},['messages','max_tokens'],{model:'auto',max_tokens:512,messages:[{role:'user',content:'你好'}]}],

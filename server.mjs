@@ -11,6 +11,7 @@ import {createUpstreamAdapter} from './upstream-adapter.mjs';
 import {createRouter,validateRouting} from './routing.mjs';
 import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
 import {modelProtocolMap,protocolForModel} from './model-protocol.mjs';
+import {modelCapabilities} from './public/model-capability.js';
 import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
@@ -52,16 +53,18 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  state.providers=state.providers.map((provider,index)=>({provider,index})).sort((a,b)=>Number(b.provider.id===state.active)-Number(a.provider.id===state.active)||(a.provider.priority??50)-(b.provider.priority??50)||a.index-b.index).map(({provider},priority)=>({...provider,priority}));
  usageStore.migrate(legacyLogs);
  // 每次请求都会在路由层查阅（健康/熔断/延迟），预热一次 SWR 缓存；usageStore 仅作为查询通道注入，不参与持久化序列化
- const {selectRoutes}=createRouter(state,usageStore);
+ const {selectRoutes,healthOf}=createRouter(state,usageStore);
  const warmHealth=()=>{try{usageStore.logs({limit:100});for(const p of state.providers)for(const m of [p.model,...(p.models||[])].filter(Boolean))usageStore.routeLogs({id:p.id,name:p.name,model:m});}catch{}};
  warmHealth();const warmTimer=setInterval(()=>{try{warmHealth();}catch{}},30000);warmTimer.unref?.();
  state.rules??=[];state.routing??={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5};
  for(const p of state.providers)p.weight??=1;
+ const ensureActiveProvider=()=>{if(!state.providers.some(p=>p.id===state.active&&p.enabled&&hasCredential(p)))state.active=state.providers.find(p=>p.enabled&&hasCredential(p))?.id||'';if(state.active){state.providers.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active)||a.priority-b.priority);state.providers.forEach((p,index)=>p.priority=index);}};
+ ensureActiveProvider();
  let sequence=0;
  let writeChain=Promise.resolve(),lastSaved='';
  const save=()=>{const payload=JSON.stringify(state);if(payload===lastSaved)return writeChain;writeChain=writeChain.then(()=>new Promise(resolve=>{setImmediate(()=>{try{writeFileSync(file+'.tmp',payload,{mode:0o600});renameSync(file+'.tmp',file);lastSaved=payload;}catch(e){console.error('state_persist_failed',e?.message||e);}resolve();});}));return writeChain;};
  const record=log=>{try{usageStore.record(log);save();}catch{console.error('request_log_persistence_failed');}};
- const safe=()=>({...state,providers:state.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:!!secret,hasMeteredKey:!!meteredSecret})),presets});
+ const safe=()=>({...state,logs:usageStore.logs({limit:50}).items,providers:state.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:!!secret,hasMeteredKey:!!meteredSecret})),presets});
  const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
  const fail=(message,status=400)=>Object.assign(new Error(message),{status});
  const json=(res,status,data)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))};
@@ -122,6 +125,21 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  }
  const discovery=createDiscovery({state,listModels,save});
  const {payloadFor,requestFor}=createUpstreamAdapter({unseal});
+ function planRoutes(input,{sequenceValue=sequence,now=Date.now()}={}){
+  const planned=selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
+  if(input.model&&input.model!=='auto')payloadFor(planned[0],input);
+  const compatible=[],excluded=[];
+  for(const candidate of planned){
+   if((!input.model||input.model==='auto')&&!modelCapabilities(candidate.model).chat){excluded.push({providerId:candidate.id,model:candidate.model,reason:'自动对话路由跳过媒体或非对话模型',status:400});continue;}
+   try{payloadFor(candidate,input);compatible.push(candidate);}catch(error){excluded.push({providerId:candidate.id,model:candidate.model,reason:error.message,status:error.status||400});}
+  }
+  if((!input.model||input.model==='auto')&&['fallback','latency','weighted'].includes(state.strategy)&&compatible.length>1){
+   const primary=compatible[0],alternate=compatible.find(route=>route.id===primary.id&&route.model!==primary.model),other=compatible.find(route=>route.id!==primary.id);
+   const head=[primary,alternate,other].filter(Boolean);
+   compatible.splice(0,compatible.length,...head,...compatible.filter(route=>!head.includes(route)));
+  }
+  return {compatible,excluded};
+ }
  let inFlight=0;let windowStart=Date.now(),windowUsed=0;
  async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http'}={}){
   if(!input||typeof input!=='object'||Array.isArray(input))throw fail('请求格式错误');
@@ -136,9 +154,9 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(input.max_tokens!==undefined&&(!Number.isInteger(input.max_tokens)||input.max_tokens<1||input.max_tokens>131072))throw fail('max_tokens 无效');
   if(input.upstream_model!==undefined&&(typeof input.upstream_model!=='string'||!input.model||input.model==='auto'))throw fail('指定模型需要同时指定服务商路由 ID');
   const explicit=input.model&&input.model!=='auto';
-  let candidates=selectRoutes(input,{sequence:sequence++}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
-  payloadFor(candidates[0],input);
-  candidates=candidates.filter(p=>{try{payloadFor(p,input);return true;}catch{return false;}}).map(p=>({...p,prices:structuredClone(p.prices||{})}));
+  const {compatible,excluded}=planRoutes(input,{sequenceValue:sequence++});
+  if(!compatible.length)throw fail(excluded[0]?.reason||'没有与请求能力匹配的可用模型',excluded[0]?.status||503);
+  const candidates=compatible.slice(0,state.routing.maxAttempts).map(p=>({...p,prices:structuredClone(p.prices||{})}));
   if(input.messages.some(m=>m.reasoning_content!==undefined&&typeof m.reasoning_content!=='string'))throw fail('reasoning_content 必须为文本');
   if(apiKeyId)apiKeys.admit(apiKeyId);
   let succeeded=false,usedTokens=0;const requestId=requestIdentifier||crypto.randomUUID();
@@ -148,7 +166,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   for(let candidateIndex=0;candidateIndex<candidates.length;candidateIndex++){
    const p=candidates[candidateIndex],remaining=Math.max(1,state.routing.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=candidates.length-candidateIndex;
    const attemptTimeout=AbortSignal.timeout(Math.max(1,Math.floor(remaining/attemptsLeft))),signal=AbortSignal.any([requestSignal,attemptTimeout]);
-   const started=Date.now();let status=502;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};
+   const started=Date.now();let status=502,pendingBytes=0;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};const pendingChunks=[];
    try{
     const upstream=requestFor(p,input,signal);
     const resp=await fetcher(upstream.url,upstream.options);
@@ -157,7 +175,14 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     const routeInfo={providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt:candidateIndex+1,fallback:candidateIndex>0};
     if(onRouteSelected)await onRouteSelected(routeInfo);
     if(input.stream){
-     const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{assertThinkingDisabled(input,chunk.choices?.[0]?.delta);committed=true;await onChunk(chunk);},signal,value=>{usage=normalizeUsage({prompt_tokens:value.inputTokens,completion_tokens:value.outputTokens,total_tokens:value.totalTokens,prompt_tokens_details:{cached_tokens:value.cachedInputTokens,cache_creation_tokens:value.cacheCreationTokens}});usage.cacheUsageInvalid=usage.cacheUsageInvalid||value.cacheUsageInvalid;usage.known=usage.known&&value.known;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null);
+     const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{
+      assertThinkingDisabled(input,chunk.choices?.[0]?.delta);
+      const delta=chunk.choices?.[0]?.delta||{},visible=Boolean(delta.content||delta.tool_calls?.length);
+      if(!committed&&!visible){pendingChunks.push(chunk);pendingBytes+=JSON.stringify(chunk).length;if(pendingBytes<1024*1024)return;committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;pendingBytes=0;return;}
+      if(!committed){committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;pendingBytes=0;}
+      await onChunk(chunk);
+     },signal,value=>{usage=normalizeUsage({prompt_tokens:value.inputTokens,completion_tokens:value.outputTokens,total_tokens:value.totalTokens,prompt_tokens_details:{cached_tokens:value.cachedInputTokens,cache_creation_tokens:value.cacheCreationTokens}});usage.cacheUsageInvalid=usage.cacheUsageInvalid||value.cacheUsageInvalid;usage.known=usage.known&&value.known;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null);
+     if(pendingChunks.length){committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;}
      if(onStreamComplete)await onStreamComplete({provider:p.id,model:p.model,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}});
      record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
      succeeded=true;usedTokens=tokens;return {provider:p.id,model:p.model,route:routeInfo,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}};
@@ -173,7 +198,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    }catch(e){
     record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0,usageKnown:false});
     if(e.status===422)throw e;
-    if(committed||requestSignal.aborted||(explicit&&!canFallback)||![401,403,408,429,500,502,503,504,529].includes(e.status||502))throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
+    const retryable=[401,403,408,429,500,502,503,504,529].includes(e.status||502)||(e.status===400&&(!explicit||input.allow_fallback));
+    if(committed||requestSignal.aborted||(explicit&&!canFallback)||!retryable)throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
    }
   }
   throw fail('所有候选服务商均调用失败，请查看请求日志',502);
@@ -205,7 +231,15 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&url.pathname==='/api/keys/update'){const b=await body(req);return json(res,200,apiKeys.update(b.id,b));}
     if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
     if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
-    if(req.method==='GET'&&url.pathname==='/api/state'){const payload=safe();payload.logs=usageStore.logs({limit:50}).items;return json(res,200,payload);}
+    if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,safe());
+    if(req.method==='POST'&&url.pathname==='/api/routing/preview'){
+     const input=await body(req),prompt=input?.prompt??'';
+     if(typeof prompt!=='string'||prompt.length>2000)throw fail('预览提示词最多 2000 字');
+     const normalized=normalizeRequest('chat',{model:input?.model||'auto',messages:[{role:'user',content:prompt||'路由预览'}],thinking_mode:input?.thinking_mode||'auto'});
+     const now=Date.now(),plan=planRoutes(normalized,{sequenceValue:sequence,now});
+     const candidates=plan.compatible.map((route,index)=>({order:index+1,providerId:route.id,provider:route.name,model:route.model,protocol:route.protocol,channel:route.channelOverride||channelFor(route,route.model),reason:route.routeReason,withinAttemptBudget:index<state.routing.maxAttempts,health:healthOf(route,route.model,now)}));
+     return json(res,200,{strategy:state.strategy,maxAttempts:state.routing.maxAttempts,candidates:candidates.slice(0,Math.max(10,state.routing.maxAttempts+2)),total:candidates.length,excluded:plan.excluded.slice(0,20)});
+    }
     if(req.method==='GET'&&url.pathname==='/v1/openapi.json')return json(res,200,platformOpenAPI);
     if(req.method==='GET'&&url.pathname==='/v1/models/all')return json(res,200,flattenDiscovery(await discovery.refresh(false)));
     if(req.method==='GET'&&url.pathname==='/v1/models'){const list=callableModels(state);return json(res,200,req.headers['anthropic-version']?anthropicModels(list):list);}
@@ -253,7 +287,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      const p={prices:old?.prices||{},weight,models,modelProtocols,modelChannels,anthropicAuth:b.anthropicAuth??old?.anthropicAuth??'x-api-key',id:b.id,name:b.name,baseUrl,model:b.model.trim(),protocol:b.protocol,priority,enabled:!!b.enabled,secret:b.clearKey?undefined:b.apiKey?seal(b.apiKey):old?.secret,meteredSecret:b.clearMeteredKey?undefined:b.meteredApiKey?seal(b.meteredApiKey):old?.meteredSecret};
      if(p.enabled&&(!p.model||!hasCredential(p)))throw fail('启用前请填写默认模型所属渠道的 API Key');
      if(state.rules.some(r=>r.providerId===p.id&&!p.models.includes(r.model)))throw fail('模型仍被规则引用，请先修改规则');
-     if(old)state.providers[state.providers.indexOf(old)]=p;else state.providers.push(p);if(!state.active&&p.enabled)state.active=p.id;save();return json(res,200,safe());
+     if(old)state.providers[state.providers.indexOf(old)]=p;else state.providers.push(p);if(!state.active&&p.enabled)state.active=p.id;ensureActiveProvider();save();return json(res,200,safe());
     }
     if(req.method==='POST'&&url.pathname==='/api/provider/switch-model'){
      const b=await body(req),p=state.providers.find(p=>p.id===b.id);
@@ -310,7 +344,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
- server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();};server.on('close',()=>{clearInterval(warmTimer);usageStore.close();});
+ server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();};server.on('close',()=>{clearInterval(warmTimer);usageStore.close();});
  return server;
 }
 // gzip 静态 HTML/JS/CSS；带 ETag + 静态资源 immutable 缓存，命中时 304

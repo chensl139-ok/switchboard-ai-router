@@ -25,6 +25,6 @@ test('HTTP/SSE 发现上游违反禁用思考时失败，强制模型完全不�
   const input={model:'test',thinking_mode:'disabled',messages:[{role:'user',content:'hi'}]};
   const denied=await post('/v1/chat/completions',{...input,upstream_model:'zai-org/GLM-5.3'});assert.equal(denied.status,400);assert.equal(calls,0);
   const http=await post('/v1/chat/completions',input);assert.equal(http.status,422);assert.match((await http.json()).error.message,/未遵守关闭思考/);
-  const sse=await post('/v1/chat/completions',{...input,stream:true});const text=await sse.text();assert.match(text,/event: error/);assert.match(text,/未遵守关闭思考/);assert.ok(!text.includes('unexpected thought'));assert.ok(!text.includes('[DONE]'));
+  const sse=await post('/v1/chat/completions',{...input,stream:true});const text=await sse.text();assert.equal(sse.status,422);assert.match(text,/未遵守关闭思考/);assert.ok(!text.includes('unexpected thought'));assert.ok(!text.includes('[DONE]'));
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}
 });

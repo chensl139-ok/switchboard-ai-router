@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -29,7 +29,7 @@
 
 控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。折叠侧栏保留同一图标轴与文字提示；模型实验室对话页将模型选择、路由状态、对话和输入区放在同一工作区，生成期间仍可编辑下一条草稿。
 
-故障转移以“服务商 + 模型”为候选单位：默认服务商置顶，先尝试各服务商默认模型，再按服务商模型列表顺序尝试其他模型，最后尝试同模型备用密钥，受“最多尝试次数”和总超时限制。实验室选择具体模型时，该模型作为起始模型并允许同服务商内回退；API 使用 `provider::model` 时固定模型，但仍可切换同模型备用密钥。流式响应一旦已经输出首个增量，不会切换候选。
+故障转移以“服务商 + 模型”为候选单位：默认服务商置顶，前三个兼容候选优先安排首选服务商默认模型、该服务商另一个模型、下一服务商模型，再尝试其余模型与备用密钥，受“最多尝试次数”和总超时限制。延迟优先与加权轮询也可在首选失败后回退到同服务商或其他服务商的模型。自动对话会过滤媒体模型与不支持请求能力的模型，过滤项不占尝试次数。路由页面可预览候选顺序、协议、健康状态和过滤原因，预览不调用上游。实验室选择具体模型时，该模型作为起始模型并显式启用同服务商、跨服务商回退；API 使用 `provider::model` 时固定模型，但仍可切换同模型备用密钥。流式响应一旦已经输出首个增量，不会切换候选。
 
 ## 快速开始
 
@@ -70,21 +70,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:1.1.0
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.0
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:1.1.0
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.0
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v1.1.0-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=1.1.0 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.0-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.0 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -292,8 +292,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:1.1.0
-SWITCHBOARD_VERSION=1.1.0 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.0
+SWITCHBOARD_VERSION=2.0.0 docker compose up -d
 docker compose ps
 ```
 
@@ -303,6 +303,9 @@ docker compose ps
 npm ci
 npm run check
 npm test
+SWITCHBOARD_TOKEN=你的产品API密钥 node scripts/smoke.mjs
+# 额外发送一次可能产生费用的真实模型调用
+SWITCHBOARD_TOKEN=你的产品API密钥 node scripts/smoke.mjs --live
 ```
 
 | 文件 / 目录 | 职责 |

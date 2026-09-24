@@ -46,7 +46,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
   try{
    const url=new URL(req.url,'http://localhost');
    if(url.pathname==='/healthz')return json(res,200,{ok:true});
-   if(url.pathname==='/readyz')return json(res,200,{ok:true,activeRequests});
+   if(url.pathname==='/readyz'){engine('default').checkReady();return json(res,200,{ok:true,activeRequests});}
    if(!originAllowed(req.headers.origin,req.headers.host))throw fail('拒绝跨域请求',403);
    if(url.pathname.startsWith('/api/account/')){
     const route=url.pathname.slice('/api/account/'.length);

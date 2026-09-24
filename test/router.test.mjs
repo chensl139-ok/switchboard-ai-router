@@ -37,7 +37,7 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  let multi=(await request('/api/state')).data.providers.find(p=>p.id==='good');assert.deepEqual(multi.models,['test-model','second/model']);
  assert.equal((await request('/api/provider/switch-model',{id:'good',model:'second/model'},gateway)).status,403);
  assert.equal((await request('/api/provider/switch-model',{id:'good',model:'unknown'})).status,400);
- assert.equal((await request('/api/provider/switch-model',{id:'good',model:'second/model'})).status,200);
+ const switched=await request('/api/provider/switch-model',{id:'good',model:'second/model'});assert.equal(switched.status,200);assert.ok(Array.isArray(switched.data.logs));assert.equal(switched.data.providers.find(p=>p.id==='good').model,'second/model');
  calls=[];await request('/v1/chat/completions',{...chat,model:'good'},gateway);assert.equal(calls[0].body.model,'second/model');
  calls=[];await request('/v1/chat/completions',{...chat,model:'good',upstream_model:'test-model'},gateway);assert.equal(calls[0].body.model,'test-model');
  await request('/api/provider',{...provider('good','https://good.example/v1'),model:'second/model',apiKey:'',models:['test-model','second/model'],modelProtocols:{'test-model':'responses'}});

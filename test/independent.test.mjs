@@ -14,7 +14,7 @@ test('独立策略：固定、回退、权重、延迟、规则、熔断',()=>{
  s.strategy='weighted';assert.deepEqual([0,1,2,3].map(sequence=>selectRoutes(s,input,{sequence})[0].id),['a','b','b','b']);
  s.strategy='latency';s.logs=Array.from({length:3},()=>({providerId:'b',model:'main',status:200,latency:10,time:new Date().toISOString()}));assert.equal(selectRoutes(s,input)[0].id,'b');
  s.strategy='rules';s.rules=[{name:'code',keywords:['sql'],providerId:'b',model:'code'}];assert.equal(selectRoutes(s,input)[0].model,'code');
- s.strategy='fallback';s.logs=Array.from({length:3},()=>({providerId:'a',model:'main',status:503,time:new Date().toISOString()}));assert.equal(selectRoutes(s,input)[0].id,'b');
+ s.strategy='fallback';s.logs=Array.from({length:3},()=>({providerId:'a',model:'main',status:503,time:new Date().toISOString()}));const first=selectRoutes(s,input)[0];assert.deepEqual([first.id,first.model],['a','code']);
  assert.throws(()=>validateRouting({strategy:'manual',active:''},s.providers));
 });
 test('合并服务商按模型选择密钥渠道，并兼容旧 Metered 路由 ID',()=>{
@@ -31,6 +31,10 @@ test('故障转移把同一服务商的其他模型加入候选链',()=>{
  const exact=selectRoutes(s,{model:'mosi::backup',messages:[]});assert.deepEqual(exact.map(route=>route.model),['backup','backup']);assert.deepEqual(exact.map(route=>route.channelOverride),['subscription','metered']);
  s.logs=Array.from({length:3},()=>({providerId:'mosi',model:'backup',status:503,time:new Date().toISOString()}));
  assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','metered','primary']);
+});
+test('小尝试预算同时保留服务商内与跨服务商候选',()=>{
+ const state=makeState();state.providers[0].models=['main','backup-1','backup-2','backup-3'];
+ assert.deepEqual(selectRoutes(state,input).map(route=>[route.id,route.model]),[['a','main'],['a','backup-1'],['b','main']]);
 });
 test('路由健康状态只熔断可重试故障，并按时间而非数组顺序计算',()=>{
  const s=makeState(),now=Date.now(),provider=s.providers[0];

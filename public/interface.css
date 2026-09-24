@@ -132,6 +132,10 @@ body.theme-dark::before { background: radial-gradient(circle at 85% -10%, #0d89b
   color: var(--ui-muted);
 }
 .sidebar-toggle:hover, body.theme-dark .sidebar-toggle:hover { background: var(--ui-accent-soft); color: var(--ui-accent-ink); }
+/* The legacy compact nav rule targets every SVG; keep exactly one toggle glyph visible. */
+.sidebar .sidebar-toggle .icon-expand { display: none; }
+body.sidebar-compact .sidebar .sidebar-toggle .icon-collapse { display: none; }
+body.sidebar-compact .sidebar .sidebar-toggle .icon-expand { display: block; }
 .sidebar .privacy-note, body.theme-dark .sidebar .privacy-note { color: var(--ui-muted); border-color: var(--ui-border); }
 .sidebar .privacy-note svg { color: var(--ui-accent); }
 body.sidebar-compact { --sidebar-width: 72px; }
@@ -288,6 +292,40 @@ dialog, body.theme-dark dialog { background: var(--ui-surface); border-color: va
 .usage-disclaimer { color: var(--ui-subtle); font-size: 11px; line-height: 1.6; }
 .usage-error { color: var(--ui-danger); }
 
+/* Developer reference */
+.api-doc-heading { margin-bottom: 14px; }
+.api-quickbar { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 18px; background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: var(--ui-shadow); }
+.api-quickbar>div { display: grid; gap: 3px; min-width: 0; margin-right: auto; }
+.api-quickbar small { color: var(--ui-subtle); font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+.api-quickbar code { overflow: hidden; color: var(--ui-text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.api-quickbar button, .api-quickbar a { flex: none; min-height: 32px; padding: 7px 11px; border: 1px solid var(--ui-border); border-radius: 7px; background: var(--ui-surface-soft); color: var(--ui-accent-ink); font-size: 11px; text-decoration: none; }
+.api-quickbar button:hover, .api-quickbar a:hover { background: var(--ui-accent-soft); }
+.api-doc-nav { position: sticky; top: 66px; z-index: 2; flex-wrap: nowrap; gap: 3px; margin: 10px 0 18px; padding: 7px; overflow-x: auto; background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: 10px; box-shadow: var(--ui-shadow); scrollbar-width: thin; }
+.api-doc-nav button { flex: none; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ui-muted); white-space: nowrap; }
+.api-doc-nav button:hover, .api-doc-nav button[aria-current="true"] { background: var(--ui-accent-soft); color: var(--ui-accent-ink); }
+.api-section { min-width: 0; scroll-margin-top: 132px; }
+.api-section h2 { margin-top: 0; }
+.api-section pre { background: #122439; color: #e7f4ff; border: 1px solid #29425e; border-radius: 8px; }
+.api-section .code-toolbar, body.theme-dark .api-section .code-toolbar { background: var(--ui-surface-soft); border-color: var(--ui-border); color: var(--ui-muted); }
+.api-endpoint-search { display: block; max-width: 420px; color: var(--ui-muted); font-size: 11px; }
+.api-endpoint-search input { margin-top: 6px; }
+.api-endpoint-count { margin: 8px 0; color: var(--ui-subtle); font-size: 11px; }
+.api-section tr[hidden] { display: none; }
+
+/* Routing planner */
+.routing-preview .panel-title { margin-bottom: 14px; }
+.routing-preview .panel-title p { margin: 5px 0 0; color: var(--ui-muted); font-size: 12px; }
+.routing-preview-controls { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(130px, .7fr) minmax(200px, 1.5fr) auto; align-items: end; gap: 10px; }
+.routing-preview-controls label { min-width: 0; font-size: 11px; color: var(--ui-muted); }
+.routing-preview-controls input, .routing-preview-controls select { margin: 6px 0 0; }
+.routing-preview-controls button { min-height: 40px; white-space: nowrap; }
+#route-preview-result { min-width: 0; margin-top: 16px; }
+.routing-preview-summary { margin: 0 0 10px; color: var(--ui-muted); font-size: 11px; }
+.routing-preview-over-budget { opacity: .55; }
+.routing-preview-excluded { margin-top: 12px; color: var(--ui-muted); font-size: 11px; }
+.routing-preview-excluded summary { cursor: pointer; color: var(--ui-accent-ink); }
+.routing-preview-excluded p { margin: 7px 0; overflow-wrap: anywhere; }
+
 /* Model lab conversation */
 .lab-session-summary, body.theme-dark .lab-session-summary {
   max-width: none;
@@ -345,6 +383,7 @@ dialog, body.theme-dark dialog { background: var(--ui-surface); border-color: va
 @media (max-width: 1150px) {
   .usage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lab-layout { grid-template-columns: minmax(0, 1fr) 240px; }
+  .routing-preview-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .usage-overview-grid, .lab-layout { grid-template-columns: 1fr; }
@@ -369,4 +408,9 @@ dialog, body.theme-dark dialog { background: var(--ui-surface); border-color: va
   .lab-composer { margin: 0 10px; }
   .lab-compose-bottom { gap: 7px; }
   .lab-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .api-quickbar { flex-wrap: wrap; padding: 12px; }
+  .api-quickbar>div { flex-basis: 100%; }
+  .api-doc-nav { position: static; margin-bottom: 14px; }
+  .api-section { scroll-margin-top: 160px; }
+  .routing-preview-controls { grid-template-columns: 1fr; }
 }

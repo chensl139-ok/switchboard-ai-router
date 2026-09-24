@@ -6,7 +6,7 @@ const mediaPatterns={
  // 图片生成：仅匹配真正输出图片的模型。`image` 泛化词覆盖 gpt-image/ERNIE-Image/Z-Image/Qwen-Image 等。
  image:/image|dall|dalle|stable[-_ ]?diffusion|sdxl|sd[-_ ]?(1\.5|xl|3|turbo)|flux|imagen|cogview|kandinsky|midjourney|recraft|playground|waifu|controlnet|animagine|dreamshaper|openjourney|pixart|kolors|hunyuan[-_ ]?dit/i,
  // 语音合成（TTS）。
- speech:/tts|text.?to.?speech|cosyvoice|moss.?tts|sovits|gpt.?sovits|azure.?tts|vits|fish[-_ ]?speech|chattts|bark|xtts|elevenlabs/i,
+ speech:/tts|speech|voice.?generator|cosyvoice|sovits|gpt.?sovits|vits|chattts|bark|xtts|elevenlabs/i,
  // 音频转写/识别（ASR/STT/翻译）。
  transcription:/whisper|asr|stt|speech.?to.?text|audio.?transcribe|transcribe|sensevoice|parakeet|translate/i,
  // 视频生成。

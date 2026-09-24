@@ -3,6 +3,7 @@ import {streamChat} from './stream-client.js';
 import {modelCapabilities} from './model-capability.js';
 import {renderModelCompare,stopModelCompare} from './model-compare.js';
 import {setLabBusy} from './lab-composer.js';
+import {createLabTiming} from './lab-performance.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,streamingVerbose:false,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
@@ -119,19 +120,19 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   const [model,upstream_model]=settings.target==='auto'?['auto']:JSON.parse(settings.target);
   let tools;try{tools=JSON.parse(settings.tools||'[]');if(!Array.isArray(tools))throw Error();}catch{$('#lab-error').textContent='tools 必须为有效 JSON 数组';return;}
   const userContent=pendingImages.length?[{type:'text',text:prompt},...pendingImages.map(image=>({type:'image_url',image_url:{url:image.url}}))]:prompt;
-  const input={...(tools.length?{tools}:{}),model,...(upstream_model?{upstream_model}:{}),messages:[...context,{role:'user',content:userContent}],max_tokens:settings.maxTokens,thinking_mode:settings.thinking};
+  const input={...(tools.length?{tools}:{}),model,...(upstream_model?{upstream_model,allow_fallback:true}:{}),messages:[...context,{role:'user',content:userContent}],max_tokens:settings.maxTokens,thinking_mode:settings.thinking};
   const response={role:'assistant',content:'',reasoning_content:'',status:'生成中',label:upstream_model||'自动路由',thinkingOpen:true};
   if(new Blob([JSON.stringify(input)]).size>10*1024*1024){$('#lab-error').textContent='含历史的请求超过 10 MB，请移除图片或清空对话';return;}
   history.push({role:'user',content:userContent},response);pendingImages=[];drawImages();$('#lab-prompt').value='';draft='';resizePrompt();$('#lab-error').textContent='';
-  const request=new AbortController();controller=request;busy(true);draw();const started=Date.now();
-  const perf={first:null,chunks:0,last:null};response.stats={};
+  const request=new AbortController();controller=request;busy(true);draw();const timing=createLabTiming();
+  response.stats={};
   try{
    let result;
    if(settings.transport==='http'){
     const res=await fetch('/api/chat',{method:'POST',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},body:JSON.stringify(input),signal:request.signal});
     const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result={...data.choices[0].message,route:responseRoute(res)};response.label=data.model||response.label;response.totalTokens=data.usage?.total_tokens;
-   }else result=await streamChat(settings.transport,token,input,update=>{perf.chunks++;perf.last=performance.now();if(perf.first===null)perf.first=performance.now();Object.assign(response,update);if(settings.streamingVerbose){const total=(update.totalTokens||perf.chunks);response.stats={chunks:perf.chunks,ttft:Math.round(perf.first-started),tpot:perf.chunks>1?Math.round((perf.last-perf.first)/(perf.chunks-1)):null,tps:perf.chunks>1?perf.chunks/((perf.last-perf.first)/1000):null};}draw();},request.signal,tenantId);
-   Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;response.durationMs=Date.now()-started;if(perf.first!=null){const totalTokens=response.totalTokens||perf.chunks;response.stats={ttft:Math.round(perf.first-started),tpot:perf.chunks>1?Math.round((perf.last-perf.first)/(perf.chunks-1)):null,tps:perf.chunks>1?(perf.chunks/((perf.last-perf.first)/1000)):null,totalMeasured:perf.chunks,totalTokens};}response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
+   }else result=await streamChat(settings.transport,token,input,(update,meta)=>{Object.assign(response,update);const live=timing.observe(meta?.hasOutput);if(settings.streamingVerbose)response.stats={ttft:live.ttft};draw();},request.signal,tenantId);
+   Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const measured=timing.finish(response.outputTokens);response.durationMs=measured.durationMs;response.stats=settings.transport==='http'?{}:{ttft:measured.ttft,tpot:measured.tpot,tps:measured.tps};response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
   finally{if(controller===request)controller=null;if(root.isConnected){busy(false);draw();$('#lab-prompt').focus();}void refresh();}
  };

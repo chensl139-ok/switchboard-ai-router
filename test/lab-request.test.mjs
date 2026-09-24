@@ -5,7 +5,7 @@ import {buildExperimentRequest,experimentResult,runExperiment} from '../public/l
 const choice={providerId:'mosi',model:'claude-haiku-4-5'};
 
 test('模型实验请求固定选择服务商与模型，拒绝无效参数',()=>{
- assert.deepEqual(buildExperimentRequest(choice,' 你好 ',8),{model:'mosi',upstream_model:'claude-haiku-4-5',messages:[{role:'user',content:'你好'}],max_tokens:8});
+ assert.deepEqual(buildExperimentRequest(choice,' 你好 ',8),{model:'mosi',upstream_model:'claude-haiku-4-5',allow_fallback:true,messages:[{role:'user',content:'你好'}],max_tokens:8});
  assert.throws(()=>buildExperimentRequest(choice,' ',8));
  assert.throws(()=>buildExperimentRequest(choice,'x',0));
  assert.throws(()=>buildExperimentRequest(choice,'x',1.5));
