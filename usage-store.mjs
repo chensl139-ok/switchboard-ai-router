@@ -42,5 +42,18 @@ export class UsageStore {
   const keys=this.db.prepare(`SELECT api_key_id AS apiKeyId,count(*) AS attempts,coalesce(sum(tokens),0) AS tokens FROM calls WHERE time>=? GROUP BY api_key_id ORDER BY attempts DESC`).all(since);
   return {days,totals,daily,providers,keys,costs,retentionDays:90,costNotice:'基于当时单价与上游用量的估算，不等同于供应商账单；图片按返回张数估算，其他未知用量或价格不估算费用。'};
  }
+ audit(days=30){
+  days=Math.max(1,Math.min(90,Math.trunc(Number(days))||30));const since=new Date(Date.now()-days*86400000).toISOString();
+  const members=this.db.prepare(`SELECT actor_id AS actorId,count(DISTINCT request_id) AS requests,count(*) AS attempts,
+   sum(CASE WHEN status=200 THEN 1 ELSE 0 END) AS successes,coalesce(sum(tokens),0) AS tokens,
+   coalesce(sum(input_tokens),0) AS inputTokens,coalesce(sum(output_tokens),0) AS outputTokens,
+   coalesce(round(avg(CASE WHEN status=200 THEN latency END)),0) AS averageLatency,max(time) AS lastUsedAt
+   FROM calls WHERE time>=? GROUP BY actor_id ORDER BY requests DESC,lastUsedAt DESC`).all(since);
+  const costs=this.db.prepare(`SELECT actor_id AS actorId,currency,sum(estimated_cost) AS amount
+   FROM calls WHERE time>=? AND estimated_cost IS NOT NULL GROUP BY actor_id,currency ORDER BY actor_id,currency`).all(since);
+  const keys=this.db.prepare(`SELECT api_key_id AS apiKeyId,actor_id AS actorId,count(DISTINCT request_id) AS requests,coalesce(sum(tokens),0) AS tokens,max(time) AS lastUsedAt
+   FROM calls WHERE time>=? AND api_key_id IS NOT NULL GROUP BY api_key_id,actor_id ORDER BY requests DESC`).all(since);
+  return {days,members,costs,keys,retentionDays:90};
+ }
  close(){if(!this.closed){this.db.close();this.closed=true;}}
 }

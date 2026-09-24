@@ -96,3 +96,10 @@ html{scrollbar-color:#c8d6cd transparent;scrollbar-width:thin}body{min-height:10
 @media(min-width:1600px){#content{padding-top:30px}}
 @media(max-width:1050px){#content{padding:24px}.routing-config-grid{grid-template-columns:1fr}.routing-guardrails .form-grid{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:720px){#content{padding:18px 14px 24px}.heading{margin-bottom:16px;padding-bottom:13px}.panel,.card{padding:15px}.routing-flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}.routing-flow>i{display:none}.routing-flow>div{display:grid;gap:5px;padding:9px}.routing-flow small{white-space:normal}.routing-modes{grid-template-columns:1fr 1fr}.routing-primary-fields{grid-template-columns:1fr}.routing-guardrails .form-grid{grid-template-columns:1fr 1fr}.metrics{gap:8px}.workflow-strip>div{padding:11px 13px}.provider-card{min-height:0}.lab-layout{gap:11px}}
+
+/* Stable sidebar icon axis */
+@media(min-width:721px){.sidebar-heading{padding-left:6px}.workspace-chip{padding-left:9px;padding-right:9px}.sidebar .nav-item{padding-left:15px;padding-right:15px}.sidebar-compact .sidebar-heading{padding-left:10px}.sidebar-compact .workspace-chip{padding-left:12px;padding-right:12px}.sidebar-compact .sidebar .nav-item{padding-left:12px;padding-right:12px}}
+
+/* Organization audit */
+.audit-metrics{grid-template-columns:repeat(4,1fr)}.audit-events{display:grid;margin-top:12px}.audit-events>div{display:grid;grid-template-columns:10px 150px minmax(100px,.7fr) minmax(110px,.7fr) minmax(160px,1.4fr);align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid #edf1ee;font-size:11px}.audit-events time,.audit-events small{color:#7f9186}.audit-dot{width:6px;height:6px;border-radius:50%;background:#47906a}.audit-help{font-size:10px;margin:12px 0 0}.panel code{font-size:10px;color:#4d6d5a}
+@media(max-width:800px){.audit-metrics{grid-template-columns:1fr 1fr}.audit-events>div{grid-template-columns:10px 1fr 1fr}.audit-events time{grid-column:2}.audit-events small{grid-column:2/-1}}

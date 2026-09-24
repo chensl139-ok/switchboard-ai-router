@@ -8,13 +8,16 @@ import {renderRouting} from './routing.js';
 import {renderApiKeys} from './api-keys.js';
 import {providerCards,providerReady} from './provider-ui.js';
 import {renderDashboard} from './dashboard.js';
+import {renderAudit} from './audit.js';
 let modelList=[],modelEpoch=0,modelChannelAssignments={},editingProviderId='';
 let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer;
+const analyticsNav=document.querySelector('[data-tab="analytics"]');
+analyticsNav?.insertAdjacentHTML('afterend','<button type="button" class="nav-item" data-tab="audit" title="组织审计" aria-label="组织审计"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7v5c0 5-3.4 8.2-8 9-4.6-.8-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg><span class="nav-name">组织审计</span><span class="nav-indicator" aria-hidden="true"></span></button>');
 document.querySelector('#provider-form [name="protocol"]').closest('label').insertAdjacentHTML('afterend','<label>Anthropic 鉴权方式<select name="anthropicAuth"><option value="x-api-key">x-api-key（官方默认）</option><option value="bearer">Authorization: Bearer（部分网关）</option></select></label>');
 document.querySelector('#provider-form [name="apiKey"]').closest('label').insertAdjacentHTML('afterend','<label>Metered API Key<input name="meteredApiKey" type="password" autocomplete="new-password" placeholder="留空保留已有计量密钥"></label>');
 const isManager=()=>['owner','admin'].includes(profile?.role);
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室'};
+const names={overview:'路由控制台',providers:'服务商管理',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室'};
 async function api(url,data){const tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile?.tenantId!==tenantAtCall)throw Error('租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();const id=r.headers.get('x-request-id');throw Error((b.error?.message||'请求失败')+(id?` · 请求 ID ${id}`:''))}return b}
 function toast(s){clearTimeout(toastTimer);$('#toast').textContent=s;$('#toast').style.display='block';toastTimer=setTimeout(()=>$('#toast').style.display='none',4500)}
 function navigate(next){if(!names[next]||next===tab)return;tab=next;history.pushState(null,'','#'+tab);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
@@ -25,10 +28,10 @@ function cards(manage=false){return providerCards({state,esc,isManager:isManager
 function logs(rows){return rows.length?`<div class="table-wrap"><table><thead><tr><th>请求时间</th><th>服务商 / 模型</th><th>API Key</th><th>状态</th><th>耗时</th><th>Tokens</th></tr></thead><tbody>${rows.map(l=>`<tr><td>${esc(new Date(l.time).toLocaleString())}</td><td>${esc(l.provider)}<br><small class="muted">${esc(l.model)}</small></td><td>${esc(l.apiKeyId?l.apiKeyId.slice(0,10):'管理员 / 旧令牌')}</td><td><span class="tag ${l.status===200?'green':''}">${l.status}</span></td><td>${l.latency} ms</td><td>${l.tokens.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">还没有请求记录。配置服务商后，前往模型实验室发起第一次调用。</div>'}
 function render(){
  stopPlayground();stopMediaLab();
- if(!names[tab]||(!isManager()&&['keys','members','prices','routing'].includes(tab))||(profile?.role==='viewer'&&['playground','media'].includes(tab)))tab='overview';
+ if(!names[tab]||(!isManager()&&['keys','members','prices','routing','audit'].includes(tab))||(profile?.role==='viewer'&&['playground','media'].includes(tab)))tab='overview';
  history.replaceState(null,'','#'+tab);document.title=names[tab]+' · Switchboard';
  const previous=$('#content'),view=document.createElement('section');view.id='content';view.tabIndex=-1;previous.replaceWith(view);
- document.querySelectorAll('nav [data-tab]').forEach(b=>{b.hidden=(['keys','members','prices','routing'].includes(b.dataset.tab)&&!isManager())||(['playground','media'].includes(b.dataset.tab)&&profile?.role==='viewer');});
+ document.querySelectorAll('nav [data-tab]').forEach(b=>{b.hidden=(['keys','members','prices','routing','audit'].includes(b.dataset.tab)&&!isManager())||(['playground','media'].includes(b.dataset.tab)&&profile?.role==='viewer');});
  $('#breadcrumb').textContent=names[tab];document.querySelectorAll('nav button[data-tab]').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('selected',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
  const nav=document.querySelector('.sidebar nav'),selected=nav.querySelector('[aria-current=page]');if(selected&&matchMedia('(max-width:720px)').matches)nav.scrollLeft+=selected.getBoundingClientRect().left-nav.getBoundingClientRect().left-(nav.clientWidth-selected.clientWidth)/2;
  let html='';
@@ -45,6 +48,7 @@ function render(){
  if(tab==='members')void renderMembers({profile,esc,toast});
  if(tab==='account')void renderAccount({profile,esc,toast,onReady:accountReady});
  if(tab==='analytics')void renderAnalytics({api,esc});
+ if(tab==='audit')void renderAudit({esc});
  if(tab==='logs')void renderLogs({api,esc,state});
  if(tab==='prices')renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});if(tab==='routing'&&isManager())renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});if(tab==='keys'&&isManager())void renderApiKeys({api,esc,toast});if(tab==='playground')renderPlayground({state,token,tenantId:profile?.tenantId,esc,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});
 }
@@ -99,7 +103,7 @@ async function accountReady(value){
  const select=document.querySelector('#tenant-select');select.innerHTML=profile.tenants.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');select.value=profile.tenantId;
  select.onchange=async()=>{try{resetPlayground();await accountReady(await accountRequest('switch',{tenantId:select.value}));}catch(e){toast(e.message);select.value=profile.tenantId;}};
  document.querySelector('#current-account').textContent=profile.user.name+' · '+({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]);
- state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing'].includes(tab))tab='overview';render();
+ state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing','audit'].includes(tab))tab='overview';render();
 }
 try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=error.message;}
 

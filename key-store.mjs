@@ -30,9 +30,10 @@ export class ApiKeyStore {
  status(key){if(key.deletedAt)return 'deleted';if(!key.enabled)return 'disabled';const now=this.now();if(key.startsAt&&now<Date.parse(key.startsAt))return 'scheduled';if(key.expiresAt&&now>=Date.parse(key.expiresAt))return 'expired';return 'active';}
  publicKey(key){const {digest,...item}=key;return {...item,status:this.status(key),dailyUsed:key.day===new Date(this.now()).toISOString().slice(0,10)?key.dailyUsed:0};}
  list(){return {legacyAvailable:!this.tenantId||this.tenantId==='default',legacyEnabled:this.state.legacyEnabled,keys:this.state.keys.filter(k=>!k.deletedAt).map(k=>this.publicKey(k))};}
- create(input){const policy=this.validate(input);if(this.state.keys.filter(k=>!k.deletedAt).length>=200)throw error('最多创建 200 个 Key');
+ create(input,createdBy=null){const policy=this.validate(input);if(this.state.keys.filter(k=>!k.deletedAt).length>=200)throw error('最多创建 200 个 Key');
+  if(createdBy!==null&&(typeof createdBy!=='string'||createdBy.length>128))throw error('Key 归属成员无效');
   const id=randomBytes(10).toString('hex'),token=`srk_${this.tenantId?this.tenantId+'_':''}${id}_${randomBytes(32).toString('hex')}`;
-  const key={id,...policy,digest:hash(token),preview:token.slice(0,12)+'…'+token.slice(-4),createdAt:new Date(this.now()).toISOString(),
+  const key={id,...policy,createdBy,digest:hash(token),preview:token.slice(0,12)+'…'+token.slice(-4),createdAt:new Date(this.now()).toISOString(),
    requests:0,successes:0,failures:0,knownTokens:0,day:'',dailyUsed:0,minute:0,minuteUsed:0,lastUsedAt:null};
   this.mutate(()=>this.state.keys.unshift(key));return {key:this.publicKey(key),token};
  }
@@ -49,6 +50,7 @@ export class ApiKeyStore {
   if(status!=='active')throw error({deleted:'API Key 已删除',disabled:'API Key 已停用',scheduled:'API Key 尚未生效',expired:'API Key 已过期'}[status],403);
   return key.id;
  }
+ owner(id){return this.state.keys.find(key=>key.id===id)?.createdBy||null;}
  admit(id){
   return this.mutate(()=>{
    const key=this.state.keys.find(k=>k.id===id);if(!key||this.status(key)!=='active')throw error('API Key 已停用、未生效或过期',403);

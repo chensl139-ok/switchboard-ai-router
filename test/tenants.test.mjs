@@ -39,6 +39,10 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   assert.equal((await request('/api/keys',null,{cookie:member})).status,403);
   assert.equal((await request('/api/account/switch',{tenantId:tenantB.id},{cookie:member})).status,403);
   assert.equal((await request('/api/account/invite',{email:'evil@example.com',role:'owner'},{cookie:member})).status,403);
+  assert.equal((await request('/api/chat',input,{cookie:member})).status,200);
+  const auditUsage=(await request('/api/account/usage-audit?days=30',null,{cookie:owner})).body;
+  assert.equal(auditUsage.members.find(row=>row.name==='Owner').requests,1);assert.equal(auditUsage.members.find(row=>row.name==='Member').tokens,15);
+  assert.equal(auditUsage.keys.find(row=>row.apiKeyId===keyA.key.id).name,'Owner');
   const ws=new WebSocket(base.replace('http:','ws:')+'/v1/realtime',{headers:{cookie:member}});await once(ws,'open');const ready=once(ws,'message');ws.send(JSON.stringify({type:'auth',token:''}));assert.equal(JSON.parse((await ready)[0]).type,'ready');
   await request('/api/account/member-role',{userId:register.body.user.id,role:'viewer'},{cookie:owner});
   const denied=once(ws,'message');ws.send(JSON.stringify({type:'chat',id:'viewer',input}));assert.equal(JSON.parse((await denied)[0]).type,'error');ws.close();await once(ws,'close');
@@ -49,6 +53,6 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   assert.equal((await request('/api/keys/toggle',{id:keyA.key.id,enabled:true},{cookie:owner})).status,404);
   const changed=await request('/api/account/password',{currentPassword:password,newPassword:password+'new'},{cookie:owner});assert.equal(changed.status,200);assert.equal((await request('/api/account/me',null,{cookie:owner})).status,401);owner=changed.cookie;
   assert.equal((await request('/api/account/me',null,{cookie:owner})).status,200);
-  const disk=readFileSync(path.join(dir,'accounts.json'),'utf8');assert.ok(!disk.includes(password));assert.ok(!disk.includes(invite.code));assert.ok(!disk.includes(owner.split('=')[1]));assert.equal(calls,1);
+  const disk=readFileSync(path.join(dir,'accounts.json'),'utf8');assert.ok(!disk.includes(password));assert.ok(!disk.includes(invite.code));assert.ok(!disk.includes(owner.split('=')[1]));assert.equal(calls,2);
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}
 });

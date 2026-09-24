@@ -168,7 +168,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   }finally{inFlight--;if(apiKeyId){try{apiKeys.complete(apiKeyId,succeeded,usedTokens);}catch{console.error('API Key usage persistence failed');}}}
  }
  const handleMedia=createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acquire:()=>{if(Date.now()-windowStart>=60000){windowStart=Date.now();windowUsed=0;}if(++windowUsed>state.routing.requestsPerMinute)throw fail('每分钟请求数已达上限',429);if(inFlight>=state.routing.concurrency)throw fail('并发请求已满',429);inFlight++;return ()=>{inFlight--;};}});
- function identity(token){if(equal(token,admin))return {admin:true};if(apiKeys.state.legacyEnabled&&equal(token,gateway))return {legacy:true};return {apiKeyId:apiKeys.authenticate(token)};}
+ function identity(token){if(equal(token,admin))return {admin:true};if(apiKeys.state.legacyEnabled&&equal(token,gateway))return {legacy:true};const apiKeyId=apiKeys.authenticate(token);return {apiKeyId,userId:apiKeys.owner(apiKeyId)};}
  const server=http.createServer(async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data: https:; media-src 'self' blob: https:; frame-ancestors 'none'");
   try{
@@ -189,7 +189,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='GET'&&url.pathname==='/api/logs')return json(res,200,usageStore.logs(Object.fromEntries(url.searchParams)));
     if(req.method==='POST'&&url.pathname==='/api/keys/delete'){const b=await body(req);return json(res,200,apiKeys.delete(b.id));}
     if(req.method==='GET'&&url.pathname==='/api/keys')return json(res,200,apiKeys.list());
-    if(req.method==='POST'&&url.pathname==='/api/keys')return json(res,201,apiKeys.create(await body(req)));
+    if(req.method==='POST'&&url.pathname==='/api/keys')return json(res,201,apiKeys.create(await body(req),req.principal?.userId||null));
     if(req.method==='POST'&&url.pathname==='/api/keys/update'){const b=await body(req);return json(res,200,apiKeys.update(b.id,b));}
     if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
     if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
@@ -290,14 +290,14 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     res.setHeader('content-type',built.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8');
     res.setHeader('cache-control','public, max-age=31536000, immutable');return res.end(readFileSync(built));
    }
-   const files={'/':'index.html','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
+   const files={'/':'index.html','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/audit.js':'audit.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
  
    if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
- server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.closeStore=()=>usageStore.close();server.on('close',()=>usageStore.close());
+ server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.closeStore=()=>usageStore.close();server.on('close',()=>usageStore.close());
  return server;
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){console.error('请使用 npm start 启动支持账户与租户隔离的平台入口。');process.exit(1);}

@@ -30,3 +30,9 @@ test('模型路由展示执行阶段并使用紧凑工作区密度',()=>{
  assert.match(routing,/routing-flow/);assert.match(routing,/健康过滤/);assert.match(routing,/routing-guardrails/);
  assert.match(css,/Compact workspace density/);assert.match(css,/\.routing-config-grid/);
 });
+
+test('组织审计按成员展示用量且侧栏图标共用中心轴',()=>{
+ const app=read('public/app.js'),audit=read('public/audit.js'),css=read('public/style.css');
+ assert.match(app,/data-tab="audit"/);assert.match(audit,/成员用量/);assert.match(audit,/API Key 归属/);
+ assert.match(css,/Stable sidebar icon axis/);assert.match(css,/\.sidebar \.nav-item\{padding-left:15px/);
+});

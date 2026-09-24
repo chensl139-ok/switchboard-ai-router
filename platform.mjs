@@ -63,6 +63,11 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
     if(req.method==='GET'&&route==='members')return json(res,200,accounts.members(current));
     if(req.method==='GET'&&route==='audit')return json(res,200,{items:accounts.audit(current)});
+    if(req.method==='GET'&&route==='usage-audit'){
+     accounts.requireAdmin(current);const report=engine(current.tenantId).usageAudit(url.searchParams.get('days'));
+     const tenantMembers=accounts.state.members.filter(member=>member.tenantId===current.tenantId),users=new Map(accounts.state.users.map(user=>[user.id,user]));
+     return json(res,200,{...report,members:report.members.map(row=>{const user=users.get(row.actorId),membership=tenantMembers.find(member=>member.userId===row.actorId);return {...row,name:user?.name||'未归属调用',email:user?.email||'',role:membership?.role||'',costs:report.costs.filter(cost=>cost.actorId===row.actorId).map(({currency,amount})=>({currency,amount}))};}),keys:report.keys.map(row=>({...row,name:users.get(row.actorId)?.name||'未归属 API Key'}))});
+    }
     if(req.method!=='POST')throw fail('接口不存在',404);
     const data=await body(req);
     if(route==='tenants'){const tenant=accounts.createTenant(current,data.name);return json(res,201,tenant);}

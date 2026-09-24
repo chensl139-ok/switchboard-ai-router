@@ -116,5 +116,5 @@ export class Accounts {
   this.validateUser({name:user.name,email:user.email,password:input.newPassword});const password=await this.passwordHash(input.newPassword);
   return this.mutate(()=>{const current=this.state.users.find(u=>u.id===caller.userId);if(current.password!==previous)throw fail('密码已发生变化，请重新登录',409);current.password=password;this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);this.event(caller.tenantId,user.id,'account.password','密码已更改');return this.session(user.id,caller.tenantId);});
  }
- audit(caller){this.requireAdmin(caller);return this.state.audit.filter(a=>a.tenantId===caller.tenantId).slice(0,200);}
+ audit(caller){this.requireAdmin(caller);return this.state.audit.filter(a=>a.tenantId===caller.tenantId).slice(0,200).map(item=>{const actor=this.state.users.find(user=>user.id===item.actorId);return {...item,actorName:actor?.name||'未知成员',actorEmail:actor?.email||''};});}
 }

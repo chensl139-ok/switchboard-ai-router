@@ -13,7 +13,7 @@ test('Key 时间边界、每日/RPM 重置、持久化、哈希及修改不重�
  try{
   const store=new ApiKeyStore(dir,{now:()=>now});
   const policy={name:'consumer',startsAt:new Date(now+1000).toISOString(),expiresAt:new Date(now+86400000*3).toISOString(),totalLimit:3,dailyLimit:1,rpmLimit:1};
-  const {key,token}=store.create(policy);assert.throws(()=>store.authenticate(token),/尚未生效/);now+=1000;
+  const {key,token}=store.create(policy,'user-1');assert.equal(store.owner(key.id),'user-1');assert.throws(()=>store.authenticate(token),/尚未生效/);now+=1000;
   assert.equal(store.authenticate(token),key.id);store.admit(key.id);store.complete(key.id,true,12);
   assert.throws(()=>store.admit(key.id),/今日/);now+=86400000;store.admit(key.id);
   store.update(key.id,{...policy,dailyLimit:5});assert.equal(store.list().keys[0].requests,2);
