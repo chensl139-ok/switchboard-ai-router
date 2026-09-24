@@ -1,5 +1,6 @@
 services:
   switchboard:
+    image: switchboard-ai-router:${SWITCHBOARD_VERSION:-1.1.0}
     build: .
     container_name: switchboard-ai-router
     restart: unless-stopped

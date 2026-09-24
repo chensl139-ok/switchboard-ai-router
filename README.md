@@ -3,19 +3,21 @@
 一个入口连接多个模型服务商。支持账户与租户隔离、六种路由策略、OpenAI / Anthropic 兼容 API、SSE / WebSocket，以及模型价格和用量管理。基于 Node.js 独立运行。
 
 [![CI](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml/badge.svg)](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
+[![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
 | 功能 | 支持内容 |
 | --- | --- |
-| 服务商与模型 | 硅基流动、DeepSeek、OpenAI、Anthropic、Gemini、OpenRouter、百炼及自定义兼容服务；自动协议、删除、排序与同服务商多模型切换 |
+| 服务商与模型 | DeepSeek、OpenAI、Anthropic、Gemini、OpenRouter、百炼及自定义兼容服务；自动协议、删除、排序与同服务商多模型切换 |
 | 智能路由 | 固定模型、服务商间及服务商内模型故障转移、加权轮询、延迟优先、关键词规则、经济优先 |
 | 模型目录 | 一键合并主/备用密钥的模型目录、搜索并加入调用列表；通过 `provider::model` 精确指定服务商与模型 |
 | 兼容 API | Chat Completions、Responses、Legacy Completions、Anthropic Messages；JSON、SSE、自建 WebSocket |
 | 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
-| 模型实验室 | 单模型对话；2–4 个模型同题对比、耗时与 Token 用量、失败原因、JSON 导出；Enter 发送、Shift + Enter 换行、图片附件、停止生成、草稿保留、回复复制 |
+| 模型实验室 | 单模型对话与 2–4 个模型同题对比；显示自动路由实际命中的服务商、模型、协议、策略和故障转移次数；支持耗时、Token、失败原因、JSON 导出、图片、工具和生成中草稿 |
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
 | 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频生成与自动进度刷新，内置限额与任务归属追踪 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
@@ -50,6 +52,40 @@ PORT=3100
 ```sh
 npm start
 ```
+
+### Docker 部署
+
+推荐使用 Compose。先生成只保存在本机的令牌与配置，再启动容器：
+
+```sh
+npm run setup
+docker compose up -d --build
+docker compose ps
+```
+
+默认访问 [http://127.0.0.1:3100](http://127.0.0.1:3100)，数据持久化到仓库下的 `data/`。Compose 使用只读根文件系统、`no-new-privileges`、健康检查和 40 秒优雅停机。
+
+正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
+
+```sh
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:1.1.0
+docker run -d --name switchboard-ai-router \
+  --restart unless-stopped \
+  -p 127.0.0.1:3100:3000 \
+  --env-file .env \
+  -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
+  -v "$PWD/data:/app/data" \
+  ghcr.io/chensl139-ok/switchboard-ai-router:1.1.0
+```
+
+若使用 Release 中的离线镜像包：
+
+```sh
+gzip -dc switchboard-ai-router-v1.1.0-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=1.1.0 docker compose up -d
+```
+
+发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
 
 ### 首次配置
 
@@ -130,6 +166,8 @@ curl -N 'http://127.0.0.1:3100/v1/chat/completions' \
 - `model: "siliconflow::zai-org/GLM-5.3"`：固定服务商和已配置模型。
 
 鉴权支持 `Authorization: Bearer KEY` 或 `x-api-key: KEY`；同时提供时必须一致。使用产品签发的 Key，不要填上游服务商密钥。
+
+非流式和 SSE 响应都会返回 `x-router-provider`、`x-router-provider-name`、`x-router-model`、`x-router-protocol`、`x-router-reason`、`x-router-attempt` 和 `x-router-fallback` 响应头，用于观测自动路由实际命中结果；WebSocket 的 `done.route` 返回同样信息。Header 文本使用 URL 编码，读取后用 `decodeURIComponent` 解码。
 
 | 方法 | 接口 | 用途 |
 | --- | --- | --- |
@@ -246,6 +284,15 @@ git pull --ff-only
 # 停止原进程后
 npm ci
 npm start
+```
+
+Docker 升级：
+
+```sh
+cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:1.1.0
+SWITCHBOARD_VERSION=1.1.0 docker compose up -d
+docker compose ps
 ```
 
 ## 验证与项目结构

@@ -8,6 +8,14 @@ RUN npm run build:web
 
 FROM node:24-alpine
 
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="Switchboard AI Router" \
+      org.opencontainers.image.description="Production-ready multi-provider AI routing gateway" \
+      org.opencontainers.image.source="https://github.com/chensl139-ok/switchboard-ai-router" \
+      org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.revision=$REVISION
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
