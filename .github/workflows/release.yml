@@ -72,7 +72,8 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION="$GITHUB_REF_NAME" --build-arg REVISION="$GITHUB_SHA" -t switchboard-ai-router:"$version" --output type=oci,dest=switchboard-ai-router-${GITHUB_REF_NAME}-oci.tar .
           gzip -9 switchboard-ai-router-${GITHUB_REF_NAME}-oci.tar
           sha256sum switchboard-ai-router-${GITHUB_REF_NAME}.zip switchboard-ai-router-${GITHUB_REF_NAME}.tar.gz switchboard-ai-router-${GITHUB_REF_NAME}-oci.tar.gz > SHA256SUMS
-          awk -v heading="## [$version]" '$0 == heading { found=1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > RELEASE_NOTES.md
+          awk -v heading="## [$version]" 'index($0,heading)==1 { found=1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > RELEASE_NOTES.md
+          test -s RELEASE_NOTES.md || { echo "Release notes for $version are missing" >&2; exit 1; }
       - name: Publish GitHub Release
         run: |
           assets=(
