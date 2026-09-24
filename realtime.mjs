@@ -80,7 +80,7 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
       if(message?.type!=='chat'||typeof message.id!=='string'||message.id.length>80||!message.input){send({type:'error',message:'请求格式无效'});return;}
       if(running){send({type:'error',id:message.id,message:'当前连接已有请求生成中'});return;}
       running={id:message.id,abort:new AbortController()};
-      try{await execute({...message.input,stream:true},{token:credential,request,authContext,signal:running.abort.signal,onChunk:async chunk=>send({type:'delta',id:message.id,chunk})});send({type:'done',id:message.id});}
+      try{const result=await execute({...message.input,stream:true},{token:credential,request,authContext,signal:running.abort.signal,onChunk:async chunk=>send({type:'delta',id:message.id,chunk})});send({type:'done',id:message.id,route:result.route,usage:result.usage});}
       catch(error){send({type:'error',id:message.id,message:error.status?error.message:'生成失败或已取消'});}
       finally{running=null;}
     });

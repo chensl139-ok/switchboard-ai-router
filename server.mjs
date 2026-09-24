@@ -113,7 +113,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  const discovery=createDiscovery({state,listModels,save});
  const {payloadFor,requestFor}=createUpstreamAdapter({unseal});
  let inFlight=0;let windowStart=Date.now(),windowUsed=0;
- async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http'}={}){
+ async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http'}={}){
   if(!input||typeof input!=='object'||Array.isArray(input))throw fail('请求格式错误');
   input=normalizeRequest('chat',input);
   input={...input,max_tokens:input.max_tokens===undefined?2048:input.max_tokens};
@@ -144,11 +144,13 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     const resp=await fetcher(upstream.url,upstream.options);
     status=resp.status;
     if(!resp.ok)throw fail(`上游返回 HTTP ${status}`,status);
+    const routeInfo={providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt:candidateIndex+1,fallback:candidateIndex>0};
+    if(onRouteSelected)await onRouteSelected(routeInfo);
     if(input.stream){
      const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{assertThinkingDisabled(input,chunk.choices?.[0]?.delta);committed=true;await onChunk(chunk);},signal,value=>{usage=normalizeUsage({prompt_tokens:value.inputTokens,completion_tokens:value.outputTokens,total_tokens:value.totalTokens,prompt_tokens_details:{cached_tokens:value.cachedInputTokens,cache_creation_tokens:value.cacheCreationTokens}});usage.cacheUsageInvalid=usage.cacheUsageInvalid||value.cacheUsageInvalid;usage.known=usage.known&&value.known;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null);
      if(onStreamComplete)await onStreamComplete({provider:p.id,model:p.model,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}});
      record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
-     succeeded=true;usedTokens=tokens;return {provider:p.id,model:p.model,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}};
+     succeeded=true;usedTokens=tokens;return {provider:p.id,model:p.model,route:routeInfo,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}};
     }
     let data=await resp.json();
     const native=p.protocol==='anthropic'?data:null;data=toChatResponse(data,p.protocol,p.model);
@@ -157,7 +159,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     const converted=clientKind==='messages'&&native?native:clientResponse(clientKind,data);
     usage=normalizeUsage(data.usage);
     record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens:usage.totalTokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
-    succeeded=true;usedTokens=usage.totalTokens;return {data,native,converted,provider:p.id};
+    succeeded=true;usedTokens=usage.totalTokens;return {data,native,converted,provider:p.id,model:p.model,route:routeInfo};
    }catch(e){
     record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0,usageKnown:false});
     if(e.status===422)throw e;
@@ -273,9 +275,10 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
       if(!res.headersSent)res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache, no-transform','x-accel-buffering':'no'});
       await writeSSE(res,chunk,abort.signal,event);
      });
-     const out=await route(input,{clientKind:kind,requestIdentifier,onStreamComplete:result=>encoder.finish(result),apiKeyId:caller.apiKeyId,actorId:caller.userId,transport:input.stream?'sse':'http',signal:abort.signal,onChunk:chunk=>encoder.push(chunk),...(kind==='messages'?{onNativeEvent:event=>encoder.nativeEvent(event)}:{})});
+     const setRouteHeaders=route=>{if(res.headersSent)return;for(const [name,value] of Object.entries({'x-router-provider':route.providerId,'x-router-provider-name':route.provider,'x-router-model':route.model,'x-router-protocol':route.protocol,'x-router-reason':route.reason,'x-router-attempt':String(route.attempt),'x-router-fallback':String(route.fallback)}))res.setHeader(name,encodeURIComponent(value||''));};
+     const out=await route(input,{clientKind:kind,requestIdentifier,onRouteSelected:setRouteHeaders,onStreamComplete:result=>encoder.finish(result),apiKeyId:caller.apiKeyId,actorId:caller.userId,transport:input.stream?'sse':'http',signal:abort.signal,onChunk:chunk=>encoder.push(chunk),...(kind==='messages'?{onNativeEvent:event=>encoder.nativeEvent(event)}:{})});
      if(input.stream){res.end();return;}
-     res.setHeader('x-router-provider',out.provider);return json(res,200,out.converted);
+     setRouteHeaders(out.route);return json(res,200,out.converted);
     }
     throw fail('接口不存在',404);
    }

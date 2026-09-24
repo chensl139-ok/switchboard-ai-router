@@ -60,3 +60,10 @@ test('侧栏收起只隐藏文字并保留全部导航图标坐标',()=>{
  assert.match(css,/\.sidebar-compact \.sidebar \.nav-group\+\.nav-group\{border-top:0;padding-top:0\}/);
  assert.match(css,/\.sidebar \.brand,\.sidebar-compact \.brand\{height:43px\}/);
 });
+
+test('模型实验室显示自动路由实际命中的服务商、模型与故障转移',()=>{
+ const source=read('public/playground.js'),stream=read('public/stream-client.js'),css=read('public/style.css');
+ assert.match(source,/实际路由/);assert.match(source,/lab-route-result/);assert.match(source,/故障转移 · 第/);
+ assert.match(source,/x-router-model/);assert.match(stream,/x-router-provider-name/);assert.match(stream,/m\.route\|\|route/);
+ assert.match(css,/Model lab route visibility/);assert.match(css,/\.lab-session-summary\{grid-template-columns:repeat\(4/);
+});

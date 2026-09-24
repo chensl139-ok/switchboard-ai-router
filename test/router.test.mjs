@@ -19,7 +19,7 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  await request('/api/routing',{active:'bad',strategy:'fallback'});
  const chat={model:'auto',messages:[{role:'user',content:'敏感正文'}]};
  let result=await request('/v1/chat/completions',chat,gateway);
- assert.equal(result.status,200);assert.equal(result.headers.get('x-router-provider'),'good');assert.equal(calls.length,2);
+ assert.equal(result.status,200);assert.equal(decodeURIComponent(result.headers.get('x-router-provider')),'good');assert.equal(decodeURIComponent(result.headers.get('x-router-model')),'test-model');assert.equal(decodeURIComponent(result.headers.get('x-router-protocol')),'openai');assert.equal(result.headers.get('x-router-fallback'),'true');assert.equal(result.headers.get('x-router-attempt'),'2');assert.equal(calls.length,2);
  let disk=readFileSync(path.join(dir,'state.json'),'utf8');assert.ok(!disk.includes('secret-upstream-key'));assert.ok(!disk.includes('敏感正文'));
  const state=(await request('/api/state')).data;assert.equal(state.logs.length,2);assert.ok(!JSON.stringify(state).includes('secret-upstream-key'));assert.equal(state.providers.find(p=>p.id==='good').hasKey,true);
  await request('/api/routing',{active:'good',strategy:'manual'});calls=[];assert.equal((await request('/v1/chat/completions',chat,gateway)).status,200);assert.equal(calls.length,1);
