@@ -28,9 +28,9 @@ test('故障转移把同一服务商的其他模型加入候选链',()=>{
  const s=makeState();s.providers=[{id:'mosi',name:'moss',model:'primary',models:['primary','backup','metered'],enabled:true,secret:'subscription',meteredSecret:'metered-key',modelChannels:{metered:'metered'},priority:10}];s.active='mosi';
  assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','backup','metered']);
  assert.deepEqual(selectRoutes(s,{model:'mosi',upstream_model:'backup',messages:[]}).map(route=>route.model),['backup','primary','metered']);
- assert.deepEqual(selectRoutes(s,{model:'mosi::backup',messages:[]}).map(route=>route.model),['backup']);
+ const exact=selectRoutes(s,{model:'mosi::backup',messages:[]});assert.deepEqual(exact.map(route=>route.model),['backup','backup']);assert.deepEqual(exact.map(route=>route.channelOverride),['subscription','metered']);
  s.logs=Array.from({length:3},()=>({providerId:'mosi',model:'backup',status:503,time:new Date().toISOString()}));
- assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','metered']);
+ assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','metered','primary']);
 });
 test('初始化重复执行不改变任何已有令牌',()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'setup-'));

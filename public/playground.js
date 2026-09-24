@@ -11,7 +11,7 @@ export function resetPlayground(){contextVersion++;controller?.abort();history=[
 export function renderPlayground({state,token,tenantId,esc,refresh}){
  const root=document.querySelector('#content');
  stopModelCompare();
- const choices=state.providers.filter(p=>p.enabled&&p.hasKey).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),providerId:p.id,label:p.name+' / '+model,model,protocol:p.modelProtocols?.[model]||p.protocol,channel:p.modelChannels?.[model]||'subscription'}))).filter(item=>modelCapabilities(item.model).chat);
+ const choices=state.providers.filter(p=>p.enabled&&(p.hasKey||p.hasMeteredKey)).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),providerId:p.id,label:p.name+' / '+model,model}))).filter(item=>modelCapabilities(item.model).chat);
  if(view==='compare'){
   renderModelCompare({root,choices,token,tenantId,esc,onSwitch:()=>{view='chat';renderPlayground({state,token,tenantId,esc,refresh});}});
   return;

@@ -6,8 +6,8 @@ import path from 'node:path';
 import {createApp} from '../server.mjs';
 const admin='a'.repeat(32),gateway='g'.repeat(32);
 test('完整网关流程：鉴权、加密、切换、回退、重启与协议适配',async()=>{
- const dir=mkdtempSync(path.join(tmpdir(),'router-test-'));let calls=[];
- const fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body),headers:opts.headers});if(url.includes('bad.example'))return new Response('{}',{status:503});if(url.includes('claude.example')||url.endsWith('/messages'))return Response.json({id:'msg1',model:'claude-test',content:[{type:'text',text:'你好'}],stop_reason:'end_turn',usage:{input_tokens:3,output_tokens:4}});if(url.endsWith('/responses'))return Response.json({id:'resp1',model:'test-model',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'ok'}]}],usage:{input_tokens:3,output_tokens:4}});return Response.json({id:'test',choices:[{message:{role:'assistant',content:'ok'},finish_reason:'stop'}],usage:{total_tokens:7}})};
+ const dir=mkdtempSync(path.join(tmpdir(),'router-test-'));let calls=[],failMetered=false;
+ const fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body),headers:opts.headers});if(failMetered&&opts.headers.authorization==='Bearer metered-secret-key')return new Response('{}',{status:503});if(url.includes('bad.example'))return new Response('{}',{status:503});if(url.includes('claude.example')||url.endsWith('/messages'))return Response.json({id:'msg1',model:'claude-test',content:[{type:'text',text:'你好'}],stop_reason:'end_turn',usage:{input_tokens:3,output_tokens:4}});if(url.endsWith('/responses'))return Response.json({id:'resp1',model:'test-model',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'ok'}]}],usage:{input_tokens:3,output_tokens:4}});return Response.json({id:'test',choices:[{message:{role:'assistant',content:'ok'},finish_reason:'stop'}],usage:{total_tokens:7}})};
  let app=createApp({dir,admin,gateway,fetcher});await new Promise(r=>app.listen(0,'127.0.0.1',r));let base=`http://127.0.0.1:${app.address().port}`;
  const request=async(url,data,token=admin)=>{const r=await fetch(base+url,{method:data?'POST':'GET',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});return {status:r.status,data:await r.json(),headers:r.headers}};
  const provider=(id,baseUrl,protocol='openai')=>({id,name:id,baseUrl,protocol,model:'test-model',priority:50,enabled:true,apiKey:'secret-upstream-key'});
@@ -48,6 +48,7 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  await request('/api/provider',{...provider('good','https://good.example/v1'),model:'second/model',apiKey:'',meteredApiKey:'metered-secret-key',models:['test-model','second/model'],modelProtocols:{'test-model':'responses'},modelChannels:{'test-model':'metered'}});
  calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::test-model'},gateway)).status,200);
  assert.equal(calls[0].headers.authorization,'Bearer metered-secret-key');
+ failMetered=true;calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::test-model'},gateway)).status,200);assert.deepEqual(calls.map(call=>call.headers.authorization),['Bearer metered-secret-key','Bearer secret-upstream-key']);failMetered=false;
  calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'good::second/model'},gateway)).status,200);
  assert.equal(calls[0].headers.authorization,'Bearer secret-upstream-key');
  assert.equal((await request('/api/state')).data.providers.find(p=>p.id==='good').hasMeteredKey,true);
@@ -56,6 +57,9 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'automatic::gpt-5.4'},gateway)).status,200);assert.equal(calls[0].url,'https://automatic.example/v1/responses');
  calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'automatic::claude-sonnet-4-6'},gateway)).status,200);assert.equal(calls[0].url,'https://automatic.example/v1/messages');
  calls=[];assert.equal((await request('/v1/chat/completions',{...chat,model:'automatic::deepseek-v4.1-flash'},gateway)).status,200);assert.equal(calls[0].url,'https://automatic.example/v1/chat/completions');
+ const beforeOrder=(await request('/api/state')).data.providers.map(p=>p.id),reversed=[...beforeOrder].reverse();
+ assert.equal((await request('/api/provider/reorder',{ids:reversed})).status,200);assert.deepEqual((await request('/api/state')).data.providers.map(p=>p.id),reversed);
+ assert.equal((await request('/api/provider/delete',{id:'automatic'})).status,200);assert.equal((await request('/api/state')).data.providers.some(p=>p.id==='automatic'),false);assert.equal((await request('/api/provider/delete',{id:'automatic'})).status,404);
  assert.equal((await request('/api/provider',{...provider('good','https://good.example/v1'),apiKey:'',models:['test-model'],modelProtocols:{unknown:'anthropic'}})).status,400);
  assert.equal((await request('/api/state')).data.providers.find(p=>p.id==='good').model,'second/model');
  assert.equal((await request('/v1/chat/completions',{...chat,model:'good',upstream_model:'unknown'},gateway)).status,400);

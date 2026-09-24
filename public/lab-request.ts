@@ -3,8 +3,6 @@ export interface ExperimentChoice {
  providerId: string;
  model: string;
  label: string;
- protocol: string;
- channel: string;
 }
 
 export interface ExperimentResult {

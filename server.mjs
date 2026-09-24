@@ -43,8 +43,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  const unseal=s=>{const b=Buffer.from(s,'base64'),c=createDecipheriv('aes-256-gcm',key,b.subarray(0,12));c.setAuthTag(b.subarray(-16));return Buffer.concat([c.update(b.subarray(12,-16)),c.final()]).toString()};
  const file=path.join(dir,'state.json');
  let state=existsSync(file)?JSON.parse(readFileSync(file,'utf8')):{providers:structuredClone(presets),active:'',strategy:'fallback',logs:[]};
- if(!state.providers.some(p=>p.id==='openrouter')&&state.providers.length<30)state.providers.push(structuredClone(presets.find(p=>p.id==='openrouter')));
  for(const p of state.providers){p.models=[...new Set([...(p.models||[]),...(p.model?[p.model]:[])])];p.modelProtocols=modelProtocolMap(p,p.models);}
+ state.providers=state.providers.map((provider,index)=>({provider,index})).sort((a,b)=>Number(b.provider.id===state.active)-Number(a.provider.id===state.active)||(a.provider.priority??50)-(b.provider.priority??50)||a.index-b.index).map(({provider},priority)=>({...provider,priority}));
  usageStore.migrate(state.logs);
  state.rules??=[];state.routing??={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5};
  for(const p of state.providers)p.weight??=1;
@@ -223,7 +223,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&url.pathname==='/api/provider'){
      const b=await body(req);if(!/^[a-z0-9-]{1,40}$/.test(b.id||''))throw fail('ID 仅限小写字母、数字和连字符');
      const baseUrl=upstreamURL(b.baseUrl);
-     if(!['openai','anthropic','responses'].includes(b.protocol)||!['x-api-key','bearer'].includes(b.anthropicAuth??'x-api-key')||typeof b.model!=='string'||b.model.length>200||typeof b.name!=='string'||!b.name.trim()||b.name.length>60||!Number.isFinite(b.priority)||b.priority<0||b.priority>100)throw fail('配置字段无效');
+     const priority=b.priority??state.providers.find(p=>p.id===b.id)?.priority??state.providers.length;
+     if(!['openai','anthropic','responses'].includes(b.protocol)||!['x-api-key','bearer'].includes(b.anthropicAuth??'x-api-key')||typeof b.model!=='string'||b.model.length>200||typeof b.name!=='string'||!b.name.trim()||b.name.length>60||!Number.isFinite(priority)||priority<0||priority>100)throw fail('配置字段无效');
      const old=state.providers.find(p=>p.id===b.id);if(!old&&state.providers.length>=30)throw fail('最多 30 个服务商');
      if(b.apiKey!==undefined&&(typeof b.apiKey!=='string'||b.apiKey.length>4096))throw fail('密钥格式无效');
      const entries=b.models??old?.models??[];
@@ -237,7 +238,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      if(b.meteredApiKey!==undefined&&(typeof b.meteredApiKey!=='string'||b.meteredApiKey.length>4096))throw fail('计量密钥格式无效');
      const weight=b.weight??old?.weight??1;if(!Number.isInteger(weight)||weight<1||weight>100)throw fail('权重需为 1–100 的整数');
      if(b.apiKey||b.clearKey||b.meteredApiKey||b.clearMeteredKey||old?.baseUrl!==baseUrl||old?.protocol!==b.protocol){if(state.catalog)delete state.catalog[b.id];}
-     const p={prices:old?.prices||{},weight,models,modelProtocols,modelChannels,anthropicAuth:b.anthropicAuth??old?.anthropicAuth??'x-api-key',id:b.id,name:b.name,baseUrl,model:b.model.trim(),protocol:b.protocol,priority:b.priority,enabled:!!b.enabled,secret:b.clearKey?undefined:b.apiKey?seal(b.apiKey):old?.secret,meteredSecret:b.clearMeteredKey?undefined:b.meteredApiKey?seal(b.meteredApiKey):old?.meteredSecret};
+     const p={prices:old?.prices||{},weight,models,modelProtocols,modelChannels,anthropicAuth:b.anthropicAuth??old?.anthropicAuth??'x-api-key',id:b.id,name:b.name,baseUrl,model:b.model.trim(),protocol:b.protocol,priority,enabled:!!b.enabled,secret:b.clearKey?undefined:b.apiKey?seal(b.apiKey):old?.secret,meteredSecret:b.clearMeteredKey?undefined:b.meteredApiKey?seal(b.meteredApiKey):old?.meteredSecret};
      if(p.enabled&&(!p.model||!hasCredential(p)))throw fail('启用前请填写默认模型所属渠道的 API Key');
      if(state.rules.some(r=>r.providerId===p.id&&!p.models.includes(r.model)))throw fail('模型仍被规则引用，请先修改规则');
      if(old)state.providers[state.providers.indexOf(old)]=p;else state.providers.push(p);if(!state.active&&p.enabled)state.active=p.id;save();return json(res,200,safe());
@@ -247,8 +248,22 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      if(!p||!p.models.includes(b.model)||!credentialFor(p,b.model))throw fail('请选择该服务商已保存且所属渠道有密钥的模型');
      p.model=b.model;save();return json(res,200,safe());
     }
+    if(req.method==='POST'&&url.pathname==='/api/provider/reorder'){
+     const b=await body(req),ids=b.ids;
+     if(!Array.isArray(ids)||ids.length!==state.providers.length||new Set(ids).size!==ids.length||ids.some(id=>!state.providers.some(p=>p.id===id)))throw fail('服务商排序数据无效');
+     state.providers=ids.map(id=>state.providers.find(p=>p.id===id));state.providers.forEach((p,index)=>p.priority=index);save();return json(res,200,safe());
+    }
+    if(req.method==='POST'&&url.pathname==='/api/provider/delete'){
+     const b=await body(req),index=state.providers.findIndex(p=>p.id===b.id);if(index<0)throw fail('服务商不存在',404);
+     const [removed]=state.providers.splice(index,1);state.rules=state.rules.filter(rule=>rule.providerId!==removed.id);if(state.catalog)delete state.catalog[removed.id];
+     if(state.providerAliases)for(const [alias,target] of Object.entries(state.providerAliases))if(target.id===removed.id)delete state.providerAliases[alias];
+     if(state.active===removed.id)state.active=state.providers.find(p=>p.enabled&&hasCredential(p))?.id||'';
+     state.providers.forEach((p,position)=>p.priority=position);save();return json(res,200,safe());
+    }
     if(req.method==='POST'&&url.pathname==='/api/routing'){
-     const b=await body(req);Object.assign(state,validateRouting({...b,rules:b.rules??state.rules,routing:b.routing??state.routing},state.providers));save();return json(res,200,safe());
+     const b=await body(req),previousActive=state.active;Object.assign(state,validateRouting({...b,rules:b.rules??state.rules,routing:b.routing??state.routing},state.providers));
+     if(state.active&&state.active!==previousActive){const index=state.providers.findIndex(p=>p.id===state.active);state.providers.unshift(...state.providers.splice(index,1));state.providers.forEach((p,position)=>p.priority=position);}
+     save();return json(res,200,safe());
     }
     if(req.method==='POST'&&mediaPaths.has(url.pathname))return await handleMedia(req,res,caller);
     if(req.method==='POST'&&generationPaths[url.pathname]){

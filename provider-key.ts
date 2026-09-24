@@ -16,5 +16,11 @@ export function credentialFor(provider: ProviderCredentialConfig, model: string,
 }
 
 export function hasCredential(provider: ProviderCredentialConfig): boolean {
- return Boolean(credentialFor(provider, provider.model));
+ return Boolean(provider.secret || provider.meteredSecret);
+}
+
+export function credentialChannels(provider: ProviderCredentialConfig, model: string): CredentialChannel[] {
+ const preferred=channelFor(provider,model);
+ const alternate: CredentialChannel=preferred==='metered'?'subscription':'metered';
+ return [preferred,alternate].filter((channel,index,all)=>all.indexOf(channel)===index&&Boolean(credentialFor(provider,model,channel)));
 }
