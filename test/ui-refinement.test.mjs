@@ -49,5 +49,14 @@ test('侧栏开关与导航图标共用固定轴且展开收起不横跳',()=>{
  const css=read('public/style.css');
  assert.match(css,/Collapse control shares the navigation icon axis in both states/);
  assert.match(css,/\.sidebar-toggle\{position:fixed;left:16px;right:auto;top:auto;bottom:16px/);
- assert.match(css,/\.sidebar-compact \.sidebar-toggle\{left:12px;width:55px;padding-left:19px;justify-content:flex-start\}/);
+ assert.match(css,/\.sidebar-compact \.sidebar-toggle\{left:16px;width:47px;padding-left:15px\}/);
+});
+
+test('侧栏收起只隐藏文字并保留全部导航图标坐标',()=>{
+ const css=read('public/style.css');
+ assert.match(css,/Preserve every navigation icon coordinate while collapsing/);
+ assert.match(css,/\.sidebar-compact \.sidebar \.nav-label\{display:block;visibility:hidden;height:14px;line-height:14px;white-space:nowrap;overflow:hidden\}/);
+ assert.match(css,/\.sidebar \.nav-item,\.sidebar-compact \.sidebar \.nav-item\{min-height:40px;justify-content:flex-start;padding:8px 15px\}/);
+ assert.match(css,/\.sidebar-compact \.sidebar \.nav-group\+\.nav-group\{border-top:0;padding-top:0\}/);
+ assert.match(css,/\.sidebar \.brand,\.sidebar-compact \.brand\{height:43px\}/);
 });
