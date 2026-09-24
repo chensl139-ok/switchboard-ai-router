@@ -131,9 +131,12 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(input.messages.some(m=>m.reasoning_content!==undefined&&typeof m.reasoning_content!=='string'))throw fail('reasoning_content 必须为文本');
   if(apiKeyId)apiKeys.admit(apiKeyId);
   let succeeded=false,usedTokens=0;const requestId=requestIdentifier||crypto.randomUUID();
-  inFlight++;const timeout=AbortSignal.timeout(state.routing.timeoutMs);const signal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false;
+  const canFallback=candidates.length>1;
+  inFlight++;const routeStarted=Date.now(),timeout=AbortSignal.timeout(state.routing.timeoutMs),requestSignal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false;
   try{
-  for(const p of candidates){
+  for(let candidateIndex=0;candidateIndex<candidates.length;candidateIndex++){
+   const p=candidates[candidateIndex],remaining=Math.max(1,state.routing.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=candidates.length-candidateIndex;
+   const attemptTimeout=AbortSignal.timeout(Math.max(1,Math.floor(remaining/attemptsLeft))),signal=AbortSignal.any([requestSignal,attemptTimeout]);
    const started=Date.now();let status=502;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};
    try{
     const upstream=requestFor(p,input,signal);
@@ -157,7 +160,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    }catch(e){
     record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0,usageKnown:false});
     if(e.status===422)throw e;
-    if(committed||signal.aborted||explicit||![401,403,408,429,500,502,503,504,529].includes(e.status||502))throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
+    if(committed||requestSignal.aborted||(explicit&&!canFallback)||![401,403,408,429,500,502,503,504,529].includes(e.status||502))throw fail(`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
    }
   }
   throw fail('所有候选服务商均调用失败，请查看请求日志',502);

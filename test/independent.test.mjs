@@ -24,6 +24,14 @@ test('合并服务商按模型选择密钥渠道，并兼容旧 Metered 路由 I
  assert.equal(selectRoutes(s,{model:'mosi-metered::gpt-5.4'})[0].channelOverride,'metered');
  assert.equal(selectRoutes(s,{model:'mosi'})[0].model,'gpt-5.4');
 });
+test('故障转移把同一服务商的其他模型加入候选链',()=>{
+ const s=makeState();s.providers=[{id:'mosi',name:'moss',model:'primary',models:['primary','backup','metered'],enabled:true,secret:'subscription',meteredSecret:'metered-key',modelChannels:{metered:'metered'},priority:10}];s.active='mosi';
+ assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','backup','metered']);
+ assert.deepEqual(selectRoutes(s,{model:'mosi',upstream_model:'backup',messages:[]}).map(route=>route.model),['backup','primary','metered']);
+ assert.deepEqual(selectRoutes(s,{model:'mosi::backup',messages:[]}).map(route=>route.model),['backup']);
+ s.logs=Array.from({length:3},()=>({providerId:'mosi',model:'backup',status:503,time:new Date().toISOString()}));
+ assert.deepEqual(selectRoutes(s,{model:'auto',messages:[]}).map(route=>route.model),['primary','metered']);
+});
 test('初始化重复执行不改变任何已有令牌',()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'setup-'));
  try{copyFileSync(new URL('../.env.example',import.meta.url),path.join(dir,'.env.example'));assert.equal(setup(dir),true);const before=readFileSync(path.join(dir,'.env'),'utf8');assert.match(before,/ADMIN_TOKEN=[a-f0-9]{64}/);assert.equal(setup(dir),false);assert.equal(readFileSync(path.join(dir,'.env'),'utf8'),before);}finally{rmSync(dir,{recursive:true,force:true});}

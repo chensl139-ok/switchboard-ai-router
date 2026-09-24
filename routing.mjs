@@ -3,6 +3,13 @@ import {usablePrice,priceEstimate,priceAt} from './pricing.mjs';
 import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
+const recentlyFailed=(state,provider,model,now)=>{
+ const last=state.logs.filter(log=>(log.providerId===provider.id||(!log.providerId&&log.provider===provider.name))&&log.model===model).slice(0,3);
+ return last.length===3&&last.every(log=>log.status>=400)&&now-Date.parse(last[0].time)<60000;
+};
+const modelRoutes=(state,provider,firstModel,now,channelOverride)=>[firstModel,...provider.models.filter(model=>model!==firstModel)]
+ .filter((model,index)=>credentialFor(provider,model,channelOverride)&&(index===0||!recentlyFailed(state,provider,model,now)))
+ .map((model,index)=>({...provider,model,channelOverride,routeReason:index===0?'显式起始模型':'同服务商模型故障转移'}));
 export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
  const available=state.providers.filter(p=>p.enabled&&p.model&&hasCredential(p));
  if(input.model&&input.model!=='auto'){
@@ -12,18 +19,16 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
   if(!p)throw fail('指定服务商尚未启用或模型未注册',503);
   model=input.upstream_model||model||p.model;
   if(!p.models.includes(model)||!credentialFor(p,model,channelOverride))throw fail('模型未加入服务商可切换列表，或所属渠道尚未配置密钥');
+  if(state.strategy==='fallback'&&input.upstream_model!==undefined&&split<0)return modelRoutes(state,p,model,now,channelOverride).slice(0,state.routing.maxAttempts);
   return [{...p,model,channelOverride,routeReason:'显式指定服务商与模型'}];
  }
  let candidates=[...available].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
  if(state.strategy==='manual')candidates=candidates.filter(p=>p.id===state.active);
- else if(state.strategy!=='economy')candidates=candidates.filter(p=>{
-  const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===p.model).slice(0,3);
-  return !(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);
- });
+ else if(!['economy','fallback'].includes(state.strategy))candidates=candidates.filter(p=>!recentlyFailed(state,p,p.model,now));
  if(state.strategy==='economy'){
   if(input.messages.some(m=>contentParts(m.content).some(p=>p.type==='image_url')))throw fail('经济优先尚不估算图片费用，请显式指定模型或选择其他策略');
   const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||2048;
-  const priced=candidates.flatMap(p=>p.models.filter(model=>{const last=state.logs.filter(l=>(l.providerId===p.id||(!l.providerId&&l.provider===p.name))&&l.model===model).slice(0,3);return credentialFor(p,model)&&(!p.meteredSecret||channelFor(p,model)==='metered')&&usablePrice(p.prices?.[model],currency,now)&&!(last.length===3&&last.every(l=>l.status>=400)&&now-Date.parse(last[0].time)<60000);}).map(model=>({...p,model,routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
+  const priced=candidates.flatMap(p=>p.models.filter(model=>credentialFor(p,model)&&(!p.meteredSecret||channelFor(p,model)==='metered')&&usablePrice(p.prices?.[model],currency,now)&&!recentlyFailed(state,p,model,now)).map(model=>({...p,model,routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
   priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
   if(!priced.length)throw fail('没有同币种且价格有效的候选模型，请同步或录入价格；未知价格不会当作免费',503);
   return priced.slice(0,state.routing.maxAttempts);
@@ -44,6 +49,11 @@ export function selectRoutes(state,input,{sequence=0,now=Date.now()}={}){
   candidates.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active));
  }
  candidates=candidates.map(p=>({...p,routeReason:reason}));
+ if(state.strategy==='fallback'){
+  const defaults=candidates.filter(p=>!recentlyFailed(state,p,p.model,now));
+  const siblingModels=candidates.flatMap(p=>p.models.filter(model=>model!==p.model&&credentialFor(p,model)&&!recentlyFailed(state,p,model,now)).map(model=>({...p,model,routeReason:'同服务商模型故障转移'})));
+  candidates=[...defaults,...siblingModels];
+ }
  if(state.strategy==='rules'){
   const text=[...input.messages].reverse().find(m=>m.role==='user')?.content;
   const query=plainText(text||'').toLowerCase();
