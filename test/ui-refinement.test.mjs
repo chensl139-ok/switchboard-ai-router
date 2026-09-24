@@ -17,3 +17,10 @@ test('侧栏收起按钮可发现、可持久化并适配中等宽度',()=>{
  assert.match(app,/localStorage\.setItem\('sidebar-compact'/);assert.match(app,/max-width:1100px/);
  assert.match(css,/\.sidebar-toggle::after/);assert.match(css,/left:calc\(var\(--sidebar-width\) - 15px\)/);
 });
+
+test('模型实验室突出直接选模型、运行摘要和生成中草稿',()=>{
+ const source=read('public/playground.js'),composer=read('public/lab-composer.js');
+ assert.match(source,/lab-session-summary/);assert.match(source,/lab-model-quick/);
+ assert.match(source,/协议自动适配/);assert.match(source,/lab-response-meta/);
+ assert.match(source,/id="lab-draft-state"/);assert.match(composer,/draftState\.hidden=!value/);
+});
