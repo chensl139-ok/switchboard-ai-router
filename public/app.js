@@ -1,6 +1,6 @@
 import {renderMediaLab,stopMediaLab} from './media-lab.js';
 import {renderModelCatalog,renderApiGuide} from './model-catalog.js';
-import {startAccountUI,showLogin,accountRequest,renderMembers,renderAccount} from './accounts.js';
+import {startAccountUI,showLogin,accountRequest,renderMembers,renderAccount,confirmAction} from './accounts.js';
 import {renderAnalytics,renderLogs} from './analytics.js';
 import {renderPrices} from './prices.js';
 import {renderPlayground,stopPlayground,resetPlayground} from './playground.js';
@@ -82,11 +82,10 @@ $('#provider-form').onsubmit=async e=>{e.preventDefault();const f=e.target,submi
 document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;try{
  if(b.dataset.modelId){const f=$('#provider-form'),items=f.elements.models.value.split('\n').map(m=>m.trim()).filter(Boolean);f.elements.models.value=[...new Set([...items,b.dataset.modelId])].join('\n');modelChannelAssignments[b.dataset.modelId]=b.dataset.modelChannel;if(!f.elements.model.value)f.elements.model.value=b.dataset.modelId;$('#model-status').textContent='已添加 '+b.dataset.modelId+'，协议与密钥将自动匹配。'}
  if(b.dataset.tab){navigate(b.dataset.tab)}
- if(b.id==='go-providers'){navigate('providers')}
  if(b.dataset.edit&&isManager())edit(b.dataset.edit);
  if(b.id==='add-provider'&&isManager())edit();
  if(b.dataset.providerMove&&isManager()){const index=state.providers.findIndex(provider=>provider.id===b.dataset.providerId),next=b.dataset.providerMove==='up'?index-1:index+1,ids=state.providers.map(provider=>provider.id);if(index>=0&&next>=0&&next<ids.length){[ids[index],ids[next]]=[ids[next],ids[index]];state=await api('/api/provider/reorder',{ids});render();toast('故障转移顺序已更新')}}
- if(b.dataset.providerDelete&&isManager()){const provider=state.providers.find(item=>item.id===b.dataset.providerDelete);if(provider&&confirm(`删除服务商“${provider.name}”？模型配置和密钥将被移除，历史日志会保留。`)){state=await api('/api/provider/delete',{id:provider.id});render();toast('服务商已删除')}}
+ if(b.dataset.providerDelete&&isManager()){const provider=state.providers.find(item=>item.id===b.dataset.providerDelete);if(provider)confirmAction(document.body,`删除服务商“${provider.name}”？`,'模型配置和已保存密钥将被移除，历史调用日志会继续保留。',async()=>{state=await api('/api/provider/delete',{id:provider.id});render();toast('服务商已删除');},toast)}
  if(b.dataset.switch){b.disabled=true;state=await api('/api/routing',{active:b.dataset.switch,strategy:state.strategy});render();toast('默认模型已切换，下一次调用生效')}
  if(b.dataset.strategy&&isManager()){b.disabled=true;state=await api('/api/routing',{active:state.active,strategy:b.dataset.strategy});render();toast('路由策略已更新')}
  if(b.id==='refresh'){await accountReady(await accountRequest('me'));}
@@ -108,9 +107,10 @@ try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=e
 const sidebarToggle=document.querySelector('#sidebar-toggle');
 function setSidebarCompact(compact){
  document.body.classList.toggle('sidebar-compact',compact);
+ sidebarToggle.dataset.tooltip=compact?'展开侧边栏':'收起侧边栏';
  sidebarToggle.setAttribute('aria-expanded',String(!compact));
  sidebarToggle.setAttribute('aria-label',compact?'展开侧边栏':'收起侧边栏');
  sidebarToggle.title=compact?'展开侧边栏':'收起侧边栏';
 }
-try{setSidebarCompact(localStorage.getItem('sidebar-compact')==='true')}catch{setSidebarCompact(false)}
+try{const saved=localStorage.getItem('sidebar-compact');setSidebarCompact(saved===null?matchMedia('(max-width:1100px) and (min-width:721px)').matches:saved==='true')}catch{setSidebarCompact(false)}
 sidebarToggle.addEventListener('click',()=>{const compact=!document.body.classList.contains('sidebar-compact');setSidebarCompact(compact);try{localStorage.setItem('sidebar-compact',String(compact))}catch{/* Optional appearance preference. */}});
