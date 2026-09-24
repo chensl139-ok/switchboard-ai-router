@@ -326,4 +326,4 @@ SWITCHBOARD_TOKEN=你的产品API密钥 node scripts/smoke.mjs --live
 
 ## 维护者联系
 
-仓库维护联系邮箱：`15652641985@162.com`。
+仓库维护联系邮箱：`15652641985@163.com`。
