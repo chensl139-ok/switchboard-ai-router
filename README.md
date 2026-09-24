@@ -19,7 +19,7 @@
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
 | 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频提交与轮询，内置限额与任务归属追踪 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
-| 多租户 | 邮箱密码登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
+| 多租户 | 邮箱密码与飞书 OAuth 登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
 | 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张价格 |
 | 观测与文档 | 调用日志、用量分析、费用估算、操作审计、产品内 API 文档和 OpenAPI JSON 下载 |
 
@@ -75,8 +75,19 @@ npm start
 | `ALLOW_HTTP_UPSTREAM` | `false` | 默认禁止 HTTP 上游，仅访问受信任的本地推理服务时开启 |
 | `COOKIE_SECURE` | `false` | HTTPS 反代场景设为 `true` |
 | `GLOBAL_MAX_CONCURRENCY` | `20` | 平台级并发上限 |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | 空 | 飞书企业自建应用凭据；只保存在服务端 |
+| `FEISHU_REDIRECT_URI` | 空 | 完整 OAuth 回调地址，必须以 `/api/account/sso/feishu/callback` 结尾并与飞书后台一致 |
+| `FEISHU_ALLOWED_TENANT_KEY` | 空 | 建议设置为本企业 tenant_key，阻止其他企业账号登录 |
+| `FEISHU_AUTO_JOIN` | `false` | 同企业飞书用户是否无需邀请自动加入默认租户 |
+| `FEISHU_DEFAULT_ROLE` | `member` | 自动加入角色，仅支持 `member` 或 `viewer` |
 
 > **提示**：若本机开启了 Fake-IP 模式代理，服务商模型列表会报「网络异常」——实际是被 SSRF 防护拦截。将 `UPSTREAM_PROXY_FAKE_IP` 设为 `true` 并重启即可。
+
+### 飞书企业登录
+
+在飞书开放平台创建企业自建应用，启用网页应用登录，并把重定向 URL 配置为部署域名加 `/api/account/sso/feishu/callback`。将应用凭据和相同回调地址写入 `.env` 后重启，登录页会自动出现“使用飞书登录”。
+
+默认采用邀请制：管理员在「成员与角色」按企业邮箱生成邀请后，同事可直接用对应飞书账号登录并消费邀请，无需另设密码。若公司希望全员可用，可同时配置 `FEISHU_ALLOWED_TENANT_KEY` 并开启 `FEISHU_AUTO_JOIN=true`；不建议在未限制 tenant_key 时开启自动加入。飞书用户可在「账户与租户」设置本地备用密码。
 
 ### 忘记密码（owner 账号）
 

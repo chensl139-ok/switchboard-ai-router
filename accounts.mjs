@@ -35,9 +35,9 @@ export class Accounts {
   const user=session&&this.state.users.find(u=>u.id===session.userId);
   const membership=session&&this.state.members.find(m=>m.userId===session.userId&&m.tenantId===session.tenantId);
   if(!user||!membership)throw fail('会话无效或当前租户权限已被移除，请重新登录',401);
-  return {userId:user.id,tenantId:session.tenantId,role:membership.role,sessionHash:session.hash,name:user.name,email:user.email};
+  return {userId:user.id,tenantId:session.tenantId,role:membership.role,sessionHash:session.hash,name:user.name,email:user.email,hasPassword:typeof user.password==='string',feishuLinked:Boolean(user.feishuOpenId)};
  }
- me(caller){return {user:{id:caller.userId,name:caller.name,email:caller.email},tenantId:caller.tenantId,role:caller.role,
+ me(caller){return {user:{id:caller.userId,name:caller.name,email:caller.email,hasPassword:caller.hasPassword,feishuLinked:caller.feishuLinked},tenantId:caller.tenantId,role:caller.role,
   tenants:this.state.members.filter(m=>m.userId===caller.userId).map(m=>({...this.state.tenants.find(t=>t.id===m.tenantId),role:m.role})),roles};}
  async setup(input){
   if(this.state.users.length)throw fail('已完成初始化',409);
@@ -48,10 +48,32 @@ export class Accounts {
  async login(input){
   if(!input||typeof input.email!=='string'||typeof input.password!=='string'||input.password.length>256)throw fail('邮箱或密码错误',401);
   const user=this.state.users.find(u=>u.email===input.email.trim().toLowerCase());
-  const valid=user?await this.checkPassword(input.password,user.password):await this.checkPassword(input.password,'00000000000000000000000000000000:'+ '00'.repeat(64));
+  const valid=user&&typeof user.password==='string'?await this.checkPassword(input.password,user.password):await this.checkPassword(input.password,'00000000000000000000000000000000:'+ '00'.repeat(64));
   if(!user||!valid)throw fail('邮箱或密码错误',401);
   const member=this.state.members.find(m=>m.userId===user.id);if(!member)throw fail('账户未加入任何租户',403);
   return this.mutate(()=>this.session(user.id,member.tenantId));
+ }
+ loginWithFeishu(identity,{autoJoin=false,allowedTenantKey='',defaultRole='member'}={}){
+  if(allowedTenantKey&&identity.tenantKey!==allowedTenantKey)throw fail('当前飞书企业无权访问此工作空间',403);
+  if(!this.state.users.length)throw fail('请先使用管理令牌创建首个管理员账户',409);
+  return this.mutate(()=>{
+   let joinedTenantId='',user=this.state.users.find(u=>u.feishuOpenId===identity.openId||identity.unionId&&u.feishuUnionId===identity.unionId);
+   if(!user){
+    user=this.state.users.find(u=>u.email===identity.email);
+    if(user){if(user.feishuOpenId&&user.feishuOpenId!==identity.openId)throw fail('该邮箱已绑定其他飞书账户',409);user.feishuOpenId=identity.openId;user.feishuUnionId=identity.unionId||undefined;}
+    else{
+     const invite=this.state.invites.find(i=>i.email===identity.email&&!i.usedAt&&i.expiresAt>this.now());
+     if(!invite&&!autoJoin)throw fail('账户尚未受邀，请联系管理员',403);
+     user={id:randomUUID(),email:identity.email,name:identity.name,password:null,feishuOpenId:identity.openId,feishuUnionId:identity.unionId||undefined,createdAt:new Date(this.now()).toISOString()};this.state.users.push(user);
+     if(invite){this.state.members.push({tenantId:invite.tenantId,userId:user.id,role:invite.role});invite.usedAt=this.now();joinedTenantId=invite.tenantId;this.event(invite.tenantId,user.id,'member.join.sso',identity.email);}
+     else{this.state.members.push({tenantId:'default',userId:user.id,role:defaultRole});this.event('default',user.id,'member.join.sso',identity.email);}
+    }
+   }
+   const pending=this.state.invites.find(i=>i.email===identity.email&&!i.usedAt&&i.expiresAt>this.now()&&!this.state.members.some(m=>m.userId===user.id&&m.tenantId===i.tenantId));
+   if(pending){this.state.members.push({tenantId:pending.tenantId,userId:user.id,role:pending.role});pending.usedAt=this.now();joinedTenantId=pending.tenantId;this.event(pending.tenantId,user.id,'member.join.sso',identity.email);}
+   const member=this.state.members.find(m=>m.userId===user.id&&(!joinedTenantId||m.tenantId===joinedTenantId));if(!member)throw fail('账户未加入任何租户',403);
+   this.event(member.tenantId,user.id,'account.login.feishu',identity.email);return this.session(user.id,member.tenantId);
+  });
  }
  logout(token){if(typeof token!=='string')return;this.mutate(()=>{this.state.sessions=this.state.sessions.filter(s=>s.hash!==hash(token));});}
  requireAdmin(caller){if(!['owner','admin'].includes(caller.role))throw fail('此操作需要租户管理员权限',403);}
@@ -90,7 +112,7 @@ export class Accounts {
  }
  async changePassword(caller,input){
   const user=this.state.users.find(u=>u.id===caller.userId),previous=user.password;
-  if(typeof input.currentPassword!=='string'||input.currentPassword.length>256||!await this.checkPassword(input.currentPassword,user.password))throw fail('原密码错误',403);
+  if(user.password&&(typeof input.currentPassword!=='string'||input.currentPassword.length>256||!await this.checkPassword(input.currentPassword,user.password)))throw fail('原密码错误',403);
   this.validateUser({name:user.name,email:user.email,password:input.newPassword});const password=await this.passwordHash(input.newPassword);
   return this.mutate(()=>{const current=this.state.users.find(u=>u.id===caller.userId);if(current.password!==previous)throw fail('密码已发生变化，请重新登录',409);current.password=password;this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);this.event(caller.tenantId,user.id,'account.password','密码已更改');return this.session(user.id,caller.tenantId);});
  }

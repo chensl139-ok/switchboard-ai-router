@@ -3,6 +3,13 @@ services:
     build: .
     container_name: switchboard-ai-router
     restart: unless-stopped
+    init: true
+    stop_grace_period: 40s
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
     env_file: .env
     environment:
       HOST: 0.0.0.0
@@ -12,3 +19,9 @@ services:
       - "127.0.0.1:3100:3000"
     volumes:
       - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3

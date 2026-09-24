@@ -4,15 +4,16 @@ import {safeFetch} from './network.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createHmac} from 'node:crypto';
+import {createHmac,randomUUID} from 'node:crypto';
 import {createApp} from './server.mjs';
 import {Accounts} from './accounts.mjs';
 import {installWebSocket} from './realtime.mjs';
+import {FeishuOAuth,feishuConfig} from './feishu-auth.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
-export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch}={}){
+export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfig()}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
- const accounts=new Accounts(dir,admin),engines=new Map(),limits=new Map();
+ const accounts=new Accounts(dir,admin),oauth=new FeishuOAuth(oauthConfig,{fetcher:identityFetcher}),engines=new Map(),limits=new Map();
  let activeRequests=0;const globalLimit=Number(process.env.GLOBAL_MAX_CONCURRENCY)||20;
  function acquireGlobal(){if(activeRequests>=globalLimit)throw fail('网关总并发已满，请稍后重试',429);activeRequests++;let released=false;return ()=>{if(!released){released=true;activeRequests--;}};}
  const derive=(purpose,id)=>createHmac('sha256',admin).update(purpose+':'+id).digest('hex');
@@ -33,18 +34,27 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  function originAllowed(origin,host){return !origin||origin===`http://${host}`||origin===`https://${host}`;}
  function caller(req,token){return token?tokenIdentity(token):session(req);}
  function cookie(req,res,token){const secure=process.env.COOKIE_SECURE==='true'||req.socket.encrypted||req.headers['x-forwarded-proto']==='https';res.setHeader('Set-Cookie',`sr_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token?43200:0}${secure?'; Secure':''}`);}
+ function oauthCookie(req,res,state){const secure=process.env.COOKIE_SECURE==='true'||req.socket.encrypted||req.headers['x-forwarded-proto']==='https';res.setHeader('Set-Cookie',`sr_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/api/account/sso/feishu/callback; Max-Age=${state?600:0}${secure?'; Secure':''}`);}
+ function namedCookie(req,name){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1)||'';}
  function json(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
  async function body(req){let text='';for await(const part of req){text+=part;if(Buffer.byteLength(text)>65536)throw fail('请求过大',413);}try{const data=JSON.parse(text);if(!data||typeof data!=='object'||Array.isArray(data))throw Error();return data;}catch{throw fail('JSON 格式无效');}}
  function rate(req){const key=req.socket.remoteAddress||'unknown';const now=Date.now();for(const [id,item] of limits)if(now-item.start>60000)limits.delete(id);if(limits.size>2000)throw fail('请求过多',429);const item=limits.get(key)||{start:now,count:0};item.count++;limits.set(key,item);if(item.count>20)throw fail('登录/注册尝试过多，请一分钟后重试',429);}
  const server=http.createServer(async(req,res)=>{
-  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');
+  const externalId=String(req.headers['x-request-id']||''),requestId=/^[A-Za-z0-9._:-]{1,128}$/.test(externalId)?externalId:randomUUID();
+  res.setHeader('X-Request-ID',requestId);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob: https: http:; media-src 'self' blob: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
   try{
    const url=new URL(req.url,'http://localhost');
    if(url.pathname==='/healthz')return json(res,200,{ok:true});
+   if(url.pathname==='/readyz')return json(res,200,{ok:true,activeRequests});
    if(!originAllowed(req.headers.origin,req.headers.host))throw fail('拒绝跨域请求',403);
    if(url.pathname.startsWith('/api/account/')){
     const route=url.pathname.slice('/api/account/'.length);
-    if(req.method==='GET'&&route==='status')return json(res,200,{needsSetup:accounts.state.users.length===0});
+    if(req.method==='GET'&&route==='status')return json(res,200,{needsSetup:accounts.state.users.length===0,sso:{feishu:oauth.publicStatus()}});
+    if(req.method==='GET'&&route==='sso/feishu/start'){rate(req);const start=oauth.start();oauthCookie(req,res,start.state);res.writeHead(302,{location:start.url,'cache-control':'no-store'});return res.end();}
+    if(req.method==='GET'&&route==='sso/feishu/callback'){
+     try{const state=url.searchParams.get('state')||'';if(!state||state!==namedCookie(req,'sr_oauth_state'))throw fail('飞书登录校验失败，请重新登录');oauth.consumeState(state);const identity=await oauth.identity(url.searchParams.get('code'));const token=accounts.loginWithFeishu(identity,oauthConfig);oauthCookie(req,res,'');cookie(req,res,token);res.writeHead(302,{location:'/#overview','cache-control':'no-store'});return res.end();}
+     catch(error){oauthCookie(req,res,'');res.writeHead(302,{location:'/?auth_error='+encodeURIComponent(error.message||'飞书登录失败'),'cache-control':'no-store'});return res.end();}
+    }
     if(req.method==='POST'&&['setup','login','register'].includes(route)){
      rate(req);const data=await body(req);const token=await accounts[route](data);cookie(req,res,token);return json(res,200,accounts.me(accounts.resolve(token)));
     }
@@ -77,7 +87,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     engine(current.tenantId).emit('request',req,res);return;
    }
    engine('default').emit('request',req,res);
-  }catch(error){if(!res.headersSent)json(res,error.status||500,clientError(req.url.startsWith('/v1/messages')?'messages':'chat',error));else res.end();}
+  }catch(error){const status=error.status||500;if(status>=500)console.error(JSON.stringify({level:'error',event:'request_failed',requestId,method:req.method,path:req.url.split('?')[0],status,message:error.message}));if(!res.headersSent)json(res,status,clientError(req.url.startsWith('/v1/messages')?'messages':'chat',error));else res.end();}
  });
  installWebSocket(server,{originAllowed,authenticate:(token,req,expectedTenant)=>{try{const current=caller(req,token);if(expectedTenant&&expectedTenant!==current.tenantId)throw fail('租户已切换',409);return current;}catch{return false;}},execute:async(input,options)=>{
   const current=caller(options.request,options.token);if(current.tenantId!==options.authContext.tenantId)throw fail('租户已切换，请重新建立连接',403);

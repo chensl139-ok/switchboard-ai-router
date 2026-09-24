@@ -1,19 +1,23 @@
 let tenantHint='';
+let accountStatus={sso:{feishu:{enabled:false}}};
 export async function accountRequest(path,data){
  const res=await fetch('/api/account/'+path,{method:data?'POST':'GET',headers:{'content-type':'application/json',...(!['status','me','login','setup','register','logout'].includes(path)&&tenantHint?{'X-Tenant-ID':tenantHint}:{})},...(data?{body:JSON.stringify(data)}:{})});
- const body=await res.json();if(!res.ok)throw Object.assign(Error(body.error?.message||'账户请求失败'),{status:res.status});if(body.tenantId)tenantHint=body.tenantId;return body;
+ const body=await res.json();if(!res.ok){const id=res.headers.get('x-request-id');throw Object.assign(Error((body.error?.message||'账户请求失败')+(id?` · 请求 ID ${id}`:'')),{status:res.status});}if(body.tenantId)tenantHint=body.tenantId;return body;
 }
 let readyHandler=null;
-export async function startAccountUI(onReady){readyHandler=onReady;const status=await accountRequest('status');if(status.needsSetup)return showLogin('setup');try{await onReady(await accountRequest('me'));}catch(e){if(e.status===401)showLogin('login');else throw e;}}
+export async function startAccountUI(onReady){readyHandler=onReady;accountStatus=await accountRequest('status');if(accountStatus.needsSetup)return showLogin('setup');try{await onReady(await accountRequest('me'));}catch(e){if(e.status===401)showLogin('login');else throw e;}}
 export function showLogin(mode='login'){
  const dialog=document.querySelector('#login');
+ const authError=new URLSearchParams(location.search).get('auth_error');if(authError)history.replaceState(null,'',location.pathname+location.hash);
  dialog.innerHTML=`<form id="account-login"><div class="eyebrow">SWITCHBOARD ACCOUNT</div><h2>${mode==='setup'?'创建首个管理员账户':mode==='register'?'受邀注册账户':'登录工作空间'}</h2><p>${mode==='setup'?'原有配置保留在默认租户，创建账户后接管。':mode==='register'?'请输入管理员提供的邀请码。':'使用邮箱和密码登录，进入你的租户。'}</p>
+ ${mode==='login'&&accountStatus.sso?.feishu?.enabled?'<a class="button primary sso-button" href="/api/account/sso/feishu/start"><span>飞</span> 使用飞书登录</a><div class="auth-divider"><span>或使用账号密码</span></div>':''}
  ${mode==='setup'?'<label>初始化管理令牌<input name="bootstrapToken" type="password" autocomplete="off" required placeholder=".env 中的 ADMIN_TOKEN"></label>':''}
  ${mode!=='login'?'<label>姓名<input name="name" required maxlength="80" autocomplete="name"></label>':''}
  <label>邮箱<input name="email" type="email" required autocomplete="username"></label><label>密码<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="${mode==='login'?'current-password':'new-password'}"></label>
  ${mode==='register'?'<label>邀请码<input name="inviteCode" required type="password" autocomplete="off"></label>':''}<button class="primary">${mode==='login'?'登录':'创建账户'}</button><p id="account-error" role="alert"></p>
  ${mode!=='setup'?`<button type="button" id="account-mode" class="subtle">${mode==='login'?'有邀请码？注册账户':'已有账户？返回登录'}</button>`:''}</form>`;
  if(!dialog.open)dialog.showModal();dialog.oncancel=e=>e.preventDefault();
+ dialog.querySelector('#account-error').textContent=authError||'';
  dialog.querySelector('#account-mode')?.addEventListener('click',()=>showLogin(mode==='login'?'register':'login'));
  dialog.querySelector('form').onsubmit=async e=>{e.preventDefault();const form=e.target,button=form.querySelector('button');button.disabled=true;try{const profile=await accountRequest(mode==='setup'?'setup':mode==='register'?'register':'login',Object.fromEntries(new FormData(form)));form.reset();await readyHandler(profile);dialog.close();}catch(error){dialog.querySelector('#account-error').textContent=error.message;}finally{button.disabled=false;}};
 }
@@ -33,9 +37,9 @@ export function confirmAction(root,title,description,action,toast){
  const dialog=document.createElement('dialog');const h=document.createElement('h2');h.textContent=title;const p=document.createElement('p');p.textContent=description;const yes=document.createElement('button');yes.textContent='确认';yes.className='primary';const no=document.createElement('button');no.textContent='取消';dialog.append(h,p,yes,no);root.append(dialog);dialog.showModal();no.onclick=()=>dialog.close();dialog.onclose=()=>dialog.remove();yes.onclick=async()=>{yes.disabled=true;try{await action();dialog.close();}catch(e){toast(e.message);yes.disabled=false;}};
 }
 export async function renderAccount({profile,esc,toast,onReady}){
- const root=document.querySelector('#content');root.innerHTML=`<div class="heading"><div><div class="eyebrow">ACCOUNT & WORKSPACES</div><h1>账户与租户</h1><p>${esc(profile.user.name)} · ${esc(profile.user.email)}</p></div></div><div class="panel"><h2>创建新租户</h2><p>新租户拥有独立的服务商、API Key、价格和用量数据。</p><form id="new-tenant"><label>租户名称<input name="name" required maxlength="80"></label><button class="primary">创建租户</button></form></div>
+ const root=document.querySelector('#content');root.innerHTML=`<div class="heading"><div><div class="eyebrow">ACCOUNT & WORKSPACES</div><h1>账户与租户</h1><p>${esc(profile.user.name)} · ${esc(profile.user.email)}</p></div><span class="account-auth-badge">${profile.user.feishuLinked?'飞书已连接':'邮箱账户'}</span></div><div class="panel"><h2>创建新租户</h2><p>新租户拥有独立的服务商、API Key、价格和用量数据。</p><form id="new-tenant"><label>租户名称<input name="name" required maxlength="80"></label><button class="primary">创建租户</button></form></div>
  <div class="panel section-space"><h2>接受邀请</h2><form id="accept-invite"><label>邀请码<input name="code" type="password" required autocomplete="off"></label><button>加入租户</button></form></div>
- <div class="panel section-space"><h2>修改密码</h2><form id="change-password"><label>原密码<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>新密码<input name="newPassword" type="password" minlength="12" maxlength="256" required autocomplete="new-password"></label><button>更新密码并退出其他会话</button></form></div>`;
+ <div class="panel section-space"><h2>${profile.user.hasPassword?'修改密码':'设置备用密码'}</h2><p>${profile.user.hasPassword?'更新后会退出此账户的其他会话。':'设置后可在飞书不可用时使用邮箱与密码登录。'}</p><form id="change-password">${profile.user.hasPassword?'<label>原密码<input name="currentPassword" type="password" required autocomplete="current-password"></label>':''}<label>新密码<input name="newPassword" type="password" minlength="12" maxlength="256" required autocomplete="new-password"></label><button>${profile.user.hasPassword?'更新密码并退出其他会话':'设置备用密码'}</button></form></div>`;
  for(const [id,route] of [['new-tenant','tenants'],['accept-invite','accept-invite'],['change-password','password']])root.querySelector('#'+id).onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await accountRequest(route,Object.fromEntries(new FormData(e.target)));e.target.reset();toast('操作成功');await onReady(await accountRequest('me'));}catch(error){toast(error.message);}finally{button.disabled=false;}};
  if(['owner','admin'].includes(profile.role)){try{const audit=await accountRequest('audit');const section=document.createElement('section');section.className='panel section-space';section.innerHTML='<h2>租户操作审计</h2>'+audit.items.slice(0,50).map(a=>`<p class="muted">${esc(new Date(a.time).toLocaleString())} · ${esc(a.action)} · ${esc(a.target)}</p>`).join('');root.append(section);}catch(error){toast(error.message);}}
 }
