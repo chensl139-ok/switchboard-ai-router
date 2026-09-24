@@ -36,3 +36,11 @@ test('组织审计按成员展示用量且侧栏图标共用中心轴',()=>{
  assert.match(app,/data-tab="audit"/);assert.match(audit,/成员用量/);assert.match(audit,/API Key 归属/);
  assert.match(css,/Stable sidebar icon axis/);assert.match(css,/\.sidebar \.nav-item\{padding-left:15px/);
 });
+
+test('服务商卡片使用紧凑密度且侧栏收起前后保持同一行',()=>{
+ const css=read('public/style.css');
+ assert.match(css,/Compact provider cards and stable collapse row/);
+ assert.match(css,/\.provider-card\{min-height:242px;padding:15px;gap:9px\}/);
+ assert.match(css,/\.sidebar-compact \.sidebar \.nav-item\{min-height:40px;padding-top:8px;padding-bottom:8px\}/);
+ assert.match(css,/\.sidebar-toggle\{top:50%;transform:translateY\(-50%\)\}/);
+});
