@@ -8,13 +8,14 @@ import {UsageStore} from './usage-store.mjs';
 import {validatePrice,openRouterPrice,usageCost,normalizeUsage} from './pricing.mjs';
 import {assertThinkingDisabled} from './thinking.mjs';
 import {createUpstreamAdapter} from './upstream-adapter.mjs';
-import {selectRoutes,validateRouting} from './routing.mjs';
+import {createRouter,validateRouting} from './routing.mjs';
 import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
 import {modelProtocolMap,protocolForModel} from './model-protocol.mjs';
 import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
-import {readFileSync,writeFileSync,mkdirSync,renameSync,existsSync} from 'node:fs';
+import {gzipSync,gunzipSync} from 'node:zlib';
+import {readdirSync,readFileSync,writeFileSync,mkdirSync,renameSync,unlinkSync,existsSync} from 'node:fs';
 import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -42,15 +43,24 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  const seal=s=>{const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv);return Buffer.concat([iv,c.update(s),c.final(),c.getAuthTag()]).toString('base64')};
  const unseal=s=>{const b=Buffer.from(s,'base64'),c=createDecipheriv('aes-256-gcm',key,b.subarray(0,12));c.setAuthTag(b.subarray(-16));return Buffer.concat([c.update(b.subarray(12,-16)),c.final()]).toString()};
  const file=path.join(dir,'state.json');
+ // 启动时压缩掉旧版残留在 state.json 里的备份文件（保留最新 3 个，其余清除），并把日志迁出 hot state
+ try{const backups=readdirSync(dir).filter(name=>name.startsWith('state.json.backup-')).sort();for(const stale of backups.slice(0,-3))try{unlinkSync(path.join(dir,stale));}catch{}}catch{}
  let state=existsSync(file)?JSON.parse(readFileSync(file,'utf8')):{providers:structuredClone(presets),active:'',strategy:'fallback',logs:[]};
+ let legacyLogs=Array.isArray(state.logs)?state.logs:[];
+ if(state.logs)delete state.logs;
  for(const p of state.providers){p.models=[...new Set([...(p.models||[]),...(p.model?[p.model]:[])])];p.modelProtocols=modelProtocolMap(p,p.models);}
  state.providers=state.providers.map((provider,index)=>({provider,index})).sort((a,b)=>Number(b.provider.id===state.active)-Number(a.provider.id===state.active)||(a.provider.priority??50)-(b.provider.priority??50)||a.index-b.index).map(({provider},priority)=>({...provider,priority}));
- usageStore.migrate(state.logs);
+ usageStore.migrate(legacyLogs);
+ // 每次请求都会在路由层查阅（健康/熔断/延迟），预热一次 SWR 缓存；usageStore 仅作为查询通道注入，不参与持久化序列化
+ const {selectRoutes}=createRouter(state,usageStore);
+ const warmHealth=()=>{try{usageStore.logs({limit:100});for(const p of state.providers)for(const m of [p.model,...(p.models||[])].filter(Boolean))usageStore.routeLogs({id:p.id,name:p.name,model:m});}catch{}};
+ warmHealth();const warmTimer=setInterval(()=>{try{warmHealth();}catch{}},30000);warmTimer.unref?.();
  state.rules??=[];state.routing??={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5};
  for(const p of state.providers)p.weight??=1;
  let sequence=0;
- const save=()=>{writeFileSync(file+'.tmp',JSON.stringify(state),{mode:0o600});renameSync(file+'.tmp',file)};
- const record=log=>{state.logs.unshift(log);state.logs=state.logs.slice(0,500);try{usageStore.record(log);save();}catch{console.error('request_log_persistence_failed');}};
+ let writeChain=Promise.resolve(),lastSaved='';
+ const save=()=>{const payload=JSON.stringify(state);if(payload===lastSaved)return writeChain;writeChain=writeChain.then(()=>new Promise(resolve=>{setImmediate(()=>{try{writeFileSync(file+'.tmp',payload,{mode:0o600});renameSync(file+'.tmp',file);lastSaved=payload;}catch(e){console.error('state_persist_failed',e?.message||e);}resolve();});}));return writeChain;};
+ const record=log=>{try{usageStore.record(log);save();}catch{console.error('request_log_persistence_failed');}};
  const safe=()=>({...state,providers:state.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:!!secret,hasMeteredKey:!!meteredSecret})),presets});
  const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
  const fail=(message,status=400)=>Object.assign(new Error(message),{status});
@@ -126,7 +136,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(input.max_tokens!==undefined&&(!Number.isInteger(input.max_tokens)||input.max_tokens<1||input.max_tokens>131072))throw fail('max_tokens 无效');
   if(input.upstream_model!==undefined&&(typeof input.upstream_model!=='string'||!input.model||input.model==='auto'))throw fail('指定模型需要同时指定服务商路由 ID');
   const explicit=input.model&&input.model!=='auto';
-  let candidates=selectRoutes(state,input,{sequence:sequence++}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
+  let candidates=selectRoutes(input,{sequence:sequence++}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
   payloadFor(candidates[0],input);
   candidates=candidates.filter(p=>{try{payloadFor(p,input);return true;}catch{return false;}}).map(p=>({...p,prices:structuredClone(p.prices||{})}));
   if(input.messages.some(m=>m.reasoning_content!==undefined&&typeof m.reasoning_content!=='string'))throw fail('reasoning_content 必须为文本');
@@ -195,7 +205,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(req.method==='POST'&&url.pathname==='/api/keys/update'){const b=await body(req);return json(res,200,apiKeys.update(b.id,b));}
     if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
     if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
-    if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,safe());
+    if(req.method==='GET'&&url.pathname==='/api/state'){const payload=safe();payload.logs=usageStore.logs({limit:50}).items;return json(res,200,payload);}
     if(req.method==='GET'&&url.pathname==='/v1/openapi.json')return json(res,200,platformOpenAPI);
     if(req.method==='GET'&&url.pathname==='/v1/models/all')return json(res,200,flattenDiscovery(await discovery.refresh(false)));
     if(req.method==='GET'&&url.pathname==='/v1/models'){const list=callableModels(state);return json(res,200,req.headers['anthropic-version']?anthropicModels(list):list);}
@@ -207,7 +217,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      if(!p.models.includes(b.model)){if(p.models.length>=500)throw fail('每个服务商最多配置 500 个模型');p.models.push(b.model);}p.model ||= b.model;save();return json(res,200,safe());
     }
     if(req.method==='POST'&&url.pathname==='/v1/messages/count_tokens'){
-     const input=normalizeRequest('messages',{...await body(req),max_tokens:2048});const [p]=selectRoutes(state,input);
+     const input=normalizeRequest('messages',{...await body(req),max_tokens:2048});const [p]=selectRoutes(input);
      if(protocolForModel(p,p.model)!=='anthropic')throw fail('该路由不支持原生 Anthropic Token 计数，请选择 Anthropic 上游',501);
      const payload=anthropicPayload(input,p.model);delete payload.stream;delete payload.max_tokens;delete payload.temperature;delete payload.top_p;
      const r=await fetcher(p.baseUrl+'/messages/count_tokens',{method:'POST',headers:{'content-type':'application/json',...(p.anthropicAuth==='bearer'?{authorization:'Bearer '+unseal(credentialFor(p,p.model,p.channelOverride))}:{'x-api-key':unseal(credentialFor(p,p.model,p.channelOverride))}),'anthropic-version':'2023-06-01'},body:JSON.stringify(payload),redirect:'error',signal:AbortSignal.timeout(15000)});
@@ -282,25 +292,45 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     throw fail('接口不存在',404);
    }
-   if(req.method==='GET'&&url.pathname==='/app.js'){
+   if((req.method!=='GET'&&req.method!=='HEAD')&&url.pathname==='/app.js')throw fail('页面不存在',404);
+   if((req.method==='GET'||req.method==='HEAD')&&url.pathname==='/app.js'){
     const built=path.join(root,'public/build/app.js');
     if(!existsSync(built))throw fail('前端资源未构建，请运行 npm run build:web',503);
-    res.setHeader('content-type','text/javascript; charset=utf-8');return res.end(readFileSync(built));
+    return staticServe(req,res,built,'text/javascript; charset=utf-8');
    }
-   if(req.method==='GET'&&/^\/build\/assets\/[A-Za-z0-9._-]+\.(js|css)$/.test(url.pathname)){
+   if((req.method==='GET'||req.method==='HEAD')&&/^\/build\/assets\/[A-Za-z0-9._-]+\.(js|css)$/.test(url.pathname)){
     const built=path.join(root,'public',url.pathname.slice(1));
-    if(!existsSync(built))throw fail('页面资源不存在',404);
-    res.setHeader('content-type',built.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8');
-    res.setHeader('cache-control','public, max-age=31536000, immutable');return res.end(readFileSync(built));
+    if(!existsSync(built)||!path.resolve(built).startsWith(path.join(root,'public','build')+path.sep))throw fail('页面资源不存在',404);
+    return staticServe(req,res,built,built.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8',{immutable:true});
    }
-   const files={'/':'index.html','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/audit.js':'audit.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
+   const files={'/':'index.html','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/interface.css':'interface.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/audit.js':'audit.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
  
-   if(req.method!=='GET'||!files[url.pathname])throw fail('页面不存在',404);
-   const f=files[url.pathname];res.setHeader('content-type',f.endsWith('.js')?'text/javascript':f.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(path.join(root,'public',f)));
+   if((req.method!=='GET'&&req.method!=='HEAD')||!files[url.pathname])throw fail('页面不存在',404);
+   const f=files[url.pathname];return staticServe(req,res,path.join(root,'public',f),f.endsWith('.js')?'text/javascript; charset=utf-8':f.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
- server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.closeStore=()=>usageStore.close();server.on('close',()=>usageStore.close());
+ server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();};server.on('close',()=>{clearInterval(warmTimer);usageStore.close();});
  return server;
+}
+// gzip 静态 HTML/JS/CSS；带 ETag + 静态资源 immutable 缓存，命中时 304
+const compressible=/text\/|javascript|json/;
+const staticCache=new Map();
+function staticServe(req,res,absolute,type,{immutable=false}={}){
+ let cached=staticCache.get(absolute);
+ if(!cached){
+  let raw,gz=null;
+  if(existsSync(absolute+'.gz')){try{gz=readFileSync(absolute+'.gz');raw=gunzipSync(gz);}catch{}}
+  if(!raw)raw=readFileSync(absolute);
+  if(!gz&&compressible.test(type)&&raw.length>=1024)gz=gzipSync(raw);
+  cached={raw,gz,etag:'W/"'+raw.length.toString(16)+'-'+(gz?gz.length:0).toString(16)+'"'};
+  staticCache.set(absolute,cached);
+ }
+ const headers={'content-type':type,'cache-control':immutable?'public, max-age=31536000, immutable':'no-cache','etag':cached.etag,'vary':'accept-encoding'};
+ if(req.headers['if-none-match']===cached.etag){res.writeHead(304,headers);return res.end();}
+ const wantsGzip=cached.gz&&/\bgzip\b/.test(String(req.headers['accept-encoding']||''));
+ if(wantsGzip)headers['content-encoding']='gzip';
+ if(req.method==='HEAD'){res.writeHead(200,headers);return res.end();}
+ res.writeHead(200,headers);res.end(wantsGzip?cached.gz:cached.raw);
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){console.error('请使用 npm start 启动支持账户与租户隔离的平台入口。');process.exit(1);}

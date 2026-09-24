@@ -1,20 +1,78 @@
+const formatCount=value=>Number(value||0).toLocaleString('zh-CN');
+const formatLatency=value=>value?`${formatCount(value)} ms`:'—';
+
+export function dailySeries(rows,days,today=new Date()){
+ const byDay=new Map(rows.map(row=>[row.day,row]));
+ today=new Date(today);today.setUTCHours(0,0,0,0);
+ return Array.from({length:days},(_,index)=>{
+  const date=new Date(today);date.setUTCDate(today.getUTCDate()-days+index+1);
+  const day=date.toISOString().slice(0,10);
+  return byDay.get(day)||{day,requests:0,attempts:0,successes:0,tokens:0};
+ });
+}
+
+function renderUsageChart(series,esc){
+ const peak=Math.max(1,...series.map(day=>day.requests));
+ const width=1000/series.length;
+ return `<div class="usage-chart" role="img" aria-label="每日生成请求柱状图，最高 ${peak} 次">
+  <svg class="usage-chart-svg" viewBox="0 0 1000 180" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="170" x2="1000" y2="170" class="usage-baseline"/>${series.map((day,index)=>{const height=day.requests?Math.max(4,day.requests/peak*150):0;return `<rect class="usage-chart-bar" x="${(index*width+Math.min(3,width*.1)).toFixed(2)}" y="${(170-height).toFixed(2)}" width="${Math.max(2,width-Math.min(6,width*.2)).toFixed(2)}" height="${height.toFixed(2)}" rx="2"><title>${esc(day.day)}：${formatCount(day.requests)} 次请求 · ${formatCount(day.tokens)} Tokens</title></rect>`;}).join('')}</svg>
+  <div class="usage-chart-labels" aria-hidden="true"><span>${esc(series[0].day.slice(5))}</span><span>${esc(series[Math.floor((series.length-1)/2)].day.slice(5))}</span><span>${esc(series[series.length-1].day.slice(5))}</span></div>
+ </div><details class="usage-daily-details"><summary>查看每日明细</summary><div class="table-wrap"><table><thead><tr><th>日期（UTC）</th><th>请求</th><th>上游尝试</th><th>成功</th><th>Tokens</th></tr></thead><tbody>${series.map(day=>`<tr><td>${esc(day.day)}</td><td>${formatCount(day.requests)}</td><td>${formatCount(day.attempts)}</td><td>${formatCount(day.successes)}</td><td>${formatCount(day.tokens)}</td></tr>`).join('')}</tbody></table></div></details>`;
+}
+
+function renderUsageOverview(summary,esc){
+ const totals=summary.totals;
+ const attempts=Number(totals.attempts||0);
+ const successes=Number(totals.successes||0);
+ const successRate=attempts?Math.round(successes/attempts*100):0;
+ const series=dailySeries(summary.daily||[],summary.days+1);
+ const peak=series.reduce((best,day)=>day.requests>best.requests?day:best,series[0]);
+ const pricedAttempts=(summary.costs||[]).reduce((sum,row)=>sum+Number(row.pricedAttempts||0),0);
+ return `<div class="usage-metrics" aria-label="用量概览">
+  <article class="usage-metric"><span>生成请求</span><strong>${formatCount(totals.requests)}</strong><small>${summary.days} 天内的独立请求</small></article>
+  <article class="usage-metric"><span>上游成功率</span><strong>${successRate}%</strong><small>${formatCount(successes)} / ${formatCount(attempts)} 次尝试成功</small></article>
+  <article class="usage-metric"><span>已知 Tokens</span><strong>${formatCount(totals.tokens)}</strong><small>输入 ${formatCount(totals.inputTokens)} · 输出 ${formatCount(totals.outputTokens)}</small></article>
+  <article class="usage-metric"><span>成功请求平均耗时</span><strong>${formatLatency(totals.averageLatency)}</strong><small>${formatCount(totals.unknownUsage)} 次用量未知</small></article>
+ </div>
+ <div class="usage-overview-grid"><section class="panel usage-trend"><div class="usage-section-head"><div><div class="eyebrow">REQUEST VOLUME</div><h2>请求趋势</h2><p>按 UTC 日期展示；起始日可能仅包含部分时段，重试不重复计数。</p></div><span class="usage-peak">峰值 ${esc(peak.day.slice(5))} · ${formatCount(peak.requests)} 次</span></div>${renderUsageChart(series,esc)}</section>
+ <section class="panel usage-health"><div class="eyebrow">UPSTREAM HEALTH</div><h2>上游尝试</h2><div class="usage-health-total"><strong>${formatCount(attempts)}</strong><span>次尝试</span></div><progress value="${successRate}" max="100" aria-label="上游成功率 ${successRate}%">${successRate}%</progress><div class="usage-health-legend"><span><i class="usage-legend-success"></i>成功 ${formatCount(successes)}</span><span><i class="usage-legend-failure"></i>失败 ${formatCount(totals.failures)}</span></div><p>成功率按上游尝试计算，包含故障转移和重试。</p></section></div>
+ <section class="panel usage-cost"><div class="usage-section-head"><div><div class="eyebrow">ESTIMATED COST</div><h2>费用估算</h2></div><span>${formatCount(pricedAttempts)} 次尝试可估价</span></div><div class="usage-cost-list">${(summary.costs||[]).map(row=>`<div><span>${esc(row.currency)}</span><strong>${Number(row.amount||0).toFixed(6)}</strong></div>`).join('')||'<p class="usage-empty">暂无可估算费用。配置模型价格后，且上游返回用量时才会显示。</p>'}</div><p>按币种分开统计；未知价格或用量不会被记为零费用。</p></section>`;
+}
+
+function renderUsageProviders(rows,esc){
+ return rows.map(row=>{
+  const attempts=Number(row.attempts||0);
+  const successRate=attempts?Math.round(Number(row.successes||0)/attempts*100):0;
+  return `<tr data-usage-search="${esc((row.provider+' '+row.model).toLowerCase())}"><td><strong>${esc(row.provider)}</strong><small>${esc(row.model)}</small></td><td>${formatCount(attempts)}</td><td><span class="usage-rate ${successRate<50?'usage-rate-low':''}">${successRate}%</span></td><td>${formatCount(row.tokens)}</td><td>${formatLatency(row.latency)}</td></tr>`;
+ }).join('');
+}
+
 export async function renderAnalytics({api,esc}){
  const root=document.querySelector('#content');
- root.innerHTML='<div class="heading"><div><div class="eyebrow">USAGE ANALYTICS</div><h1>用量分析</h1><p>按租户隔离统计，仅记录调用元数据；费用为估算。</p></div><select id="usage-days" aria-label="统计周期"><option value="7">最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option></select></div><div id="usage-content"><div class="view-loading" role="status"><span class="loading-dot"></span>正在读取用量…</div></div>';
+ root.innerHTML=`<div class="heading usage-heading"><div><div class="eyebrow">USAGE ANALYTICS</div><h1>用量分析</h1><p>查看调用趋势、上游健康和模型用量。数据按当前租户隔离。</p></div><select id="usage-days" aria-label="统计周期"><option value="7">最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option></select></div><div id="usage-content" aria-live="polite"><div class="view-loading" role="status"><span class="loading-dot"></span>正在读取用量…</div></div>`;
  const content=root.querySelector('#usage-content');
- let loadVersion=0;async function load(){const version=++loadVersion;try{const s=await api('/api/analytics?days='+root.querySelector('#usage-days').value);if(version!==loadVersion)return;const t=s.totals;const max=Math.max(1,...s.daily.map(d=>d.requests));
-  content.innerHTML=`<div class="metrics">${[['生成请求',t.requests],['上游尝试',t.attempts],['已知 Tokens',t.tokens],['平均耗时',t.averageLatency+' ms']].map(([label,value])=>`<div class="metric"><label>${label}</label><strong>${esc(value??0)}</strong></div>`).join('')}</div><div class="panel"><h2>每日调用（UTC）</h2><div class="usage-chart">${s.daily.map(day=>`<div class="usage-day"><span>${day.day.slice(5)}</span><meter min="0" max="${max}" value="${day.requests}"></meter><strong>${day.requests}</strong></div>`).join('')||'<p class="empty">暂无调用数据</p>'}</div></div>
-  <div class="panel section-space"><h2>费用估算</h2>${s.costs.map(c=>`<p><strong>${esc(c.currency)} ${Number(c.amount).toFixed(6)}</strong> · ${c.pricedAttempts} 次有价格且有用量的尝试</p>`).join('')||'<p>暂无可估算费用：需配置价格并由上游返回用量。</p>'}<p class="muted">未知用量 ${t.unknownUsage||0} 次；这些记录不会当作零费用。不同币种分开统计。</p></div>
-  <div class="panel section-space"><h2>按服务商 / 模型</h2><div class="table-wrap"><table><thead><tr><th>服务商 / 模型</th><th>尝试</th><th>成功</th><th>Tokens</th><th>平均耗时</th></tr></thead><tbody>${s.providers.map(p=>`<tr><td>${esc(p.provider)}<br><small>${esc(p.model)}</small></td><td>${p.attempts}</td><td>${p.successes}</td><td>${p.tokens}</td><td>${p.latency} ms</td></tr>`).join('')}</tbody></table></div></div><div class="info">${esc(s.costNotice)} 详细日志保留 ${s.retentionDays} 天。重试算多个上游尝试，但同一生成请求只计一次。</div>`;
- }catch(e){if(version===loadVersion)content.textContent=e.message;}}
- root.querySelector('#usage-days').onchange=load;await load();
+ let loadVersion=0;
+ async function load(){
+  const version=++loadVersion;
+  content.innerHTML='<div class="view-loading" role="status"><span class="loading-dot"></span>正在读取用量…</div>';
+  try{
+   const summary=await api('/api/analytics?days='+root.querySelector('#usage-days').value);
+   if(version!==loadVersion||!root.isConnected)return;
+   content.innerHTML=`${renderUsageOverview(summary,esc)}<section class="panel usage-models"><div class="usage-section-head"><div><div class="eyebrow">MODEL BREAKDOWN</div><h2>服务商与模型</h2><p>按上游尝试次数排序，便于定位低成功率模型。</p></div><label class="usage-search"><span class="sr-only">筛选服务商或模型</span><input id="usage-model-search" type="search" placeholder="筛选服务商或模型"></label></div><div class="table-wrap"><table><thead><tr><th>服务商 / 模型</th><th>尝试</th><th>成功率</th><th>Tokens</th><th>平均耗时</th></tr></thead><tbody>${renderUsageProviders(summary.providers||[],esc)}</tbody></table></div><p class="usage-empty" id="usage-model-empty" hidden>没有匹配的模型。</p>${summary.providers?.length?'':'<p class="usage-empty">当前周期暂无模型调用。</p>'}</section><div class="usage-disclaimer">${esc(summary.costNotice)} 详细日志保留 ${formatCount(summary.retentionDays)} 天。</div>`;
+   const search=content.querySelector('#usage-model-search');
+   search.oninput=()=>{let visible=0;const query=search.value.trim().toLowerCase();content.querySelectorAll('[data-usage-search]').forEach(row=>{row.hidden=!row.dataset.usageSearch.includes(query);if(!row.hidden)visible++;});content.querySelector('#usage-model-empty').hidden=visible>0||!summary.providers?.length;};
+  }catch(error){if(version===loadVersion&&root.isConnected)content.innerHTML=`<div class="panel usage-error" role="alert">${esc(error.message)}</div>`;}
+ }
+ root.querySelector('#usage-days').onchange=()=>void load();
+ await load();
 }
 export async function renderLogs({api,esc,state}){
  const root=document.querySelector('#content');let page=1;
- root.innerHTML=`<div class="heading"><div><div class="eyebrow">REQUEST LOGS</div><h1>调用日志</h1><p>租户独立日志 · 不保存提示词、回复正文或密钥</p></div></div><div class="log-filters"><select id="log-provider" aria-label="筛选服务商"><option value="">全部服务商</option>${state.providers.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><select id="log-status" aria-label="筛选调用状态"><option value="">全部状态</option><option value="success">成功</option><option value="error">失败</option></select><input id="log-key" aria-label="API Key ID" placeholder="按 API Key ID 筛选"><button id="log-query">查询</button></div><div class="panel" id="log-data"><div class="view-loading" role="status"><span class="loading-dot"></span>正在读取日志…</div></div><div class="log-pagination"><button id="log-prev">上一页</button><span id="log-page"></span><button id="log-next">下一页</button></div>`;
- let loadVersion=0;async function load(){const version=++loadVersion;const query=root.querySelector('#log-query');query.disabled=true;query.textContent='查询中…';try{const params=new URLSearchParams({page:String(page),limit:'25',provider:root.querySelector('#log-provider').value,status:root.querySelector('#log-status').value,apiKeyId:root.querySelector('#log-key').value.trim()});const s=await api('/api/logs?'+params);if(version!==loadVersion)return;
+ const search=()=>{page=1;void load();};
+ root.innerHTML=`<div class="heading"><div><div class="eyebrow">REQUEST LOGS</div><h1>调用日志</h1><p>租户独立日志 · 不保存提示词、回复正文或密钥</p></div></div><div class="log-filters"><select id="log-provider" aria-label="筛选服务商"><option value="">全部服务商</option>${state.providers.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><select id="log-status" aria-label="筛选调用状态"><option value="">全部状态</option><option value="success">成功</option><option value="error">失败</option></select><input id="log-key" aria-label="API Key ID" placeholder="按 API Key ID 筛选"><input id="log-model" aria-label="模型" placeholder="搜索模型"><button id="log-query">查询</button></div><div class="panel" id="log-data"><div class="view-loading" role="status"><span class="loading-dot"></span>正在读取日志…</div></div><div class="log-pagination"><button id="log-prev">上一页</button><span id="log-page"></span><button id="log-next">下一页</button></div>`;
+ let loadVersion=0;async function load(){const version=++loadVersion;const query=root.querySelector('#log-query');query.disabled=true;query.textContent='查询中…';try{const params=new URLSearchParams({page:String(page),limit:'25',provider:root.querySelector('#log-provider').value,status:root.querySelector('#log-status').value,apiKeyId:root.querySelector('#log-key').value.trim(),q:root.querySelector('#log-model').value.trim()});const s=await api('/api/logs?'+params);if(version!==loadVersion)return;
  root.querySelector('#log-data').innerHTML=`<div class="table-wrap"><table><thead><tr><th>时间 / 请求</th><th>服务商 / 模型</th><th>状态</th><th>用量 / 费用</th><th>路由依据</th></tr></thead><tbody>${s.items.map(l=>`<tr><td>${esc(new Date(l.time).toLocaleString())}<br><small>${esc(l.request_id.slice(0,12))} · ${esc(l.transport)}</small></td><td>${esc(l.provider)}<br><small>${esc(l.model)}</small></td><td>${l.status}<br>${l.latency} ms</td><td>${l.usage_known?l.tokens+' tokens':'用量未知'}<br>${l.estimated_cost===null?'费用未知':esc(l.currency)+' '+Number(l.estimated_cost).toFixed(6)}<br><small>${esc(l.api_key_id||'账户调用')}</small></td><td>${esc(l.reason)}</td></tr>`).join('')}</tbody></table></div>${!s.items.length?'<p class="empty">暂无记录</p>':''}`;
  root.querySelector('#log-page').textContent=`第 ${page} 页 · 共 ${s.total} 条尝试`;root.querySelector('#log-prev').disabled=page<=1;root.querySelector('#log-next').disabled=page*25>=s.total;
  }catch(e){if(version===loadVersion)root.querySelector('#log-data').textContent=e.message;}finally{if(version===loadVersion){query.disabled=false;query.textContent='查询';}}}
- root.querySelector('#log-key').onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();page=1;void load();}};root.querySelector('#log-provider').onchange=root.querySelector('#log-status').onchange=()=>{page=1;void load();};root.querySelector('#log-query').onclick=()=>{page=1;void load();};root.querySelector('#log-prev').onclick=()=>{page--;void load();};root.querySelector('#log-next').onclick=()=>{page++;void load();};await load();
+ root.querySelector('#log-key').onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();page=1;void search();}};root.querySelector('#log-provider').onchange=root.querySelector('#log-status').onchange=()=>{page=1;void load();};root.querySelector('#log-query').onclick=()=>{page=1;void load();};root.querySelector('#log-prev').onclick=()=>{page--;void load();};root.querySelector('#log-next').onclick=()=>{page++;void load();};await load();
 }

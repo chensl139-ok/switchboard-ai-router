@@ -8,8 +8,15 @@ export class ApiKeyStore {
   this.file=path.join(dir,'api-keys.json');this.now=now;this.tenantId=tenantId;
   this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{legacyEnabled,keys:[]};
  }
- persist(){const temp=this.file+'.tmp';writeFileSync(temp,JSON.stringify(this.state),{mode:0o600});renameSync(temp,this.file);}
- mutate(fn){const before=structuredClone(this.state);try{const result=fn();this.persist();return result;}catch(e){this.state=before;throw e;}}
+ persist(){
+  const snapshot=this.state;
+  const temp=this.file+'.tmp';
+  writeFileSync(temp,JSON.stringify(snapshot),{mode:0o600});
+  renameSync(temp,this.file);
+ }
+ mutate(fn){const before=structuredClone(this.state);let result;try{result=fn();}catch(e){this.state=before;throw e;}
+  try{this.persist();}catch(e){this.state=before;throw e;}
+  return result;}
  validate(input){
   if(!input||typeof input!=='object'||typeof input.name!=='string'||!input.name.trim()||input.name.length>80)throw error('请输入 1–80 字的密钥名称');
   const result={name:input.name.trim(),enabled:input.enabled??true};

@@ -12,8 +12,14 @@ export class Accounts {
   mkdirSync(dir,{recursive:true,mode:0o700});this.file=path.join(dir,'accounts.json');this.bootstrapToken=bootstrapToken;this.now=now;this.kdf=0;
   this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{users:[],tenants:[{id:'default',name:'默认租户',createdAt:new Date(now()).toISOString()}],members:[],sessions:[],invites:[],audit:[]};
  }
- save(){writeFileSync(this.file+'.tmp',JSON.stringify(this.state),{mode:0o600});renameSync(this.file+'.tmp',this.file);}
- mutate(fn){const before=structuredClone(this.state);try{const result=fn();this.save();return result;}catch(error){this.state=before;throw error;}}
+ save(){
+  const snapshot=this.state;
+  writeFileSync(this.file+'.tmp',JSON.stringify(snapshot),{mode:0o600});
+  renameSync(this.file+'.tmp',this.file);
+ }
+ mutate(fn){const before=structuredClone(this.state);let result;try{result=fn();}catch(error){this.state=before;throw error;}
+  try{this.save();}catch(error){this.state=before;throw error;}
+  return result;}
  event(tenantId,actorId,action,target){this.state.audit.unshift({id:randomUUID(),tenantId,actorId,action,target,time:new Date(this.now()).toISOString()});this.state.audit=this.state.audit.slice(0,2000);}
  validateUser(input){
   if(!input||typeof input.email!=='string'||input.email.length>254||!/^\S+@\S+\.\S+$/.test(input.email))throw fail('邮箱格式无效');
@@ -78,6 +84,23 @@ export class Accounts {
  logout(token){if(typeof token!=='string')return;this.mutate(()=>{this.state.sessions=this.state.sessions.filter(s=>s.hash!==hash(token));});}
  requireAdmin(caller){if(!['owner','admin'].includes(caller.role))throw fail('此操作需要租户管理员权限',403);}
  validateRole(caller,role){this.requireAdmin(caller);if(!roles.includes(role))throw fail('角色无效');if(role==='owner'&&caller.role!=='owner')throw fail('只有所有者可授予所有者角色',403);}
+ deleteTenant(caller,tenantId){
+  this.requireAdmin(caller);
+  if(caller.role!=='owner')throw fail('仅租户所有者可删除租户',403);
+  if(tenantId==='default')throw fail('默认租户不能删除');
+  if(tenantId===caller.tenantId)throw fail('请先切换到其他租户，再删除当前租户');
+  const tenant=this.state.tenants.find(t=>t.id===tenantId);if(!tenant)throw fail('租户不存在',404);
+  const member=this.state.members.find(m=>m.tenantId===tenantId&&m.userId===caller.userId);
+  if(!member||member.role!=='owner')throw fail('仅租户所有者可删除租户',403);
+  this.mutate(()=>{
+   this.state.tenants=this.state.tenants.filter(t=>t.id!==tenantId);
+   this.state.members=this.state.members.filter(m=>m.tenantId!==tenantId);
+   this.state.invites=this.state.invites.filter(i=>i.tenantId!==tenantId);
+   this.state.sessions=this.state.sessions.filter(s=>s.tenantId!==tenantId);
+   this.state.audit=this.state.audit.filter(a=>a.tenantId!==tenantId);
+  });
+  return {deleted:tenantId,name:tenant.name};
+ }
  createTenant(caller,name){
   if(typeof name!=='string'||!name.trim()||name.length>80)throw fail('租户名称长度需为 1–80');
   if(this.state.tenants.length>=50)throw fail('当前单实例最多支持 50 个租户');

@@ -1,7 +1,11 @@
 services:
   switchboard:
-    image: switchboard-ai-router:${SWITCHBOARD_VERSION:-1.1.0}
-    build: .
+    image: switchboard-ai-router:${SWITCHBOARD_VERSION:-1.2.0}
+    build:
+      context: .
+      args:
+        VERSION: ${SWITCHBOARD_VERSION:-1.2.0}
+        REVISION: ${SWITCHBOARD_REVISION:-local}
     container_name: switchboard-ai-router
     restart: unless-stopped
     init: true

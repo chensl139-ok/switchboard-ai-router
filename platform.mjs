@@ -3,6 +3,7 @@ import {generationPaths,apiToken,clientError} from './protocols.mjs';
 import {safeFetch} from './network.mjs';
 import http from 'node:http';
 import path from 'node:path';
+import {rmSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createHmac,randomUUID} from 'node:crypto';
 import {createApp} from './server.mjs';
@@ -71,6 +72,13 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(req.method!=='POST')throw fail('接口不存在',404);
     const data=await body(req);
     if(route==='tenants'){const tenant=accounts.createTenant(current,data.name);return json(res,201,tenant);}
+    if(route==='tenants/delete'){
+     const removed=accounts.deleteTenant(current,data.tenantId);
+     engines.get(removed.deleted)?.close();
+     engines.delete(removed.deleted);
+     try{rmSync(path.join(dir,'tenants',removed.deleted),{recursive:true,force:true});}catch(error){console.error(JSON.stringify({level:'error',event:'tenant_dir_cleanup_failed',tenantId:removed.deleted,message:error?.message||String(error)}));}
+     return json(res,200,removed);
+    }
     if(route==='switch'){accounts.switchTenant(current,data.tenantId);return json(res,200,accounts.me(session(req)));}
     if(route==='invite')return json(res,201,accounts.invite(current,data));
     if(route==='revoke-invite'){accounts.revokeInvite(current,data.id);return json(res,200,{ok:true});}
@@ -103,6 +111,8 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  return server;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ process.on('unhandledRejection',error=>{console.error(JSON.stringify({level:'error',event:'unhandled_rejection',message:error?.message||String(error)}));});
+ process.on('uncaughtException',error=>{console.error(JSON.stringify({level:'fatal',event:'uncaught_exception',message:error?.message||String(error)}));process.exit(1);});
  const app=createPlatform();
  const port=Number(process.env.PORT)||3000;
  const host=process.env.HOST||'0.0.0.0';

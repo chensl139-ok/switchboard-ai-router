@@ -21,13 +21,13 @@ export function showLogin(mode='login'){
  dialog.querySelector('#account-mode')?.addEventListener('click',()=>showLogin(mode==='login'?'register':'login'));
  dialog.querySelector('form').onsubmit=async e=>{e.preventDefault();const form=e.target,button=form.querySelector('button');button.disabled=true;try{const profile=await accountRequest(mode==='setup'?'setup':mode==='register'?'register':'login',Object.fromEntries(new FormData(form)));form.reset();await readyHandler(profile);dialog.close();}catch(error){dialog.querySelector('#account-error').textContent=error.message;}finally{button.disabled=false;}};
 }
-export async function renderMembers({profile,esc,toast}){
+export async function renderMembers({profile,esc,toast,prefix=''}){
  const root=document.querySelector('#content');let data;try{data=await accountRequest('members');}catch(e){root.textContent=e.message;return;}
- root.innerHTML=`<div class="heading"><div><div class="eyebrow">MEMBERS & ROLES</div><h1>成员与角色</h1><p>当前租户的角色独立生效，移除成员后下一次请求即失效。</p></div></div>
+ root.innerHTML=`${prefix}<div class="heading"><div><div class="eyebrow">MEMBERS & ROLES</div><h1>成员与角色</h1><p>当前租户的角色独立生效，移除成员后下一次请求即失效。</p></div></div>
  <div class="panel"><h2>租户成员</h2><div class="table-wrap"><table><thead><tr><th>姓名</th><th>邮箱</th><th>角色</th><th>操作</th></tr></thead><tbody>${data.members.map(m=>`<tr><td>${esc(m.name)}${m.userId===profile.user.id?'（你）':''}</td><td>${esc(m.email)}</td><td><select data-role-user="${m.userId}" ${m.role==='owner'&&profile.role!=='owner'?'disabled':''}>${['owner','admin','member','viewer'].map(role=>`<option value="${role}" ${role===m.role?'selected':''} ${role==='owner'&&profile.role!=='owner'?'disabled':''}>${{owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[role]}</option>`).join('')}</select></td><td><button data-remove-member="${m.userId}" ${m.userId===profile.user.id||m.role==='owner'&&profile.role!=='owner'?'disabled':''}>移除</button></td></tr>`).join('')}</tbody></table></div></div>
  <div class="panel section-space"><h2>邀请成员</h2><form id="invite-form"><div class="form-grid"><label>邮箱<input name="email" type="email" required></label><label>角色<select name="role">${['member','viewer','admin',...(profile.role==='owner'?['owner']:[])].map(role=>`<option value="${role}">${{owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[role]}</option>`).join('')}</select></label></div><button class="primary">生成邀请</button></form><div id="invite-result"></div><p class="muted">邀请有效 72 小时，仅绑定邮箱可使用。通过你选择的安全渠道发送邀请码；系统不自动发送邮件。</p></div>
  <div class="panel section-space"><h2>待处理邀请</h2>${data.invites.filter(i=>i.expiresAt>Date.now()).map(i=>`<p>${esc(i.email)} · ${esc(i.role)} <button data-revoke="${i.id}" ${i.role==='owner'&&profile.role!=='owner'?'disabled':''}>撤销邀请</button></p>`).join('')||'<p class="muted">暂无有效邀请</p>'}</div><div class="info">所有者：全部权限与所有者管理。管理员：服务商、路由、Key、价格和普通成员管理。成员：查看配置和用量、调用模型。只读：查看配置、用量和日志，不可调用或修改。</div>`;
- const reload=()=>renderMembers({profile,esc,toast});
+ const reload=()=>renderMembers({profile,esc,toast,prefix});
  root.querySelector('#invite-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const result=await accountRequest('invite',Object.fromEntries(new FormData(e.target)));const box=root.querySelector('#invite-result');box.innerHTML='<label>邀请码（仅展示一次）<input readonly id="invite-code"></label>';box.querySelector('input').value=result.code;}catch(error){toast(error.message);}finally{button.disabled=false;}};
  root.querySelectorAll('[data-revoke]').forEach(el=>el.onclick=async()=>{try{await accountRequest('revoke-invite',{id:el.dataset.revoke});await reload();}catch(error){toast(error.message);}});
  root.querySelectorAll('[data-role-user]').forEach(el=>el.onchange=async()=>{try{await accountRequest('member-role',{userId:el.dataset.roleUser,role:el.value});await reload();toast('角色已更新');}catch(error){toast(error.message);await reload();}});
@@ -40,6 +40,20 @@ export async function renderAccount({profile,esc,toast,onReady}){
  const root=document.querySelector('#content');root.innerHTML=`<div class="heading"><div><div class="eyebrow">ACCOUNT & WORKSPACES</div><h1>账户与租户</h1><p>${esc(profile.user.name)} · ${esc(profile.user.email)}</p></div><span class="account-auth-badge">${profile.user.feishuLinked?'飞书已连接':'邮箱账户'}</span></div><div class="panel"><h2>创建新租户</h2><p>新租户拥有独立的服务商、API Key、价格和用量数据。</p><form id="new-tenant"><label>租户名称<input name="name" required maxlength="80"></label><button class="primary">创建租户</button></form></div>
  <div class="panel section-space"><h2>接受邀请</h2><form id="accept-invite"><label>邀请码<input name="code" type="password" required autocomplete="off"></label><button>加入租户</button></form></div>
  <div class="panel section-space"><h2>${profile.user.hasPassword?'修改密码':'设置备用密码'}</h2><p>${profile.user.hasPassword?'更新后会退出此账户的其他会话。':'设置后可在飞书不可用时使用邮箱与密码登录。'}</p><form id="change-password">${profile.user.hasPassword?'<label>原密码<input name="currentPassword" type="password" required autocomplete="current-password"></label>':''}<label>新密码<input name="newPassword" type="password" minlength="12" maxlength="256" required autocomplete="new-password"></label><button>${profile.user.hasPassword?'更新密码并退出其他会话':'设置备用密码'}</button></form></div>`;
+ const owned=profile.tenants.filter(t=>t.role==='owner'&&t.id!=='default');
+ if(owned.length){
+  const box=document.createElement('div');box.className='panel section-space danger-zone';
+  box.innerHTML=`<h2>删除租户</h2><p class="muted">仅租户所有者可删除。将移除该租户下的所有成员、邀请、服务商、API Key 与用量数据，不可恢复。当前所在租户与默认租户不能删除。</p>`;
+  const list=document.createElement('div');list.className='tenant-delete-list';
+  for(const t of owned.filter(t=>t.id!==profile.tenantId)){
+   const row=document.createElement('p');
+   const btn=document.createElement('button');btn.type='button';btn.textContent='删除 '+t.name;
+   btn.onclick=()=>{confirmAction(box,`删除租户“${t.name}”？`,'该租户下所有成员、服务商密钥、API Key 与历史用量将被删除，且无法恢复。',async()=>{await accountRequest('tenants/delete',{tenantId:t.id});toast('租户已删除');await onReady(await accountRequest('me'));},toast);};
+   row.append(btn);list.append(row);
+  }
+  box.append(owned.some(t=>t.id===profile.tenantId)?(list.append(Object.assign(document.createElement('p'),{className:'muted',textContent:'当前租户需先切换其他租户才能删除。'})),list):list);
+  root.append(box);
+ }
  for(const [id,route] of [['new-tenant','tenants'],['accept-invite','accept-invite'],['change-password','password']])root.querySelector('#'+id).onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await accountRequest(route,Object.fromEntries(new FormData(e.target)));e.target.reset();toast('操作成功');await onReady(await accountRequest('me'));}catch(error){toast(error.message);}finally{button.disabled=false;}};
  if(['owner','admin'].includes(profile.role)){try{const audit=await accountRequest('audit');const section=document.createElement('section');section.className='panel section-space';section.innerHTML='<h2>租户操作审计</h2>'+audit.items.slice(0,50).map(a=>`<p class="muted">${esc(new Date(a.time).toLocaleString())} · ${esc(a.action)} · ${esc(a.target)}</p>`).join('');root.append(section);}catch(error){toast(error.message);}}
 }

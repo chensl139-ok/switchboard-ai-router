@@ -67,7 +67,8 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
     const send=value=>{if(ws.readyState===WebSocket.OPEN){if(ws.bufferedAmount>1024*1024){ws.close(1013,'客户端读取过慢');return;}ws.send(JSON.stringify(value));}};
     const timeout=setTimeout(()=>{if(!authorized)ws.close(1008,'需要认证');},5000);
     ws.on('pong',()=>{alive=true;});
-    const heartbeat=setInterval(()=>{if(!alive){ws.terminate();return;}alive=false;ws.ping();},30000);
+    const heartbeat=setInterval(()=>{if(!alive){ws.terminate();return;}alive=false;try{ws.ping();}catch{}},30000);
+    ws.__heartbeat=heartbeat;
     ws.on('close',()=>{clearTimeout(timeout);clearInterval(heartbeat);running?.abort.abort();});
     ws.on('error',()=>{running?.abort.abort();});
     ws.on('message',async raw=>{
@@ -85,7 +86,10 @@ export function installWebSocket(server, {authenticate, execute, originAllowed})
       finally{running=null;}
     });
   });
-  server.on('close',()=>{for(const ws of wss.clients)ws.close(1001,'服务关闭');wss.close();});
+  server.on('close',()=>{
+   for(const ws of wss.clients){try{clearInterval(ws.__heartbeat);ws.close(1001,'服务关闭');}catch{}}
+   try{wss.close();}catch{}
+  });
   return wss;
 }
 export async function writeSSE(res, value, signal, event=null) {
