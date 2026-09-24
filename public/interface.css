@@ -116,6 +116,9 @@ body.theme-dark::before { background: radial-gradient(circle at 85% -10%, #0d89b
   border-color: transparent;
 }
 .sidebar .nav-item.selected .nav-icon, body.theme-dark .sidebar .nav-item.selected .nav-icon { color: var(--ui-accent); }
+.sidebar .nav-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; line-height: 1.2; }
+.sidebar .nav-children { margin-top: 2px; color: var(--ui-subtle); font-size: 9px; font-weight: 400; white-space: nowrap; }
+.sidebar .nav-item.selected .nav-children { color: var(--ui-accent-ink); opacity: .74; }
 .sidebar .nav-item.selected::before, body.theme-dark .sidebar .nav-item.selected::before,
 .sidebar .nav-indicator, .sidebar .nav-item.selected .nav-indicator { display: none !important; }
 .sidebar .nav-group+.nav-group, body.theme-dark .sidebar .nav-group+.nav-group { border-color: var(--ui-border); }
@@ -150,12 +153,18 @@ body.sidebar-compact { --sidebar-width: 72px; }
   .sidebar-compact .sidebar .nav-label { height: 14px; margin: 0 0 7px; visibility: hidden; }
   .sidebar-compact .sidebar .nav-item { width: 40px; height: 40px; min-height: 40px; padding: 10px 12px; justify-content: flex-start; }
   .sidebar-compact .sidebar .nav-item .nav-icon { width: 16px; height: 20px; }
+  .sidebar-compact .sidebar .nav-copy { display: none; }
   .sidebar-compact .workspace-chip { padding: 0; background: transparent; border: 0; }
   .sidebar-compact .tenant-button { width: 40px; height: 42px; min-height: 42px; padding: 6px; background: var(--ui-surface); border: 1px solid var(--ui-border); }
   .sidebar-compact .tenant-button .tenant-avatar { width: 28px; height: 28px; min-width: 28px; }
+  .sidebar-compact .tenant-button { position: relative; justify-content: center; }
+  .sidebar-compact .tenant-button::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--ui-accent); border: 2px solid var(--ui-surface); }
+  .sidebar-compact .tenant-button:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
   .sidebar-compact .tenant-button .tenant-caret { display: none; }
   .sidebar-compact .sidebar-footer { display: none; }
 }
+.provider-live { margin-left: auto; color: var(--ui-subtle); font-size: 10px; white-space: nowrap; }
+@media (max-width: 720px) { .sidebar .nav-children { display: none; } .sidebar-compact .sidebar .nav-copy { display: flex; } .sidebar-compact .tenant-button::after { display: none; } .provider-live { margin-left: 0; } }
 
 body>main>header, body.theme-dark>main>header,
 body>main>footer, body.theme-dark>main>footer {

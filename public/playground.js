@@ -37,7 +37,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  <div class="lab-settings-divider"></div><label>模型思考<select id="lab-thinking"><option value="auto">模型默认</option><option value="enabled">开启思考</option><option value="disabled">关闭思考</option></select></label><p class="lab-help" id="lab-thinking-help">思考开关控制模型推理，不只是隐藏显示。</p>
  <label class="lab-switch"><span>思考区可见性<small>仅调整界面，独立于模型思考开关</small></span><input id="lab-show-thinking" type="checkbox" role="switch"></label>
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
- <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><label class="lab-switch"><span>详尽统计<small>实时显示 TTFT / TPOT / Tokens/s</small></span><input id="lab-verbose" type="checkbox" role="switch"></label></aside></div>`);
+ <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><label class="lab-switch"><span>详尽统计<small>TTFT / 端到端输出速率（需上游用量）</small></span><input id="lab-verbose" type="checkbox" role="switch"></label></aside></div>`);
  const $=selector=>root.querySelector(selector);
  $('#lab-compare').onclick=()=>{controller?.abort();controller=null;view='compare';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh});};
  $('#lab-prompt').value=draft;
@@ -57,7 +57,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   const parts=[esc(m.label||'自动路由')];
   if(m.status!=='生成中'&&m.durationMs)parts.push((m.durationMs/1000).toFixed(1)+' 秒');
   if(m.totalTokens)parts.push(m.totalTokens+' tokens');
-  if(m.status!=='生成中'&&m.stats?.tps)parts.push(m.stats.tps.toFixed(1)+' tok/s');
+  if(m.status!=='生成中'&&m.stats?.tps)parts.push('端到端 '+m.stats.tps.toFixed(1)+' tok/s');
   if(settings.streamingVerbose&&m.stats){
    if(m.stats.ttft!=null)parts.push('TTFT '+m.stats.ttft+'ms');
    if(m.stats.tpot!=null)parts.push('TPOT '+m.stats.tpot+'ms');

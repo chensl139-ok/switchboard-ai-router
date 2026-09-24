@@ -7,11 +7,11 @@ import {renderPrices} from './prices.js';
 import {renderPlayground,stopPlayground,resetPlayground} from './playground.js';
 import {renderRouting} from './routing.js';
 import {renderApiKeys} from './api-keys.js';
-import {providerCards,providerReady} from './provider-ui.js';
+import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.js';
 import {renderDashboard} from './dashboard.js';
 import {renderAudit} from './audit.js';
 let modelList=[],modelEpoch=0,modelChannelAssignments={},editingProviderId='';
-let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer;
+let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
 const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
@@ -20,6 +20,13 @@ document.querySelector('#provider-form [name="protocol"]').closest('label').inse
 document.querySelector('[data-tab="providers"] .nav-name').textContent='服务商与模型';
 document.querySelector('[data-tab="models"]')?.remove();
 document.querySelector('[data-tab="media"]')?.remove();
+const navDetails={providers:'服务商 · 模型目录',playground:'对话 · 媒体',analytics:'用量 · 模型价格',members:'成员 · 审计'};
+for(const [id,detail] of Object.entries(navDetails)){
+ const button=document.querySelector(`.sidebar [data-tab="${id}"]`),name=button?.querySelector('.nav-name');if(!name)continue;
+ const copy=document.createElement('span'),sub=document.createElement('small');copy.className='nav-copy';sub.className='nav-children';sub.textContent=detail;name.before(copy);copy.append(name,sub);
+ button.title=`${name.textContent}：${detail}`;button.setAttribute('aria-label',button.title);
+}
+for(const [node,label] of [...document.querySelectorAll('.sidebar .nav-label')].map((node,index)=>[node,['核心工作流','开发接入','团队与用量'][index]]))node.textContent=label;
 document.querySelector('#provider-form [name="apiKey"]').closest('label').insertAdjacentHTML('afterend','<details class="key-advanced"><summary>备用密钥（可选）<small>同服务商配置第二把 Key 用于故障转移；只配一把时无需关心</small></summary><label>Metered API Key<input name="meteredApiKey" type="password" autocomplete="new-password" placeholder="留空保留已有备用密钥"></label></details>');
 
 const isManager=()=>['owner','admin'].includes(profile?.role);
@@ -35,7 +42,8 @@ const pageTabs=options=>`<div class="page-tabs" role="tablist">${options.map(([i
 const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view))&&!(profile?.role==='viewer'&&groups.playground.includes(view));
 
 function syncNavigation(){
- $('#breadcrumb').textContent=names[tab];
+ const parent=Object.keys(groups).find(key=>key!==tab&&groups[key].includes(tab));
+ $('#breadcrumb').textContent=parent?`${names[parent]} / ${names[tab]}`:names[tab];
  for(const button of document.querySelectorAll('nav button[data-tab]')){
   const view=button.dataset.tab;
   button.hidden=(!isManager()&&['keys','members','routing'].includes(view))||(profile?.role==='viewer'&&groups.playground.includes(view));
@@ -59,6 +67,14 @@ function renderProviderFilter(root){
   root.querySelector('#provider-empty').hidden=count>0;
  };
  search.oninput=filter;status.onchange=filter;filter();
+ const tenantId=profile?.tenantId,indicator=root.querySelector('#provider-live');let busy=false;
+ const refresh=async()=>{
+  if(busy||document.visibilityState==='hidden'||!root.isConnected||tab!=='providers'||profile?.tenantId!==tenantId)return;
+  busy=true;try{const result=await api('/api/logs?limit=100');if(!root.isConnected||profile?.tenantId!==tenantId)return;state.logs=result.items;refreshProviderHealth(root,state.providers,state.logs);if(indicator)indicator.textContent=`已更新 ${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;}
+  catch{if(indicator)indicator.textContent='更新暂停 · 稍后重试';}finally{busy=false;}
+ };
+ providerPoll={timer:setInterval(refresh,10000),refresh};
+ void refresh();
 }
 
 function initialPageHtml(){
@@ -67,7 +83,7 @@ function initialPageHtml(){
   const header=heading('服务商与模型','一处配置服务商与模型；按优先级排序，失败自动切换到下一个。',isManager()?'<button id="add-provider" class="primary">＋ 添加服务商</button>':'');
   const tabs=pageTabs([['providers','服务商'],['models','模型目录']]);
   if(tab==='models')return header+tabs;
-  return header+tabs+`<div class="workflow-strip"><div><b>1</b><span>连接服务商<small>填写地址与密钥</small></span></div><div><b>2</b><span>选择模型<small>协议自动匹配</small></span></div><div><b>3</b><span>调整顺序<small>失败自动向下切换</small></span></div></div><div class="filter-bar"><label class="search-field"><span class="sr-only">搜索服务商或模型</span><input type="search" id="provider-search" placeholder="搜索服务商、模型名称或 ID…"></label><select id="provider-filter" aria-label="服务商状态"><option value="">全部状态</option><option value="true">可用</option><option value="false">待配置 / 未启用</option></select><span id="provider-count" class="muted"></span></div>`+cards(true)+`<div id="provider-empty" class="empty" hidden>未找到匹配服务商。试试其他关键词或调整状态筛选。</div><div class="info">只需调整顺序：越靠前优先级越高，默认服务商始终置顶。模型协议和密钥选择由系统自动处理；删除服务商不会删除历史用量日志。</div>`;
+  return header+tabs+`<div class="workflow-strip"><div><b>1</b><span>连接服务商<small>填写地址与密钥</small></span></div><div><b>2</b><span>选择模型<small>协议自动匹配</small></span></div><div><b>3</b><span>调整顺序<small>失败自动向下切换</small></span></div></div><div class="filter-bar"><label class="search-field"><span class="sr-only">搜索服务商或模型</span><input type="search" id="provider-search" placeholder="搜索服务商、模型名称或 ID…"></label><select id="provider-filter" aria-label="服务商状态"><option value="">全部状态</option><option value="true">可用</option><option value="false">待配置 / 未启用</option></select><span id="provider-count" class="muted"></span><span id="provider-live" class="provider-live" role="status">正在更新调用状态…</span></div>`+cards(true)+`<div id="provider-empty" class="empty" hidden>未找到匹配服务商。试试其他关键词或调整状态筛选。</div><div class="info">只需调整顺序：越靠前优先级越高，默认服务商始终置顶。模型协议和密钥选择由系统自动处理；删除服务商不会删除历史用量日志。</div>`;
  }
  if(groups.playground.includes(tab))return heading('模型实验室','直接对话或生成媒体；选中模型时自动适配协议。')+pageTabs([['playground','对话'],['media','媒体']]);
  return '<div class="view-loading" role="status"><span class="loading-dot"></span>正在加载…</div>';
@@ -94,6 +110,7 @@ function renderPage(root){
 }
 
 function render(){
+ if(providerPoll){clearInterval(providerPoll.timer);providerPoll=undefined;}
  stopPlayground();stopMediaLab();
  if(!canOpen(tab))tab='overview';
  history.replaceState(null,'','#'+tab);document.title=names[tab]+' · Switchboard';
@@ -103,6 +120,7 @@ function render(){
  root.innerHTML=initialPageHtml();
  renderPage(root);
 }
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void providerPoll?.refresh();});
 function edit(id){const p=state.providers.find(p=>p.id===id)||{id:'',name:'',baseUrl:'',model:'',protocol:'openai',weight:1,enabled:false};const f=$('#provider-form');f.reset();resetModels();editingProviderId=id||'';modelChannelAssignments={...(p.modelChannels||{})};for(const k of ['id','name','baseUrl','model','protocol'])f.elements[k].value=p[k];f.elements.anthropicAuth.value=p.anthropicAuth||'x-api-key';f.elements.models.value=(p.models||[]).join('\n');f.elements.id.readOnly=!!id;f.elements.enabled.checked=p.enabled;if(p.hasMeteredKey||Object.values(modelChannelAssignments).includes('metered')){const adv=f.querySelector('.key-advanced');if(adv)adv.open=true;}$('#edit-error').textContent='';$('#edit').showModal()}
 let formDirty=false;
 $('#provider-form').addEventListener('input',()=>{formDirty=true;});
@@ -168,9 +186,9 @@ function renderTenantChip(profile){
  const chip=document.querySelector('.workspace-chip');if(!chip)return;
  const current=profile.tenants.find(t=>t.id===profile.tenantId)||profile.tenants[0];
  const initial=name=>String(name||'?').trim().slice(0,1).toUpperCase();
- chip.innerHTML=`<button type="button" class="tenant-button" id="tenant-button" aria-haspopup="true" aria-expanded="false" aria-label="切换租户"><span class="tenant-avatar">${esc(initial(current?.name))}</span><span class="workspace-copy">${esc(current?.name||'默认租户')}<small>数据与密钥按租户隔离</small></span><svg class="nav-icon tenant-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="tenant-popover" id="tenant-popover" role="menu" hidden><div class="tenant-popover-label">切换租户</div>${profile.tenants.map(t=>`<button type="button" role="menuitemradio" aria-checked="${t.id===profile.tenantId}" data-tenant="${esc(t.id)}" class="${t.id===profile.tenantId?'selected':''}"><span class="tenant-avatar">${esc(initial(t.name))}</span><span>${esc(t.name)}</span>${t.id===profile.tenantId?'<span class="tenant-check">✓</span>':''}</button>`).join('')}</div>`;
+ chip.innerHTML=`<button type="button" class="tenant-button" id="tenant-button" aria-haspopup="true" aria-expanded="false" aria-label="当前租户：${esc(current?.name||'默认租户')}，点击切换" title="当前租户：${esc(current?.name||'默认租户')}，点击切换"><span class="tenant-avatar">${esc(initial(current?.name))}</span><span class="workspace-copy">${esc(current?.name||'默认租户')}<small>数据与密钥按租户隔离</small></span><svg class="nav-icon tenant-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="tenant-popover" id="tenant-popover" role="menu" hidden><div class="tenant-popover-label">切换租户</div>${profile.tenants.map(t=>`<button type="button" role="menuitemradio" aria-checked="${t.id===profile.tenantId}" data-tenant="${esc(t.id)}" class="${t.id===profile.tenantId?'selected':''}"><span class="tenant-avatar">${esc(initial(t.name))}</span><span>${esc(t.name)}</span>${t.id===profile.tenantId?'<span class="tenant-check">✓</span>':''}</button>`).join('')}</div>`;
  const button=chip.querySelector('#tenant-button'),popover=chip.querySelector('#tenant-popover');
- button.onclick=()=>{const open=popover.hidden;if(open){popover.hidden=false;const rect=button.getBoundingClientRect(),width=Math.max(220,rect.width);popover.style.width=width+'px';popover.style.left=Math.max(8,Math.min(rect.left,innerWidth-width-8))+'px';popover.style.top=Math.max(8,Math.min(rect.bottom+6,innerHeight-popover.offsetHeight-8))+'px';}else popover.hidden=true;button.setAttribute('aria-expanded',String(open));};
+ button.onclick=()=>{const open=popover.hidden;if(open){popover.hidden=false;const rect=button.getBoundingClientRect(),compact=document.body.classList.contains('sidebar-compact')&&innerWidth>720,width=compact?240:Math.max(220,rect.width);popover.style.width=width+'px';const desiredLeft=compact?rect.right+10:rect.left,desiredTop=compact?rect.top:rect.bottom+6;popover.style.left=Math.max(8,Math.min(desiredLeft,innerWidth-width-8))+'px';popover.style.top=Math.max(8,Math.min(desiredTop,innerHeight-popover.offsetHeight-8))+'px';}else popover.hidden=true;button.setAttribute('aria-expanded',String(open));};
  popover.querySelectorAll('[data-tenant]').forEach(item=>item.onclick=async()=>{popover.hidden=true;button.setAttribute('aria-expanded','false');if(item.dataset.tenant===profile.tenantId)return;try{resetPlayground();await accountReady(await accountRequest('switch',{tenantId:item.dataset.tenant}));}catch(e){toast(e.message);}});
 }
 function resetTenantChip(){
