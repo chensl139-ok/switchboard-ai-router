@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[v2.0.1 整合版 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.1) · [更新记录](CHANGELOG.md) · [2.0 开发历史](docs/RELEASE_HISTORY.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+[v2.0.1 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.1) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 能做什么
 
@@ -21,14 +21,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，用量使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-版本整理说明：当前 v2.0.1 是 2.0 系列整合版，包含原先到 v2.0.15 的累计改动，并非早期 v2.0.1 的代码。此次 GHCR 整理后仅保留当前整合版的 `2.0.1`、`2.0` 和 `latest` 镜像标签；历史镜像已停止提供。旧版 Git tag 与 Release 仅供源码和发布记录追溯，离线部署可使用对应 Release 附件。升级前备份数据，并按镜像 digest 或实际运行版本核对部署来源。
-
-| 现存版本 | 定位 | 获取方式 |
-| --- | --- | --- |
-| [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0) | 首个可部署版本 | Git tag 源码；无独立 Release 附件 |
-| [v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) | 租户、飞书登录与多服务商能力 | 历史 Release 附件与 Git tag |
-| [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) | 2.0 路由架构基线 | 历史 Release 附件与 Git tag |
-| [v2.0.1](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.1) | 最新整合维护版 | GHCR、多架构离线包、源码附件与 Git tag |
+当前发布版本为 v2.0.1。GHCR 提供 `2.0.1`、`2.0` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release，但这些版本的 GHCR 在线镜像已清理。
 
 ## 五分钟部署
 
@@ -158,6 +151,6 @@ SWITCHBOARD_TOKEN=YOUR_API_KEY node scripts/smoke.mjs
 SWITCHBOARD_TOKEN=YOUR_API_KEY node scripts/smoke.mjs --live
 ```
 
-推送 `v*` 标签会触发 [Release 工作流](.github/workflows/release.yml)：运行检查和测试、构建并推送 GHCR 的 amd64／arm64 镜像、从对应 [CHANGELOG.md](CHANGELOG.md) 条目生成 Release 说明和归档附件。普通提交由 [CI 工作流](.github/workflows/ci.yml) 验证，**不会**自动发布新版本。发布步骤与历史版本整理原则见 [发布维护说明](.github/RELEASING.md)，维护脚本用途见 [脚本索引](scripts/README.md)。
+推送 `v*` 标签会触发 [Release 工作流](.github/workflows/release.yml)：运行检查和测试、构建并推送 GHCR 的 amd64／arm64 镜像、从对应 [CHANGELOG.md](CHANGELOG.md) 条目生成 Release 说明和归档附件。普通提交由 [CI 工作流](.github/workflows/ci.yml) 验证，**不会**自动发布新版本。发布步骤见 [发布维护说明](.github/RELEASING.md)，维护脚本用途见 [脚本索引](scripts/README.md)。
 
 项目架构和模块边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。问题反馈请提交 [GitHub Issue](https://github.com/chensl139-ok/switchboard-ai-router/issues)；仓库维护邮箱：`15652641985@163.com`。
