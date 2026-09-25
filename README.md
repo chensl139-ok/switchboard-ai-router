@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.5](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.5) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.6](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.6) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.5
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.6
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.5
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.6
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.5-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.5 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.6-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.6 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -295,8 +295,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.5
-SWITCHBOARD_VERSION=2.0.5 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.6
+SWITCHBOARD_VERSION=2.0.6 docker compose up -d
 docker compose ps
 ```
 

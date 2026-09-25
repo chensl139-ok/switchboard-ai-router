@@ -42,6 +42,7 @@ test('侧栏、模块内部间距和静态缓存由统一规则约束',()=>{
  assert.match(css,/--space-sm: 10px; --space-md: 16px/);
  assert.match(css,/sidebar-heading \.brand-mark \{ display: block/);
  assert.match(css,/sidebar-compact \.sidebar \.nav-item \{ padding-left: 16px/);
+ assert.match(css,/#content>\.heading,#content>\.dashboard-heading \{ align-items: center; min-height: 52px; margin-bottom: 12px/);
  assert.match(server,/createHash\('sha256'\)\.update\(raw\)/);
 });
 

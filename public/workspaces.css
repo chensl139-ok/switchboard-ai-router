@@ -235,11 +235,11 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
  #page-parent { color: var(--ui-subtle); font-size: 9px; font-weight: 650; letter-spacing: .08em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
  #breadcrumb,body.theme-dark #breadcrumb { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 21px; line-height: 1.15; letter-spacing: -.35px; font-weight: 700; }
  #content { padding-top: 12px; }
- #content>.heading,#content>.dashboard-heading { align-items: center; min-height: 0; margin-bottom: 12px; padding-bottom: 9px; gap: 12px; border-bottom: 1px solid var(--ui-border); }
+ #content>.heading,#content>.dashboard-heading { align-items: center; min-height: 52px; margin-bottom: 12px; padding-bottom: 9px; gap: 12px; border-bottom: 1px solid var(--ui-border); }
  #content>.heading>div:first-child,#content>.dashboard-heading>div:first-child { min-width: 0; }
  #content>.heading .eyebrow,#content>.dashboard-heading .eyebrow,#content>.heading h1,#content>.dashboard-heading h1,#content.lab-page>.heading .eyebrow { display: none; }
- #content>.heading p,#content>.dashboard-heading p { margin: 0; max-width: none; color: var(--ui-muted); font-size: 12px; line-height: 1.5; }
- #content.lab-page>.heading { margin-bottom: 8px; }
+ #content>.heading p,#content>.dashboard-heading p { margin: 0; max-width: none; color: var(--ui-muted); font-size: 12px; line-height: 18px; }
+ #content.lab-page>.heading { min-height: 52px; align-items: center; margin-bottom: 12px; }
  #content.chat-workspace { height: calc(100dvh - 64px); }
 }
 @media (min-width: 721px) and (max-width: 1100px) {
