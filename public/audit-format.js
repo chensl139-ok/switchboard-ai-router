@@ -1,5 +1,6 @@
 const actions={
  'account.setup':['初始化账户','account'],'account.login.feishu':['飞书登录','account'],'account.password':['修改密码','account'],
+ 'account.password.reset.issue':['签发密码重置码','account'],'account.password.reset':['重置密码','account'],
  'member.join':['加入组织','member'],'member.join.sso':['通过飞书加入','member'],'member.invite':['邀请成员','member'],
  'member.remove':['移除成员','member'],'member.role':['修改角色','member'],'invite.revoke':['撤销邀请','member'],
  'tenant.create':['创建租户','tenant'],'tenant.delete':['删除租户','tenant'],

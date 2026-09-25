@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.6](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.6) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.7](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.7) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.6
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.7
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.6
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.7
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.6-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.6 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.7-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.7 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -133,13 +133,14 @@ SWITCHBOARD_VERSION=2.0.6 docker compose up -d
 
 所有者和管理员可在「组织审计」按 7／30／90 天查看每位成员的请求数、上游尝试、成功率、输入／输出 Token、费用估算和最近使用时间。租户操作记录支持按操作人、类型、时间范围和关键字组合筛选，服务端分页覆盖所有保留事件，并展示原始事件标识。控制台调用直接归属登录成员；新建 API Key 自动归属创建人。升级前创建的 Key 和旧版环境令牌无法可靠推断个人身份，因此保留为“未归属”，不会伪造审计关系。管理配置变更和飞书登录事件也会记录操作者。
 
-### 忘记密码（owner 账号）
+### 忘记密码
 
-密码使用 scrypt 单向哈希存储，无法反推明文；使用随仓库提供的 reset 脚本：
+普通成员可在登录页选择「忘记密码？」。组织所有者或管理员在「成员与角色」为该成员签发一次性重置码，再通过安全渠道交付；有效期为 30 分钟，使用后会撤销该账户全部旧会话。注册另需管理员提供的邮箱专属邀请码，登录页已提前说明。系统不会自动发送邮件。
+
+若唯一所有者忘记密码且无法使用已绑定飞书登录，由部署管理员在服务器本地恢复。密码使用 scrypt 单向哈希存储，无法反推明文；使用随仓库提供的 reset 脚本：
 
 ```sh
-# 1. 停掉正在运行的 platform.mjs
-kill <PID_on_3100>
+# 1. 停止平台进程；Docker 部署则执行 docker compose stop switchboard
 
 # 2. 把新密码通过环境变量传入，不进 shell history
 export SWITCHBOARD_NEW_PASSWORD='你的新密码（≥12 字符）'
@@ -147,7 +148,7 @@ export SWITCHBOARD_NEW_PASSWORD='你的新密码（≥12 字符）'
 # 3. 执行重置
 node scripts/reset-admin-password.mjs
 
-# 4. 取消密码变量并重启服务
+# 4. 取消密码变量并重启服务；Docker 部署则执行 docker compose start switchboard
 unset SWITCHBOARD_NEW_PASSWORD
 npm start
 ```
@@ -280,6 +281,8 @@ data/
 
 整体备份数据目录，不可丢失 `master.key`。不要提交 `.env`、密钥或数据目录到公开仓库。
 
+需要清除历史调用、用量和组织操作审计，但保留账户、登录会话、API Key、密钥配额规则及服务商/路由配置时，先停止容器或进程，再运行 `node scripts/clear-history.mjs data --apply --backup-root=/安全的备份目录`，最后启动服务。省略 `--apply` 仅预览各租户记录数。脚本会先创建权限受限的完整备份，随后清空历史、重置 API Key 用量计数，并移除数据目录内旧的历史备份副本；注意总调用限额也会从零重新计数。完整备份仍含旧记录，应按组织留存政策安全保管或单独销毁。
+
 当前使用本地文件、SQLite 和进程内限流，**只支持单副本运行**，不要让多个进程共享同一数据目录。默认日志保留 90 天。
 
 升级前备份数据，然后执行：
@@ -295,8 +298,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.6
-SWITCHBOARD_VERSION=2.0.6 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.7
+SWITCHBOARD_VERSION=2.0.7 docker compose up -d
 docker compose ps
 ```
 

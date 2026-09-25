@@ -480,3 +480,5 @@ body.theme-dark .usage-day small{color:#92a79a}
 body.theme-dark .analytics-cost{border-color:#25312a}
 body.theme-dark .analytics-cost strong{color:#cde0d3}
 body.theme-dark .analytics-cost span{color:#8fa89a}
+#account-recover{display:block;width:100%;font-size:12px;margin-top:4px}
+#reset-result:not(:empty){max-width:480px;margin-top:14px}

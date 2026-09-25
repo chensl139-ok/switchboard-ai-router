@@ -51,7 +51,7 @@ async function main(){
     password=process.env.SWITCHBOARD_NEW_PASSWORD;
   }
   if(!password && !process.stdin.isTTY){
-    password=(await import('node:fs/promises')).readFileSync(0,'utf8').split(/\r?\n/)[0];
+    password=readFileSync(0,'utf8').split(/\r?\n/)[0];
   }
   if(!password){
     console.error('用法：node scripts/reset-admin-password.mjs <新密码> [--data=DIR]');
@@ -84,6 +84,7 @@ async function main(){
    :u);
   // 失效该用户的所有会话，重置后必须重新登录
   updated.sessions=(original.sessions||[]).filter(s=>s.userId!==ownerUser.id);
+  updated.passwordResets=(original.passwordResets||[]).filter(r=>r.userId!==ownerUser.id);
   updated.audit=[
    {id:`reset-${Date.now()}`,tenantId:'default',actorId:ownerUser.id,
     action:'account.password.reset',target:'通过本地脚本重置',time:now},

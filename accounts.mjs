@@ -11,7 +11,8 @@ export const roles=['owner','admin','member','viewer'];
 export class Accounts {
  constructor(dir,bootstrapToken,{now=()=>Date.now()}={}){
   mkdirSync(dir,{recursive:true,mode:0o700});this.file=path.join(dir,'accounts.json');this.bootstrapToken=bootstrapToken;this.now=now;this.kdf=0;
-  this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{users:[],tenants:[{id:'default',name:'默认租户',createdAt:new Date(now()).toISOString()}],members:[],sessions:[],invites:[],audit:[]};
+  this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{users:[],tenants:[{id:'default',name:'默认租户',createdAt:new Date(now()).toISOString()}],members:[],sessions:[],invites:[],passwordResets:[],audit:[]};
+  this.state.passwordResets??=[];
  }
  save(){
   const snapshot=this.state;
@@ -97,15 +98,17 @@ export class Accounts {
    this.state.tenants=this.state.tenants.filter(t=>t.id!==tenantId);
    this.state.members=this.state.members.filter(m=>m.tenantId!==tenantId);
    this.state.invites=this.state.invites.filter(i=>i.tenantId!==tenantId);
+   this.state.passwordResets=this.state.passwordResets.filter(r=>r.tenantId!==tenantId);
    this.state.sessions=this.state.sessions.filter(s=>s.tenantId!==tenantId);
    this.state.audit=this.state.audit.filter(a=>a.tenantId!==tenantId);
+   this.event(caller.tenantId,caller.userId,'tenant.delete',tenant.name+' · '+tenant.id);
   });
   return {deleted:tenantId,name:tenant.name};
  }
  createTenant(caller,name){
   if(typeof name!=='string'||!name.trim()||name.length>80)throw fail('租户名称长度需为 1–80');
   if(this.state.tenants.length>=50)throw fail('当前单实例最多支持 50 个租户');
-  return this.mutate(()=>{const tenant={id:randomUUID(),name:name.trim(),createdAt:new Date(this.now()).toISOString()};this.state.tenants.push(tenant);this.state.members.push({tenantId:tenant.id,userId:caller.userId,role:'owner'});this.event(tenant.id,caller.userId,'tenant.create',tenant.name);return tenant;});
+  return this.mutate(()=>{const tenant={id:randomUUID(),name:name.trim(),createdAt:new Date(this.now()).toISOString()};this.state.tenants.push(tenant);this.state.members.push({tenantId:tenant.id,userId:caller.userId,role:'owner'});this.event(caller.tenantId,caller.userId,'tenant.create',tenant.name);this.event(tenant.id,caller.userId,'tenant.create',tenant.name);return tenant;});
  }
  switchTenant(caller,id){if(!this.state.members.some(m=>m.userId===caller.userId&&m.tenantId===id))throw fail('无权访问此租户',403);this.mutate(()=>{this.state.sessions.find(s=>s.hash===caller.sessionHash).tenantId=id;});}
  members(caller){this.requireAdmin(caller);return {members:this.state.members.filter(m=>m.tenantId===caller.tenantId).map(m=>{const u=this.state.users.find(u=>u.id===m.userId);return {userId:u.id,name:u.name,email:u.email,role:m.role};}),invites:this.state.invites.filter(i=>i.tenantId===caller.tenantId&&!i.usedAt).map(({digest,...i})=>i)};}
@@ -138,7 +141,44 @@ export class Accounts {
   const user=this.state.users.find(u=>u.id===caller.userId),previous=user.password;
   if(user.password&&(typeof input.currentPassword!=='string'||input.currentPassword.length>256||!await this.checkPassword(input.currentPassword,user.password)))throw fail('原密码错误',403);
   this.validateUser({name:user.name,email:user.email,password:input.newPassword});const password=await this.passwordHash(input.newPassword);
-  return this.mutate(()=>{const current=this.state.users.find(u=>u.id===caller.userId);if(current.password!==previous)throw fail('密码已发生变化，请重新登录',409);current.password=password;this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);this.event(caller.tenantId,user.id,'account.password','密码已更改');return this.session(user.id,caller.tenantId);});
+  return this.mutate(()=>{const current=this.state.users.find(u=>u.id===caller.userId);if(current.password!==previous)throw fail('密码已发生变化，请重新登录',409);current.password=password;this.state.passwordResets=this.state.passwordResets.filter(r=>r.userId!==user.id);this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);this.event(caller.tenantId,user.id,'account.password','密码已更改');return this.session(user.id,caller.tenantId);});
+ }
+ issuePasswordReset(caller,userId){
+  this.requireAdmin(caller);
+  const member=this.state.members.find(m=>m.tenantId===caller.tenantId&&m.userId===userId);
+  if(!member)throw fail('成员不存在',404);
+  if(userId===caller.userId)throw fail('请在账户与租户中修改自己的密码',400);
+  for(const targetMembership of this.state.members.filter(m=>m.userId===userId)){
+   const issuer=this.state.members.find(m=>m.userId===caller.userId&&m.tenantId===targetMembership.tenantId);
+   if(!issuer||!['owner','admin'].includes(issuer.role)||targetMembership.role==='owner'&&issuer.role!=='owner')throw fail('该账户还属于其他租户，请由所有相关租户的管理员签发重置码',403);
+  }
+  const code=randomBytes(24).toString('hex'),expiresAt=this.now()+30*60000;
+  return this.mutate(()=>{
+   this.state.passwordResets=this.state.passwordResets.filter(r=>r.expiresAt>this.now()&&r.userId!==userId);
+   if(this.state.passwordResets.length>=500)throw fail('待使用重置码过多，请稍后重试',429);
+   this.state.passwordResets.push({userId,tenantId:caller.tenantId,digest:hash(code),expiresAt});
+   this.event(caller.tenantId,caller.userId,'account.password.reset.issue',userId);
+   return {code,expiresAt};
+  });
+ }
+ async completePasswordReset(input){
+  const invalid=()=>fail('重置码无效或已过期',400);
+  if(typeof input?.email!=='string'||typeof input?.code!=='string'||input.code.length>128)throw invalid();
+  const email=input.email.trim().toLowerCase();
+  const user=this.state.users.find(u=>u.email===email);
+  const reset=user&&this.state.passwordResets.find(r=>r.userId===user.id&&r.expiresAt>this.now()&&timingSafeEqual(Buffer.from(hash(input.code)),Buffer.from(r.digest)));
+  if(!reset)throw invalid();
+  this.validateUser({name:user.name,email:user.email,password:input.newPassword});
+  const password=await this.passwordHash(input.newPassword);
+  return this.mutate(()=>{
+   const current=this.state.passwordResets.find(r=>r.userId===user.id&&r.digest===reset.digest&&r.expiresAt>this.now());
+   if(!current)throw invalid();
+   this.state.users.find(u=>u.id===user.id).password=password;
+   this.state.passwordResets=this.state.passwordResets.filter(r=>r.userId!==user.id);
+   this.state.sessions=this.state.sessions.filter(s=>s.userId!==user.id);
+   this.event(current.tenantId,user.id,'account.password.reset',user.id);
+   return {ok:true};
+  });
  }
  audit(caller){this.requireAdmin(caller);return this.state.audit.filter(a=>a.tenantId===caller.tenantId).map(item=>{const actor=this.state.users.find(user=>user.id===item.actorId),targetUser=this.state.users.find(user=>user.id===item.target);return {...item,actorName:actor?.name||'未知成员',actorEmail:actor?.email||'',targetName:item.target==='配置已更新'?'旧版记录 · 未记录具体对象':targetUser?.name||item.target,...auditAction(item.action)};});}
  auditPage(caller,{page=1,limit=25,days='',actor='',category='',q=''}={}){

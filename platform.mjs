@@ -64,6 +64,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(req.method==='POST'&&['setup','login','register'].includes(route)){
      rate(req);const data=await body(req);const token=await accounts[route](data);cookie(req,res,token);return json(res,200,accounts.me(accounts.resolve(token)));
     }
+    if(req.method==='POST'&&route==='password-reset/complete'){rate(req);return json(res,200,await accounts.completePasswordReset(await body(req)));}
     if(req.method==='POST'&&route==='logout'){accounts.logout(sessionToken(req));cookie(req,res,'');return json(res,200,{ok:true});}
     const current=session(req);if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已在其他页面切换，请刷新后重试',409);
     if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
@@ -91,6 +92,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(route==='member-role'){accounts.updateMember(current,data);return json(res,200,accounts.members(current));}
     if(route==='member-remove'){accounts.updateMember(current,data,true);return json(res,200,{ok:true});}
     if(route==='password'){const token=await accounts.changePassword(current,data);cookie(req,res,token);return json(res,200,{ok:true});}
+    if(route==='password-reset/issue')return json(res,201,accounts.issuePasswordReset(current,data.userId));
     throw fail('接口不存在',404);
    }
    if(url.pathname.startsWith('/api/')||url.pathname.startsWith('/v1/')){

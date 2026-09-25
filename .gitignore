@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 data/
+.history-backups/
 node_modules/
 *.log
 *.pid
