@@ -80,8 +80,11 @@
 .chat-workspace #lab-image-button { background: transparent; border-color: transparent; }
 .chat-workspace .lab-privacy { padding: 7px 12px 9px; font-size: 10px; flex: none; }
 .chat-workspace .lab-error { flex: none; max-height: 88px; overflow: auto; }
-.chat-workspace .lab-images:empty { display: none; }
-.chat-workspace .lab-images { flex: none; max-height: 100px; overflow: auto; }
+.chat-workspace .lab-composer .lab-images:empty { display: none; }
+.chat-workspace .lab-composer .lab-images { display: flex; flex: none; width: 100%; max-height: 106px; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 10px 14px 4px; border-bottom: 1px solid var(--ui-border); scrollbar-width: thin; }
+.chat-workspace .lab-composer .lab-images>span { display: block; flex: 0 0 76px; width: 76px; height: 76px; border: 1px solid var(--ui-border); border-radius: 9px; background: var(--ui-surface-soft); }
+.chat-workspace .lab-composer .lab-images img { display: block; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 8px; object-fit: cover; }
+.chat-workspace .lab-composer .lab-images button { top: 3px; right: 3px; display: grid; place-items: center; width: 22px; height: 22px; min-width: 22px; min-height: 22px; padding: 0; border: 1px solid var(--ui-border); border-radius: 50%; background: var(--ui-surface); color: var(--ui-text); line-height: 1; }
 .chat-workspace .lab-settings { position: static; width: auto; height: 100%; max-height: none; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; box-shadow: none; }
 .chat-workspace .lab-settings[hidden] { display: none; }
 .chat-workspace .lab-settings-heading { flex: none; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--ui-border); font-size: 13px; }

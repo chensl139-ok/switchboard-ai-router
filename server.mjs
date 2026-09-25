@@ -337,7 +337,13 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     }
     if(req.method==='POST'&&mediaPaths.has(url.pathname))return await handleMedia(req,res,caller);
     if(req.method==='POST'&&generationPaths[url.pathname]){
-     const kind=generationPaths[url.pathname],input=normalizeRequest(kind,await body(req)),abort=new AbortController();req.protocolKind=kind;const requestIdentifier=crypto.randomUUID();res.setHeader('x-request-id',requestIdentifier);res.setHeader('request-id',requestIdentifier);
+     const kind=generationPaths[url.pathname],raw=await body(req);req.protocolKind=kind;
+     if(kind==='responses'){
+      const requested=typeof raw.model==='string'?raw.model:'';
+      const name=requested.includes('::')?requested.slice(requested.indexOf('::')+2):state.providers.find(provider=>provider.id===requested)?.model||requested;
+      if(modelCapabilities(name).vision)return await handleMedia(req,res,caller,raw);
+     }
+     const input=normalizeRequest(kind,raw),abort=new AbortController();const requestIdentifier=crypto.randomUUID();res.setHeader('x-request-id',requestIdentifier);res.setHeader('request-id',requestIdentifier);
      res.on('close',()=>{if(!res.writableEnded)abort.abort();});
      const encoder=createClientStream(kind,async(event,chunk)=>{
       if(!res.headersSent)res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache, no-transform','x-accel-buffering':'no'});

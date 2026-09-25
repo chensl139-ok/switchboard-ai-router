@@ -125,7 +125,7 @@ Cherry Studio 若能聊天但无法获取模型列表，请检查代理绕过规
 
 ## 媒体与专用模型接口
 
-3.2 版加入专用接口；在「媒体实验室」可测试图片生成、语音合成、音频转文字和视频任务。
+3.2 版加入专用接口；在「媒体实验室」可测试图片生成、语音合成、音频转文字、视频生成和视觉理解任务。
 
 | POST 接口 | 输入与输出 |
 | --- | --- |
@@ -138,6 +138,20 @@ Cherry Studio 若能聊天但无法获取模型列表，请检查代理绕过规
 | /v1/video/status | 使用提交返回的 requestId 轮询，返回 status / results |
 | /v1/embeddings | 兼容上游 JSON 向量嵌入 |
 | /v1/rerank | 兼容上游 JSON 重排 |
+| /v1/responses（MOSS-VL 专用用法） | 单轮视觉理解：一条文字指令 + 1～5 张图片，或一段视频；同步返回文本 |
+
+`moss-vl-1.0` 属于视觉语言模型架构，但 [MOSS 官方接口](https://platform.mosi.cn/docs/reference/responses/)将它作为图片／视频理解任务提供：必须使用 `/v1/responses`，不能只发文本、不能混合图片与视频、不能流式输出。它不进入普通对话模型列表或 `auto` 对话路由。先在服务商中注册模型，然后在媒体实验室选择「视觉理解」，或使用下列请求；图片／视频地址必须为 HTTPS，也可使用上游已上传文件的 `file_id`。
+
+```json
+{
+  "model": "moss::moss-vl-1.0",
+  "input": [{"role": "user", "content": [
+    {"type": "input_text", "text": "描述这张图片"},
+    {"type": "input_image", "image_url": "https://example.com/photo.jpg"}
+  ]}],
+  "max_output_tokens": 1024
+}
+```
 
 必须显式指定已注册模型，例如 `siliconflow::Kwai-Kolors/Kolors`，不支持 auto。JSON 上限 10 MB；multipart 上限 52 MB；单音频文件上限 50 MB；单次上游超时 180 秒，音频响应上限 64 MB。不自动回退或重试，避免重复生成。生成使用共同 Key 配额；视频轮询不扣生成次数，但受频率和并发限制。
 

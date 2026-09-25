@@ -5,10 +5,31 @@ import {once} from 'node:events';
 import {priceAt,normalizeUsage,usageCost} from './pricing.mjs';
 import {credentialFor,channelFor} from './provider-key.ts';
 import {protocolForModel} from './model-protocol.mjs';
+import {modelCapabilities} from './public/model-capability.js';
 export const mediaPaths=new Set(['/v1/images/generations','/v1/images/edits','/v1/audio/speech','/v1/audio/transcriptions','/v1/audio/translations','/v1/video/submit','/v1/video/status','/v1/embeddings','/v1/rerank']);
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const owner=caller=>caller.apiKeyId?'key:'+caller.apiKeyId:caller.userId?'user:'+caller.userId:caller.admin?'admin':'legacy';
 const sf=p=>['api.siliconflow.cn','api.siliconflow.com'].includes(new URL(p.baseUrl).hostname);
+const mediaURL=value=>{try{const url=new URL(value);return typeof value==='string'&&value.length<=4096&&url.protocol==='https:'&&!url.username&&!url.password;}catch{return false;}};
+export function visionPayload(data,model){
+ if(!modelCapabilities(model).vision)throw fail('所选模型不属于视觉理解模型',400);
+ if(!data||Array.isArray(data)||typeof data!=='object')throw fail('视觉理解请求必须是 JSON 对象',400);
+ if(data.stream!==undefined&&data.stream!==false)throw fail('该视觉理解模型不支持流式输出',400);
+ if(!Array.isArray(data.input)||data.input.length!==1||data.input[0]?.role!=='user'||!Array.isArray(data.input[0].content))throw fail('视觉理解需提供一条 user 输入',400);
+ const parts=data.input[0].content;
+ const texts=parts.filter(part=>part?.type==='input_text');
+ const images=parts.filter(part=>part?.type==='input_image');
+ const videos=parts.filter(part=>part?.type==='input_video');
+ if(texts.length!==1||typeof texts[0].text!=='string'||!texts[0].text.trim()||texts[0].text.length>10000||parts.length!==texts.length+images.length+videos.length)throw fail('视觉理解需要一条文字指令和图片或视频',400);
+ if(images.length&&videos.length||images.length>5||videos.length>1||!images.length&&!videos.length)throw fail('每次需要 1～5 张图片或 1 个视频，不能混用',400);
+ for(const part of [...images,...videos]){
+  const url=part.type==='input_image'?part.image_url:part.video_url;
+  if((url!==undefined)===(part.file_id!==undefined)||url!==undefined&&!mediaURL(url)||part.file_id!==undefined&&(typeof part.file_id!=='string'||!/^[A-Za-z0-9._-]{1,200}$/.test(part.file_id)))throw fail('媒体项需要 HTTPS URL 或 file_id，且只能选择一种',400);
+ }
+ const max=data.max_output_tokens??1024;
+ if(!Number.isInteger(max)||max<1||max>8192)throw fail('max_output_tokens 需为 1～8192',400);
+ return {model,input:[{role:'user',content:parts}],max_output_tokens:max};
+}
 export function mediaProvider(state,model){
  if(typeof model!=='string'||!model||model==='auto')throw fail('媒体调用需指定已配置模型，建议使用 provider::model，不支持 auto');
  const available=state.providers.filter(p=>p.enabled&&(p.secret||p.meteredSecret));
@@ -31,9 +52,9 @@ async function limitedJSON(response){let length=0,parts=[];for await(const chunk
 export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acquire}){
  const file=path.join(dir,'media-jobs.json');let jobs=existsSync(file)?JSON.parse(readFileSync(file,'utf8')):{};
  const save=()=>{writeFileSync(file+'.tmp',JSON.stringify(jobs),{mode:0o600});renameSync(file+'.tmp',file);};
- return async(req,res,caller)=>{
+ return async(req,res,caller,providedData)=>{
   const pathname=new URL(req.url,'http://local').pathname,poll=pathname==='/v1/video/status';
-  const {data,form}=await readBody(req);let p,job;
+  const {data,form}=providedData?{data:providedData,form:null}:await readBody(req);let p,job;
   if(poll){if(typeof data.requestId!=='string'||!Object.hasOwn(jobs,data.requestId))throw fail('视频任务不存在或不属于当前调用方',404);job=jobs[data.requestId];if(!job||job.expiresAt<Date.now()||(!(caller.admin||['owner','admin'].includes(caller.role))&&job.owner!==owner(caller)))throw fail('视频任务不存在或不属于当前调用方',404);p=state.providers.find(p=>p.id===job.providerId&&p.enabled&&p.baseUrl===job.baseUrl&&credentialFor(p,job.model));if(!p)throw fail('任务对应服务商配置已改变或未启用',409);p={...p,model:job.model,secret:credentialFor(p,job.model),prices:channelFor(p,job.model)==='metered'||!p.meteredSecret?p.prices:{}};}
   else p=mediaProvider(state,data.model);
   if(pathname.startsWith('/v1/video/')&&!sf(p))throw fail('视频任务协议当前支持硅基流动，其他服务商视频协议尚未适配',501);
@@ -42,7 +63,7 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
   if(form&&pathname.includes('/audio/')){const audio=form.get('file');if(!audio||typeof audio==='string'||audio.size===0||audio.size>50*1024*1024)throw fail('file 需为 1 字节至 50 MB 的音频文件');}
   if(pathname==='/v1/images/edits'&&sf(p))throw fail('硅基流动图像编辑请调用 /v1/images/generations，使用 image 字段',501);
   if(!poll&&!form){if(['/v1/images/generations','/v1/video/submit'].includes(pathname)&&(typeof data.prompt!=='string'||!data.prompt.trim()))throw fail('prompt 不能为空');if(pathname==='/v1/audio/speech'&&(typeof data.input!=='string'||!data.input.trim()))throw fail('input 不能为空');if(data.stream&&pathname!=='/v1/audio/speech')throw fail('此媒体接口不支持 SSE，请移除 stream 参数');}
-  const payload=poll?{requestId:job.upstreamId}:{...data,model:p.model};delete payload.upstream_model;
+  const payload=poll?{requestId:job.upstreamId}:pathname==='/v1/responses'?visionPayload(data,p.model):{...data,model:p.model};delete payload.upstream_model;
   if(sf(p)&&pathname==='/v1/images/generations'){
    if(payload.n!==undefined&&payload.batch_size!==undefined&&payload.n!==payload.batch_size)throw fail('n 与 batch_size 不一致');
    if(payload.size!==undefined&&payload.image_size!==undefined&&payload.size!==payload.image_size)throw fail('size 与 image_size 不一致');
@@ -70,6 +91,11 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
    }
    if(form&&pathname.includes('/audio/')&&!type.includes('json')){const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length>8*1024*1024)throw fail('转录响应超过限制',502);res.writeHead(200,{'content-type':/^text\//.test(type)?'text/plain; charset=utf-8':'application/octet-stream','cache-control':'no-store'});res.end(bytes);succeeded=true;return;}
    let result=await limitedJSON(response);
+   if(pathname==='/v1/responses'){
+    if(result.status==='failed'||result.error)throw fail('视觉理解上游返回失败结果',502);
+    if(!Array.isArray(result.output)||!result.output.some(item=>item.type==='message'&&item.content?.some(part=>part.type==='output_text'&&typeof part.text==='string')))throw fail('视觉理解上游未返回文本结果',502);
+    usage=normalizeUsage(result.usage);tokens=usage.totalTokens;cost=usageCost(p,p.model,usage,started);
+   }
    if(pathname==='/v1/images/generations'){
     if(sf(p)){if(!Array.isArray(result.images)||!result.images.length)throw fail('上游未返回生成图片',502);result={...result,created:Math.floor(started/1000),data:result.images.map(image=>({url:image.url}))};}
     if(!Array.isArray(result.data)||!result.data.length)throw fail('上游未返回生成图片',502);

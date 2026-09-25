@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.11](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.11) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.12](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.12) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -19,7 +19,7 @@
 | 多模态与工具 | 文字与图片输入、函数工具定义、流式工具参数和结果回传；工具由调用方执行 |
 | 模型实验室 | 自适应对话工作区与按需展开的生成设置、2–4 个模型同题对比；显示实际路由、故障转移、耗时、Token、失败原因，流式 Markdown 回复、代码复制，并支持图片、工具和生成中草稿 |
 | 模型思考 | 真实思考内容展示与折叠；模型推理开关与界面显示开关独立 |
-| 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频生成与自动进度刷新，内置限额与任务归属追踪 |
+| 媒体实验室 | 图片生成、图片编辑、音频合成、音频转写/翻译、视频生成与自动进度刷新、MOSS 图片/视频理解，内置限额与任务归属追踪 |
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
 | 多租户 | 邮箱密码与飞书 OAuth 登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
 | 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张价格 |
@@ -32,6 +32,8 @@
 模型实验室每条回复展示总耗时、输出 Token 数、TTFB（首个响应数据）、TTFT（首个内容或思考增量）、TPS（端到端输出吞吐）及估算 TPOT。TPS 以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表纯解码速度。TPOT 按 `(最后一个可见输出增量时间 - 第一个可见输出增量时间) / (上游输出 Token 数 - 1)` 估算，不再把结束帧和网络收尾时间计入生成。只有多个相隔足够时间的流式增量且上游报告输出 Token 用量时才展示；网络分块、隐藏思考和服务商 Token 口径仍可能影响准确性，不能视作供应商的精确逐 Token 解码指标。HTTP 完整响应无法测量 TTFT/TPOT，缺少可靠数据时显示「—」。
 
 对话调用默认最大输出为 8192 Tokens；实验室或 API 请求显式设置的值优先。各服务商和模型自身的输出上限仍以对应上游为准。
+
+`moss-vl-1.0` 虽采用 VLM 架构，当前服务商接口仅提供单轮图片／视频理解，不是普通文本对话模型。平台将其列为「视觉理解 · 非对话」，在媒体实验室调用，不参与自动对话路由；通过 `/v1/responses` 显式指定模型、文字指令和图片或视频，且只能同步调用。详见 [API 接入说明](API.md#媒体与专用模型接口)。
 
 对话回复支持 Markdown 标题、列表、表格、引用、链接及代码块，流式输出时逐步呈现；代码块和整条回复可分别复制。模型返回的 HTML 不直接执行，危险协议链接被禁用；外链图片只提供链接，不自动请求图片，以免对第三方泄露浏览器访问。
 
@@ -78,21 +80,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.11
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.12
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.11
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.12
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.11-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.11 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.12-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.12 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -308,8 +310,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.11
-SWITCHBOARD_VERSION=2.0.11 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.12
+SWITCHBOARD_VERSION=2.0.12 docker compose up -d
 docker compose ps
 ```
 

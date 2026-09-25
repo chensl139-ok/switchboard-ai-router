@@ -13,6 +13,13 @@ test('媒体实验室使用通用视频名称并自动轮询异步任务',()=>{
  assert.match(source,/imageRequired=\$\('#media-kind'\)\.value==='video'&&\/I2V\/i/);
 });
 
+test('贴图预览放入对话输入框并保持横向排列',()=>{
+ const chat=read('public/playground.js'),css=read('public/workspaces.css');
+ assert.match(chat,/<form id="lab-form" class="lab-composer">[\s\S]*?<div id="lab-images" class="lab-images"/);
+ assert.match(css,/\.lab-composer \.lab-images \{ display: flex;[\s\S]*?width: 100%;[\s\S]*?overflow-x: auto/);
+ assert.match(css,/\.lab-composer \.lab-images>span \{ display: block; flex: 0 0 76px/);
+});
+
 test('侧栏收起按钮可发现、可持久化并适配中等宽度',()=>{
  const html=read('public/index.html'),app=read('public/app.js'),css=read('public/style.css');
  assert.match(html,/sidebar-heading.*id="sidebar-toggle"/);assert.match(html,/aria-controls="workspace-sidebar"/);assert.match(html,/data-tooltip="收起导航"/);
