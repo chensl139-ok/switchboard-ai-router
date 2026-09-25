@@ -45,8 +45,14 @@ export class UsageStore {
    coalesce(sum(tokens),0) AS tokens,coalesce(sum(input_tokens),0) AS inputTokens,coalesce(sum(output_tokens),0) AS outputTokens,
    sum(CASE WHEN usage_known=0 THEN 1 ELSE 0 END) AS unknownUsage,
    coalesce(round(avg(CASE WHEN status=200 THEN latency END)),0) AS averageLatency FROM calls WHERE time>=?`).get(since);
-  const daily=this.db.prepare(`SELECT substr(time,1,10) AS day,count(DISTINCT request_id) AS requests,count(*) AS attempts,
+  const requestOutcomes=`SELECT request_id,min(time) AS first_time,max(CASE WHEN status=200 THEN 1 ELSE 0 END) AS succeeded FROM calls WHERE time>=? GROUP BY request_id`;
+  const final=this.db.prepare(`SELECT count(*) AS requests,coalesce(sum(succeeded),0) AS requestSuccesses FROM (${requestOutcomes})`).get(since);
+  totals.requestSuccesses=final.requestSuccesses;totals.requestFailures=final.requests-final.requestSuccesses;
+  const attemptDays=this.db.prepare(`SELECT substr(time,1,10) AS day,count(*) AS attempts,
    sum(CASE WHEN status=200 THEN 1 ELSE 0 END) AS successes,coalesce(sum(tokens),0) AS tokens FROM calls WHERE time>=? GROUP BY day ORDER BY day`).all(since);
+  const requestDays=this.db.prepare(`SELECT substr(first_time,1,10) AS day,count(*) AS requests,coalesce(sum(succeeded),0) AS requestSuccesses FROM (${requestOutcomes}) GROUP BY day ORDER BY day`).all(since);
+  const byDay=new Map();for(const row of [...attemptDays,...requestDays])byDay.set(row.day,{...byDay.get(row.day),...row});
+  const daily=[...byDay.values()].sort((a,b)=>a.day.localeCompare(b.day));
   const providers=this.db.prepare(`SELECT provider_id AS providerId,provider,model,count(*) AS attempts,sum(CASE WHEN status=200 THEN 1 ELSE 0 END) AS successes,
    coalesce(sum(tokens),0) AS tokens,round(avg(latency)) AS latency FROM calls WHERE time>=? GROUP BY provider_id,provider,model ORDER BY attempts DESC`).all(since);
   const costs=this.db.prepare(`SELECT currency,sum(estimated_cost) AS amount,count(*) AS pricedAttempts FROM calls WHERE time>=? AND estimated_cost IS NOT NULL GROUP BY currency`).all(since);
@@ -60,6 +66,11 @@ export class UsageStore {
    coalesce(sum(input_tokens),0) AS inputTokens,coalesce(sum(output_tokens),0) AS outputTokens,
    coalesce(round(avg(CASE WHEN status=200 THEN latency END)),0) AS averageLatency,max(time) AS lastUsedAt
    FROM calls WHERE time>=? GROUP BY actor_id ORDER BY requests DESC,lastUsedAt DESC`).all(since);
+  const memberOutcomes=this.db.prepare(`SELECT actor_id AS actorId,count(*) AS requests,coalesce(sum(succeeded),0) AS requestSuccesses FROM
+   (SELECT actor_id,request_id,max(CASE WHEN status=200 THEN 1 ELSE 0 END) AS succeeded FROM calls WHERE time>=? GROUP BY actor_id,request_id)
+   GROUP BY actor_id`).all(since);
+  const outcomesByActor=new Map(memberOutcomes.map(row=>[row.actorId,row]));
+  for(const member of members){member.requestSuccesses=outcomesByActor.get(member.actorId)?.requestSuccesses||0;member.requestFailures=member.requests-member.requestSuccesses;}
   const costs=this.db.prepare(`SELECT actor_id AS actorId,currency,sum(estimated_cost) AS amount
    FROM calls WHERE time>=? AND estimated_cost IS NOT NULL GROUP BY actor_id,currency ORDER BY actor_id,currency`).all(since);
   const keys=this.db.prepare(`SELECT api_key_id AS apiKeyId,actor_id AS actorId,count(DISTINCT request_id) AS requests,coalesce(sum(tokens),0) AS tokens,max(time) AS lastUsedAt

@@ -22,8 +22,8 @@ export function renderPrices({state,api,esc,toast,onSaved}){
    const reference=['openrouter','openrouter-reference'].includes(price.source);
    const deadline=price.expiresAt?new Date(price.expiresAt).toLocaleString('zh-CN'):'长期有效';
    const overdue=price.expiresAt&&Date.parse(price.expiresAt)<=Date.now();
-   const main=document.createElement('strong');main.textContent=reference?`${overdue?'复核已逾期':'复核截至'} ${deadline}`:price.expiresAt?`${overdue?'已过期':'有效至'} ${deadline}`:'长期有效';
-   const note=document.createElement('small');note.textContent=reference?`采集于 ${price.observedAt?new Date(price.observedAt).toLocaleString('zh-CN'):'未知时间'} · 非来源有效期`:'';
+   const main=document.createElement('strong');main.textContent=reference?(price.expiresAt?`${overdue?'复核已逾期':'复核截至'} ${deadline}`:'长期有效 · 建议定期复核'):price.expiresAt?`${overdue?'已过期':'有效至'} ${deadline}`:'长期有效';
+   const note=document.createElement('small');note.textContent=reference?`采集于 ${price.observedAt?new Date(price.observedAt).toLocaleString('zh-CN'):'未知时间'} · 仅供参考，非合同价`:'';
    cell.className='price-validity'+(overdue?' is-overdue':'');cell.replaceChildren(main,note);
   });
  }

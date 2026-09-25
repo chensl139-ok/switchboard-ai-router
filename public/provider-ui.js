@@ -8,8 +8,8 @@ export function providerHealth(provider,logs){
  if(Number(rows[0].status)===401)return {label:'鉴权失败',tone:'danger',detail:'最近调用返回 401 · 请更新 API Key'};
  const successes=rows.filter(log=>log.status===200),rate=Math.round(successes.length/rows.length*100);
  const latency=successes.length?Math.round(successes.reduce((sum,log)=>sum+log.latency,0)/successes.length):0;
- if(Number(rows[0].status)===200&&rate<70)return {label:'恢复中',tone:'warning',detail:`最近调用成功 · 近 ${rows.length} 次成功率 ${rate}%`};
- return {label:rate>=95?'健康':rate>=70?'波动':'异常',tone:rate>=95?'green':rate<70?'danger':'warning',detail:`近 ${rows.length} 次成功率 ${rate}%${latency?` · ${latency} ms`:''}`};
+ if(Number(rows[0].status)===200&&rate<70)return {label:'恢复中',tone:'warning',detail:`最近尝试成功 · 近 ${rows.length} 次上游尝试成功率 ${rate}%`};
+ return {label:rate>=95?'健康':rate>=70?'波动':'异常',tone:rate>=95?'green':rate<70?'danger':'warning',detail:`近 ${rows.length} 次上游尝试成功率 ${rate}%${latency?` · ${latency} ms`:''}`};
 }
 
 const healthMarkup=health=>`<span class="health-dot ${health.tone}"></span><strong>${health.label}</strong><small>${health.detail}</small>`;

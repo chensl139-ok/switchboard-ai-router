@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.7](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.7) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.8](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.8) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -29,7 +29,7 @@
 
 控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。桌面端将页面标题并入顶栏，正文只保留必要说明与操作；窄屏在正文显示标题，以留出搜索与按钮空间。全站页面边距、模块内部留白、筛选区、卡片和表格采用统一的间距尺度，模型实验室的对话与媒体页共用边界。侧栏平台名称左侧显示路由图标，展开态的收起按钮置于右侧；折叠态按钮与导航图标共用同一中心轴，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。对话页让消息区随窗口伸缩，输入区贴底并可继续编辑下一条草稿；运行模型和状态合并为一个响应式操作条，实际命中模型只在回复标题显示一次，路由细节按需展开。输入框聚焦保持单层反馈，生成设置按需展开，在窄屏以侧边浮层呈现。
 
-模型实验室每条回复展示总耗时、输出 Token 数、TTFB（首个响应数据）、TTFT（首个内容或思考增量）、TPS（端到端输出吞吐）及估算 TPOT。TPS 以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表纯解码速度。TPOT 按 `(总耗时 - TTFT) / (输出 Token 数 - 1)` 估算，只在流式输出出现多个有时间间隔的增量且上游返回可信用量时展示；网络分块不等于 Token，因此不把分块间隔冒充真实 TPOT。HTTP 完整响应无法测量 TTFT/TPOT，缺少可靠数据时显示「—」。
+模型实验室每条回复展示总耗时、输出 Token 数、TTFB（首个响应数据）、TTFT（首个内容或思考增量）、TPS（端到端输出吞吐）及估算 TPOT。TPS 以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表纯解码速度。TPOT 按 `(最后一个可见输出增量时间 - 第一个可见输出增量时间) / (上游输出 Token 数 - 1)` 估算，不再把结束帧和网络收尾时间计入生成。只有多个相隔足够时间的流式增量且上游报告输出 Token 用量时才展示；网络分块、隐藏思考和服务商 Token 口径仍可能影响准确性，不能视作供应商的精确逐 Token 解码指标。HTTP 完整响应无法测量 TTFT/TPOT，缺少可靠数据时显示「—」。
 
 故障转移以“服务商 + 模型”为候选单位：默认服务商置顶，前三个兼容候选优先安排首选服务商默认模型、该服务商另一个模型、下一服务商模型，再尝试其余模型与备用密钥，受“最多尝试次数”和总超时限制。延迟优先与加权轮询也可在首选失败后回退到同服务商或其他服务商的模型。自动对话会过滤媒体模型与不支持请求能力的模型，过滤项不占尝试次数。路由页面可预览候选顺序、协议、健康状态和过滤原因，预览不调用上游。实验室选择具体模型时，该模型作为起始模型并显式启用同服务商、跨服务商回退；API 使用 `provider::model` 时固定模型，但仍可切换同模型备用密钥。流式响应一旦已经输出首个增量，不会切换候选。
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.7
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.8
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.7
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.8
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.7-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.7 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.8-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.8 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -131,7 +131,7 @@ SWITCHBOARD_VERSION=2.0.7 docker compose up -d
 
 ### 组织用量审计
 
-所有者和管理员可在「组织审计」按 7／30／90 天查看每位成员的请求数、上游尝试、成功率、输入／输出 Token、费用估算和最近使用时间。租户操作记录支持按操作人、类型、时间范围和关键字组合筛选，服务端分页覆盖所有保留事件，并展示原始事件标识。控制台调用直接归属登录成员；新建 API Key 自动归属创建人。升级前创建的 Key 和旧版环境令牌无法可靠推断个人身份，因此保留为“未归属”，不会伪造审计关系。管理配置变更和飞书登录事件也会记录操作者。
+所有者和管理员可在「组织审计」按 7／30／90 天查看每位成员的请求数、上游尝试、最终成功率、输入／输出 Token、费用估算和最近使用时间。最终成功率按独立请求计算，故障转移后成功也计为成功；每次失败尝试仍留在请求日志和服务商健康中。租户操作记录支持按操作人、类型、时间范围和关键字组合筛选，服务端分页覆盖所有保留事件，并展示原始事件标识。控制台调用直接归属登录成员；新建 API Key 自动归属创建人。升级前创建的 Key 和旧版环境令牌无法可靠推断个人身份，因此保留为“未归属”，不会伪造审计关系。管理配置变更和飞书登录事件也会记录操作者。
 
 ### 忘记密码
 
@@ -237,6 +237,8 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 OpenRouter 参考价只是经济路由和用量展示的估算依据，**不代表其他服务商的合同价、优惠价或实际账单**。应优先手动录入实际采购价格；不同币种不混合比较。价格数据属于部署实例，费用不作为计费结算凭据。
 自动导入使用 OpenRouter 模型目录中的基础 Token 报价和已提供的缓存读写价，不涵盖阶梯价、多模态、套餐或供应商折扣；不适合直接用于结算。
 
+已有价格可在停机后执行 `node scripts/set-price-expiry.mjs data` 预览，再执行 `node scripts/set-price-expiry.mjs data --apply` 将期限统一设为无限期。脚本会先把原始状态文件备份到权限受限的 `.price-backups/`；备份含已加密的服务商凭据，请妥善保管。无限期只表示平台不自动让该价格失效，不代表参考价永远准确；来源和采集时间仍保留供定期复核。后续新导入的 OpenRouter 参考价仍默认在 7 天后提醒复核。
+
 ## 思考、图片与工具的边界
 
 实验室支持图片附件和直接粘贴截图，最多 4 张、单张不超过 4 MB；包含历史及 Base64 的总请求上限为 10 MB。选择具备视觉能力的上游模型后才能处理图片。
@@ -298,8 +300,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.7
-SWITCHBOARD_VERSION=2.0.7 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.8
+SWITCHBOARD_VERSION=2.0.8 docker compose up -d
 docker compose ps
 ```
 

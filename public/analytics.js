@@ -7,7 +7,7 @@ export function dailySeries(rows,days,today=new Date()){
  return Array.from({length:days},(_,index)=>{
   const date=new Date(today);date.setUTCDate(today.getUTCDate()-days+index+1);
   const day=date.toISOString().slice(0,10);
-  return byDay.get(day)||{day,requests:0,attempts:0,successes:0,tokens:0};
+  return byDay.get(day)||{day,requests:0,requestSuccesses:0,attempts:0,successes:0,tokens:0};
  });
 }
 
@@ -17,25 +17,27 @@ function renderUsageChart(series,esc){
  return `<div class="usage-chart" role="img" aria-label="每日生成请求柱状图，最高 ${peak} 次">
   <svg class="usage-chart-svg" viewBox="0 0 1000 180" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="170" x2="1000" y2="170" class="usage-baseline"/>${series.map((day,index)=>{const height=day.requests?Math.max(4,day.requests/peak*150):0;return `<rect class="usage-chart-bar" x="${(index*width+Math.min(3,width*.1)).toFixed(2)}" y="${(170-height).toFixed(2)}" width="${Math.max(2,width-Math.min(6,width*.2)).toFixed(2)}" height="${height.toFixed(2)}" rx="2"><title>${esc(day.day)}：${formatCount(day.requests)} 次请求 · ${formatCount(day.tokens)} Tokens</title></rect>`;}).join('')}</svg>
   <div class="usage-chart-labels" aria-hidden="true"><span>${esc(series[0].day.slice(5))}</span><span>${esc(series[Math.floor((series.length-1)/2)].day.slice(5))}</span><span>${esc(series[series.length-1].day.slice(5))}</span></div>
- </div><details class="usage-daily-details"><summary>查看每日明细</summary><div class="table-wrap"><table><thead><tr><th>日期（UTC）</th><th>请求</th><th>上游尝试</th><th>成功</th><th>Tokens</th></tr></thead><tbody>${series.map(day=>`<tr><td>${esc(day.day)}</td><td>${formatCount(day.requests)}</td><td>${formatCount(day.attempts)}</td><td>${formatCount(day.successes)}</td><td>${formatCount(day.tokens)}</td></tr>`).join('')}</tbody></table></div></details>`;
+ </div><details class="usage-daily-details"><summary>查看每日明细</summary><div class="table-wrap"><table><thead><tr><th>日期（UTC）</th><th>请求</th><th>最终成功</th><th>上游尝试</th><th>Tokens</th></tr></thead><tbody>${series.map(day=>`<tr><td>${esc(day.day)}</td><td>${formatCount(day.requests)}</td><td>${formatCount(day.requestSuccesses)}</td><td>${formatCount(day.attempts)}</td><td>${formatCount(day.tokens)}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 
 function renderUsageOverview(summary,esc){
  const totals=summary.totals;
  const attempts=Number(totals.attempts||0);
  const successes=Number(totals.successes||0);
- const successRate=attempts?Math.round(successes/attempts*100):0;
+ const attemptRate=attempts?Math.round(successes/attempts*100):0;
+ const requests=Number(totals.requests||0),requestSuccesses=Number(totals.requestSuccesses||0);
+ const finalRate=requests?Math.round(requestSuccesses/requests*100):null;
  const series=dailySeries(summary.daily||[],summary.days+1);
  const peak=series.reduce((best,day)=>day.requests>best.requests?day:best,series[0]);
  const pricedAttempts=(summary.costs||[]).reduce((sum,row)=>sum+Number(row.pricedAttempts||0),0);
  return `<div class="usage-metrics" aria-label="用量概览">
   <article class="usage-metric"><span>生成请求</span><strong>${formatCount(totals.requests)}</strong><small>${summary.days} 天内的独立请求</small></article>
-  <article class="usage-metric"><span>上游成功率</span><strong>${successRate}%</strong><small>${formatCount(successes)} / ${formatCount(attempts)} 次尝试成功</small></article>
+  <article class="usage-metric"><span>最终调用成功率</span><strong>${finalRate===null?'—':finalRate+'%'}</strong><small>${formatCount(requestSuccesses)} / ${formatCount(requests)} 次请求成功；故障转移后成功也计入</small></article>
   <article class="usage-metric"><span>已知 Tokens</span><strong>${formatCount(totals.tokens)}</strong><small>输入 ${formatCount(totals.inputTokens)} · 输出 ${formatCount(totals.outputTokens)}</small></article>
   <article class="usage-metric"><span>成功请求平均耗时</span><strong>${formatLatency(totals.averageLatency)}</strong><small>${formatCount(totals.unknownUsage)} 次用量未知</small></article>
  </div>
  <div class="usage-overview-grid"><section class="panel usage-trend"><div class="usage-section-head"><div><div class="eyebrow">REQUEST VOLUME</div><h2>请求趋势</h2><p>按 UTC 日期展示；起始日可能仅包含部分时段，重试不重复计数。</p></div><span class="usage-peak">峰值 ${esc(peak.day.slice(5))} · ${formatCount(peak.requests)} 次</span></div>${renderUsageChart(series,esc)}</section>
- <section class="panel usage-health"><div class="eyebrow">UPSTREAM HEALTH</div><h2>上游尝试</h2><div class="usage-health-total"><strong>${formatCount(attempts)}</strong><span>次尝试</span></div><progress value="${successRate}" max="100" aria-label="上游成功率 ${successRate}%">${successRate}%</progress><div class="usage-health-legend"><span><i class="usage-legend-success"></i>成功 ${formatCount(successes)}</span><span><i class="usage-legend-failure"></i>失败 ${formatCount(totals.failures)}</span></div><p>成功率按上游尝试计算，包含故障转移和重试。</p></section></div>
+ <section class="panel usage-health"><div class="eyebrow">UPSTREAM HEALTH</div><h2>上游尝试</h2><div class="usage-health-total"><strong>${formatCount(attempts)}</strong><span>次尝试 · ${attempts?attemptRate+'%':'—'} 成功</span></div><progress value="${attemptRate}" max="100" aria-label="上游尝试成功率 ${attemptRate}%">${attemptRate}%</progress><div class="usage-health-legend"><span><i class="usage-legend-success"></i>成功 ${formatCount(successes)}</span><span><i class="usage-legend-failure"></i>失败 ${formatCount(totals.failures)}</span></div><p>这里按每次上游尝试计算；已被故障转移挽回的失败仍保留，便于判断服务商健康。</p></section></div>
  <section class="panel usage-cost"><div class="usage-section-head"><div><div class="eyebrow">ESTIMATED COST</div><h2>费用估算</h2></div><span>${formatCount(pricedAttempts)} 次尝试可估价</span></div><div class="usage-cost-list">${(summary.costs||[]).map(row=>`<div><span>${esc(row.currency)}</span><strong>${Number(row.amount||0).toFixed(6)}</strong></div>`).join('')||'<p class="usage-empty">暂无可估算费用。配置模型价格后，且上游返回用量时才会显示。</p>'}</div><p>按币种分开统计；未知价格或用量不会被记为零费用。</p></section>`;
 }
 

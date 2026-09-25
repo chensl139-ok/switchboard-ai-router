@@ -8,7 +8,7 @@ import {renderPlayground,stopPlayground,resetPlayground} from './playground.js';
 import {renderRouting} from './routing.js';
 import {renderApiKeys} from './api-keys.js';
 import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.js';
-import {renderDashboard,renderDashboardRoutePreview} from './dashboard.js';
+import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from './dashboard.js';
 import {renderAudit} from './audit.js';
 import {modelCapabilities} from './model-capability.js';
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
@@ -125,7 +125,7 @@ function renderPage(root){
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);
  switch(tab){
-  case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(root.isConnected)renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(root.isConnected){root.querySelector('#dashboard-route-chain').textContent='路由预览暂不可用';root.querySelector('#dashboard-route-note').textContent=error.message;}});break;
+  case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(root.isConnected)renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(root.isConnected){root.querySelector('#dashboard-route-chain').textContent='路由预览暂不可用';root.querySelector('#dashboard-route-note').textContent=error.message;}});void api('/api/analytics?days=7').then(summary=>{if(root.isConnected)renderDashboardSummary(root,summary);}).catch(()=>{if(root.isConnected)root.querySelector('#dashboard-final-detail').textContent='用量数据暂不可用';});break;
   case 'providers':renderProviderFilter(root);break;
   case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;},embedded:true});break;
   case 'playground':renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});break;

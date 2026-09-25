@@ -3,6 +3,7 @@
 !.env.example
 data/
 .history-backups/
+.price-backups/
 node_modules/
 *.log
 *.pid
