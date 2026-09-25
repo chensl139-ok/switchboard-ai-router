@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.8](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.8) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.9](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.9) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.8
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.9
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.8
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.9
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.8-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.8 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.9-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.9 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -237,7 +237,7 @@ API 地址不要追加 `/models` 或 `/chat/completions`。Cherry Studio 标准�
 OpenRouter 参考价只是经济路由和用量展示的估算依据，**不代表其他服务商的合同价、优惠价或实际账单**。应优先手动录入实际采购价格；不同币种不混合比较。价格数据属于部署实例，费用不作为计费结算凭据。
 自动导入使用 OpenRouter 模型目录中的基础 Token 报价和已提供的缓存读写价，不涵盖阶梯价、多模态、套餐或供应商折扣；不适合直接用于结算。
 
-已有价格可在停机后执行 `node scripts/set-price-expiry.mjs data` 预览，再执行 `node scripts/set-price-expiry.mjs data --apply` 将期限统一设为无限期。脚本会先把原始状态文件备份到权限受限的 `.price-backups/`；备份含已加密的服务商凭据，请妥善保管。无限期只表示平台不自动让该价格失效，不代表参考价永远准确；来源和采集时间仍保留供定期复核。后续新导入的 OpenRouter 参考价仍默认在 7 天后提醒复核。
+已有价格可在停机后执行 `node scripts/set-price-expiry.mjs data` 预览，再执行 `node scripts/set-price-expiry.mjs data --apply` 将期限统一设为无限期。脚本会先把原始状态文件备份到权限受限的 `.price-backups/`；备份含已加密的服务商凭据，请妥善保管。无限期只表示平台不自动让该价格失效，不代表参考价永远准确；来源和采集时间仍保留供定期复核。再次同步已设为无限期的参考价会更新报价和采集时间，但保留无限期；首次导入的 OpenRouter 参考价仍默认在 7 天后提醒复核。
 
 ## 思考、图片与工具的边界
 
@@ -300,8 +300,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.8
-SWITCHBOARD_VERSION=2.0.8 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.9
+SWITCHBOARD_VERSION=2.0.9 docker compose up -d
 docker compose ps
 ```
 

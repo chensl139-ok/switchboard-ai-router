@@ -41,6 +41,12 @@ export function matchOpenRouterModel(model,rows){
 }
 // 合同/官方/手动价格都属于该服务商自身的数据，参考价只能填补空缺或刷新旧参考价。
 export function canImportOpenRouterPrice(current){return !current||['openrouter','openrouter-reference'].includes(current.source);}
+// Refreshing a reference quote must not discard an explicit indefinite policy.
+// New imports still get the default seven-day review date from openRouterPrice.
+export function refreshedReferencePrice(current,imported){
+ if(!canImportOpenRouterPrice(current))return current;
+ return {...imported,...(current?.expiresAt===null?{expiresAt:null}:{})};
+}
 export function usablePrice(price,currency,now=Date.now()){return !!price&&price.billingUnit!=='image'&&price.currency===currency&&Number.isFinite(price.inputPerMillion)&&Number.isFinite(price.outputPerMillion)&&price.inputPerMillion>=0&&price.outputPerMillion>=0&&(price.expiresAt==null||Date.parse(price.expiresAt)>now);}
 export function priceAt(price,now=Date.now()){
  if(!price?.periods?.length)return price;

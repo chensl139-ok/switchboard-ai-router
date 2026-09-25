@@ -5,7 +5,7 @@ import {platformOpenAPI} from './openapi.mjs';
 import {flattenDiscovery,callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
 import {safeFetch} from './network.mjs';
 import {UsageStore} from './usage-store.mjs';
-import {validatePrice,openRouterPrice,matchOpenRouterModel,canImportOpenRouterPrice,usageCost,normalizeUsage} from './pricing.mjs';
+import {validatePrice,openRouterPrice,matchOpenRouterModel,canImportOpenRouterPrice,refreshedReferencePrice,usageCost,normalizeUsage} from './pricing.mjs';
 import {assertThinkingDisabled} from './thinking.mjs';
 import {createUpstreamAdapter} from './upstream-adapter.mjs';
 import {createRouter,validateRouting} from './routing.mjs';
@@ -285,7 +285,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
       const chosen=model===b.modelId?explicitRow:matchOpenRouterModel(model,rows);
       if(!chosen){unmatched++;continue;}
       let price;try{price=openRouterPrice(chosen);}catch{price=null;}if(!price){unmatched++;continue;}
-      prices[model]={...price,source:p.baseUrl==='https://openrouter.ai/api/v1'?'openrouter':'openrouter-reference',referenceModel:chosen.id};count++;
+      prices[model]=refreshedReferencePrice(prices[model],{...price,source:p.baseUrl==='https://openrouter.ai/api/v1'?'openrouter':'openrouter-reference',referenceModel:chosen.id});count++;
      }
      p.prices=prices;save();return json(res,200,{state:safe(),count,skippedManual,unmatched});
     }
