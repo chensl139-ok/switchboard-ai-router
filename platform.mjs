@@ -127,7 +127,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  process.on('unhandledRejection',error=>{console.error(JSON.stringify({level:'error',event:'unhandled_rejection',message:error?.message||String(error)}));});
- process.on('uncaughtException',error=>{console.error(JSON.stringify({level:'fatal',event:'uncaught_exception',message:error?.message||String(error)}));process.exit(1);});
+ process.on('uncaughtException',error=>{console.error(JSON.stringify({level:'fatal',event:'uncaught_exception',message:error?.message||String(error),stack:error?.stack}));process.exit(1);});
  const app=createPlatform();
  const port=Number(process.env.PORT)||3000;
  const host=process.env.HOST||'0.0.0.0';

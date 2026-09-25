@@ -1,10 +1,10 @@
 services:
   switchboard:
-    image: switchboard-ai-router:${SWITCHBOARD_VERSION:-2.0.13}
+    image: switchboard-ai-router:${SWITCHBOARD_VERSION:-2.0.14}
     build:
       context: .
       args:
-        VERSION: ${SWITCHBOARD_VERSION:-2.0.13}
+        VERSION: ${SWITCHBOARD_VERSION:-2.0.14}
         REVISION: ${SWITCHBOARD_REVISION:-local}
     container_name: switchboard-ai-router
     restart: unless-stopped

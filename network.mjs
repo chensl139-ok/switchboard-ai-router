@@ -2,7 +2,25 @@ import https from 'node:https';
 import http from 'node:http';
 import {lookup} from 'node:dns';
 import {isIP} from 'node:net';
-import {Readable,Transform} from 'node:stream';
+import {Transform} from 'node:stream';
+
+function responseBody(stream,response){
+ let closed=false,controller,cleanup=()=>{};
+ const onData=chunk=>{
+  if(closed)return;
+  controller.enqueue(chunk);
+  if(controller.desiredSize<=0)stream.pause();
+ };
+ const onEnd=()=>{if(closed)return;closed=true;cleanup();controller.close();};
+ const onError=error=>{if(closed)return;closed=true;cleanup();controller.error(error);};
+ const onClose=()=>{if(!closed)onError(Error('上游流提前中断'));};
+ cleanup=()=>{stream.off('data',onData);stream.off('end',onEnd);stream.off('error',onError);stream.off('close',onClose);};
+ return new ReadableStream({
+  start(value){controller=value;stream.on('data',onData);stream.once('end',onEnd);stream.once('error',onError);stream.once('close',onClose);stream.pause();},
+  pull(){if(!closed)stream.resume();},
+  cancel(){if(closed)return;closed=true;cleanup();stream.destroy();response.destroy();}
+ },{highWaterMark:1});
+}
 export function publicAddress(address){
  if(isIP(address)===6)return /^[23][0-9a-f]{3}:/i.test(address)&&!/^2001:(db8|0|20):/i.test(address)&&!/^2002:/i.test(address);
  if(isIP(address)!==4)return false;
@@ -31,7 +49,7 @@ export function safeFetch(value,options={}){
   const request=protocol.request(url,{method:options.method||'GET',headers:options.headers,signal:options.signal,lookup:resolve},response=>{
    const headers=new Headers();for(const [name,value] of Object.entries(response.headers))if(value!==undefined)headers.set(name,Array.isArray(value)?value.join(','):value);
    let bytes=0;let settled=false;const limited=new Transform({transform(chunk,encoding,callback){if(settled||this.destroyed)return callback();bytes+=chunk.length;if(bytes>Math.min(options.maxResponseBytes||8*1024*1024,64*1024*1024)){settled=true;return callback(Error('上游响应超过大小限制'));}callback(null,chunk);}});response.on('error',error=>{settled=true;if(!limited.destroyed)limited.destroy(error);});limited.on('close',()=>{if(!response.complete&&!response.destroyed)response.destroy();});response.pipe(limited);
-   resolveResponse(new Response([204,205,304].includes(response.statusCode)?null:Readable.toWeb(limited),{status:response.statusCode,statusText:response.statusMessage,headers}));
+   resolveResponse(new Response([204,205,304].includes(response.statusCode)?null:responseBody(limited,response),{status:response.statusCode,statusText:response.statusMessage,headers}));
   });
   request.on('error',reject);if(options.body)request.write(options.body);request.end();
  });
