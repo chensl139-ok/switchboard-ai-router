@@ -74,7 +74,8 @@ const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view))
 
 function syncNavigation(){
  const parent=Object.keys(groups).find(key=>key!==tab&&groups[key].includes(tab));
- $('#breadcrumb').textContent=parent?`${names[parent]} / ${names[tab]}`:names[tab];
+ $('#page-parent').textContent=parent?names[parent]:'工作空间';
+ $('#breadcrumb').textContent=names[tab];
  for(const button of document.querySelectorAll('nav button[data-tab]')){
   const view=button.dataset.tab;
   button.hidden=(!isManager()&&['keys','members','routing'].includes(view))||(profile?.role==='viewer'&&groups.playground.includes(view));
@@ -151,6 +152,7 @@ function render(){
  $('#content').replaceWith(root);
  syncNavigation();
  root.innerHTML=initialPageHtml();
+ if(tab==='overview')$('#breadcrumb').textContent=root.querySelector('.dashboard-heading h1')?.textContent||names.overview;
  renderPage(root);
 }
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void providerPoll?.refresh();});

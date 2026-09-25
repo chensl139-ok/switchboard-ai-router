@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.3](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.3) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.4](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.4) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -27,7 +27,7 @@
 
 上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。
 
-控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。全站标题层级、外层边距与二级标签栏位置统一，模型实验室的对话与媒体页共用标题和边界。侧栏主入口标出二级模块，折叠前后的开关、导航图标和租户头像保持同一轴线，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。对话页让消息区随窗口伸缩，输入区贴底并可继续编辑下一条草稿；输入框聚焦保持单层反馈，生成设置按需展开，在窄屏以侧边浮层呈现。
+控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。桌面端将页面标题并入顶栏，正文只保留必要说明与操作；窄屏在正文显示标题，以留出搜索与按钮空间。全站外层边距与二级标签栏位置统一，模型实验室的对话与媒体页共用边界。侧栏主入口标出二级模块，折叠前后的开关、导航图标和租户头像保持同一轴线，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。对话页让消息区随窗口伸缩，输入区贴底并可继续编辑下一条草稿；实际命中模型只在回复标题显示一次，路由细节按需展开。输入框聚焦保持单层反馈，生成设置按需展开，在窄屏以侧边浮层呈现。
 
 模型实验室的 Tokens/s 表示“端到端输出吞吐”：以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表模型纯解码速度。上游没有提供逐 Token 时间戳时不展示推测的 TPOT；缺少可信输出 Token 用量时也不显示 Tokens/s。
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.3
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.4
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.3
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.4
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.3-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.3 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.4-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.4 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -295,8 +295,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.3
-SWITCHBOARD_VERSION=2.0.3 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.4
+SWITCHBOARD_VERSION=2.0.4 docker compose up -d
 docker compose ps
 ```
 

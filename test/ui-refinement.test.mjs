@@ -25,7 +25,7 @@ test('模型实验室突出直接选模型、运行摘要和生成中草稿',()=
  assert.match(source,/lab-session-summary/);assert.match(source,/lab-model-quick/);
  assert.match(source,/协议自动适配/);assert.match(source,/lab-response-meta/);
  assert.match(source,/id="lab-draft-state"/);assert.match(composer,/draftState\.hidden=!value/);
- assert.match(source,/lab-settings-toggle/);assert.match(source,/本次路由选择中/);
+ assert.match(source,/lab-settings-toggle/);assert.match(source,/id="lab-transport-label"/);
 });
 
 test('租户浮层不被折叠侧栏裁切，并支持键盘切换与明确提示',()=>{
@@ -166,11 +166,20 @@ test('侧栏收起只隐藏文字并保留全部导航图标坐标',()=>{
  assert.match(css,/\.sidebar \.workspace-chip,\.sidebar-compact \.workspace-chip\{height:62px;min-height:62px/);
 });
 
-test('模型实验室显示自动路由实际命中的服务商、模型与故障转移',()=>{
- const source=read('public/playground.js'),stream=read('public/stream-client.js'),css=read('public/style.css');
- assert.match(source,/实际路由/);assert.match(source,/lab-route-result/);assert.match(source,/故障转移 · 第/);
+test('模型实验室仅在消息标题展示实际命中模型，路由细节按需展开',()=>{
+ const source=read('public/playground.js'),stream=read('public/stream-client.js'),css=read('public/workspaces.css');
+ assert.match(source,/response\.label=`\$\{response\.route\.provider/);assert.match(source,/lab-route-details/);assert.match(source,/故障转移 · 第/);
+ assert.doesNotMatch(source,/id="lab-route-label"/);assert.doesNotMatch(source,/lab-route-result/);
  assert.match(source,/x-router-model/);assert.match(stream,/x-router-provider-name/);assert.match(stream,/m\.route\|\|route/);
- assert.match(css,/Model lab route visibility/);assert.match(css,/\.lab-session-summary\{grid-template-columns:repeat\(4/);
+ assert.match(css,/\.chat-workspace \.lab-route-details>div/);
+});
+
+test('桌面端将页面标题并入顶栏，移动端保留正文标题',()=>{
+ const html=read('public/index.html'),app=read('public/app.js'),css=read('public/workspaces.css');
+ assert.match(html,/class="topbar-location"/);assert.match(html,/<h1 id="breadcrumb">/);
+ assert.match(app,/#page-parent/);assert.match(app,/if\(tab==='overview'\)\$\('#breadcrumb'\)/);
+ assert.match(css,/#content>\.heading h1,#content>\.dashboard-heading h1,#content\.lab-page>\.heading \.eyebrow \{ display: none; \}/);
+ assert.match(css,/@media \(max-width: 720px\) \{[\s\S]*?\.topbar-location \{ display: none; \}/);
 });
 
 test('全站页边距和标题统一，二级标签置于标题后，输入框聚焦不出现双层描边',()=>{

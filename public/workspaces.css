@@ -27,8 +27,7 @@
 .chat-workspace .lab-session-summary small { margin: 0; font-size: 10px; }
 .chat-workspace .lab-session-summary strong { font-size: 10px; font-weight: 500; }
 .chat-workspace .lab-session-summary>div:first-child small { display: none; }
-.chat-workspace .lab-session-summary>div:last-child { flex: 1 1 180px; justify-content: flex-end; }
-.chat-workspace .lab-main>.lab-session-summary>div:last-child strong { white-space: nowrap; text-overflow: ellipsis; }
+.chat-workspace .lab-session-summary>div:last-child { margin-left: auto; }
 #content.chat-workspace .lab-messages { flex: 1 1 0; height: auto; min-height: 0; padding: 24px max(20px,calc((100% - 860px)/2)); overscroll-behavior: contain; }
 .chat-workspace .lab-message,body.theme-dark .chat-workspace .lab-message { max-width: 860px; margin: 0 auto 16px; padding: 0 0 16px; border-bottom: 1px solid var(--ui-border); background: transparent; }
 .chat-workspace .lab-message:last-child { margin-bottom: 0; border-bottom: 0; }
@@ -36,6 +35,10 @@
 .chat-workspace .lab-message.user .lab-answer,body.theme-dark .chat-workspace .lab-message.user .lab-answer { width: fit-content; max-width: 100%; padding: 9px 13px; border: 1px solid var(--ui-border); border-radius: 10px; background: var(--ui-surface-soft); color: var(--ui-text); }
 .chat-workspace .lab-message.assistant .lab-answer,body.theme-dark .chat-workspace .lab-message.assistant .lab-answer { color: var(--ui-text); }
 .chat-workspace .lab-answer { line-height: 1.7; }
+.chat-workspace .lab-route-details { margin: 0 0 8px; color: var(--ui-muted); font-size: 11px; }
+.chat-workspace .lab-route-details summary { width: fit-content; cursor: pointer; color: var(--ui-accent-ink); }
+.chat-workspace .lab-route-details.is-fallback summary { color: var(--ui-danger); }
+.chat-workspace .lab-route-details>div { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 7px 0 0; padding: 7px 10px; border-left: 2px solid var(--ui-border); background: var(--ui-surface-soft); }
 #content.chat-workspace .lab-empty { padding: 20px 0; min-height: 100%; }
 #content.chat-workspace .lab-empty-icon { display: grid; width: 46px; height: 46px; margin-bottom: 14px; }
 #content.chat-workspace .lab-empty h2 { font-size: clamp(18px,1.6vw,24px); margin: 0 0 8px; }
@@ -151,7 +154,7 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
  .chat-workspace #lab-settings-toggle>span { display: none; }
  .chat-workspace .lab-main>.lab-session-summary { padding: 6px 10px; gap: 6px 10px; }
  .chat-workspace .lab-session-summary>div:nth-child(3) { display: none; }
- .chat-workspace .lab-session-summary>div:last-child { flex-basis: 100%; justify-content: flex-start; }
+ .chat-workspace .lab-session-summary>div:last-child { margin-left: 0; }
  #content.chat-workspace .lab-messages { padding: 18px 14px; }
  .chat-workspace .lab-message-body { padding-left: 0; }
  #content.chat-workspace .lab-empty h2 { font-size: 19px; }
@@ -173,4 +176,30 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
  #content.chat-workspace .lab-empty-icon { display: none; }
  #content.chat-workspace .lab-empty { padding: 10px 0; }
  #content.chat-workspace .lab-prompts { margin-top: 12px; }
+}
+
+/* A single page chrome: page identity lives in the top bar; content starts with context/actions. */
+@media (min-width: 721px) {
+ body>main>header { height: 64px; gap: 10px; padding-inline: max(var(--page-gutter),calc((100% - 1800px)/2 + var(--page-gutter))); }
+ .topbar-location { display: flex; flex: 1 1 auto; flex-direction: column; justify-content: center; min-width: 0; gap: 2px; }
+ #page-parent { color: var(--ui-subtle); font-size: 9px; font-weight: 650; letter-spacing: .08em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ #breadcrumb,body.theme-dark #breadcrumb { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 21px; line-height: 1.15; letter-spacing: -.35px; font-weight: 700; }
+ #content { padding-top: 12px; }
+ #content>.heading,#content>.dashboard-heading { align-items: center; min-height: 0; margin-bottom: 12px; padding-bottom: 9px; gap: 12px; border-bottom: 1px solid var(--ui-border); }
+ #content>.heading>div:first-child,#content>.dashboard-heading>div:first-child { min-width: 0; }
+ #content>.heading .eyebrow,#content>.dashboard-heading .eyebrow,#content>.heading h1,#content>.dashboard-heading h1,#content.lab-page>.heading .eyebrow { display: none; }
+ #content>.heading p,#content>.dashboard-heading p { margin: 0; max-width: none; color: var(--ui-muted); font-size: 12px; line-height: 1.5; }
+ #content.lab-page>.heading { margin-bottom: 8px; }
+ #content.chat-workspace { height: calc(100dvh - 64px); }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+ #current-account { display: none; }
+ #global-search { flex-basis: 170px; width: 170px; }
+}
+@media (max-width: 720px) {
+ body>main>header { height: 44px; justify-content: flex-end; gap: 8px; padding-inline: var(--page-gutter); }
+ .topbar-location { display: none; }
+ #global-search,body.theme-dark #global-search { flex: 1 1 auto; width: auto; max-width: 240px; }
+ #content>.heading .eyebrow,#content>.dashboard-heading .eyebrow { display: none; }
+ #content>.heading,#content>.dashboard-heading { margin-bottom: 12px; padding-bottom: 10px; }
 }
