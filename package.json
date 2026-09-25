@@ -1,6 +1,6 @@
 {
   "name": "switchboard-ai-router",
-  "version": "2.0.15",
+  "version": "2.0.1",
   "private": true,
   "type": "module",
   "scripts": {
