@@ -13,6 +13,16 @@ test('媒体实验室使用通用视频名称并自动轮询异步任务',()=>{
  assert.match(source,/imageRequired=\$\('#media-kind'\)\.value==='video'&&\/I2V\/i/);
 });
 
+test('切换媒体任务、模型或视觉输入类型时清空旧结果并阻止迟到响应覆盖',()=>{
+ const source=read('public/media-lab.js');
+ assert.match(source,/if\(\$\('#media-kind'\)\.value!==kind\)clearSelection\(\)/);
+ assert.match(source,/\$\('#media-model'\)\.onchange=\(\)=>\{clearSelection\(\)/);
+ assert.match(source,/\$\('#media-vision-type'\)\.onchange=\(\)=>\{clearSelection\(\)/);
+ assert.match(source,/selectionEpoch\+\+;controller\?\.abort\(\);controller=null;stopPolling\(\);taskId=null/);
+ assert.match(source,/if\(!active\(\)\|\|epoch!==selectionEpoch\|\|id!==taskId\)return/);
+ assert.match(source,/current=\(\)=>active\(\)&&epoch===selectionEpoch/);
+});
+
 test('贴图预览放入对话输入框并保持横向排列',()=>{
  const chat=read('public/playground.js'),css=read('public/workspaces.css');
  assert.match(chat,/<form id="lab-form" class="lab-composer">[\s\S]*?<div id="lab-images" class="lab-images"/);
