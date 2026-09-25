@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.4](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.4) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.5](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.5) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -23,13 +23,13 @@
 | API Key | 产品侧创建、有效期、启停、删除、总次数／每日次数／RPM 限制；明文仅展示一次 |
 | 多租户 | 邮箱密码与飞书 OAuth 登录、邀请注册、租户切换、所有者／管理员／成员／只读角色 |
 | 价格管理 | 输入、输出、缓存命中价格；高峰／空闲时段、时区与星期；图片按张价格 |
-| 观测与文档 | 请求日志组合筛选、故障转移请求追踪；租户审计按成员、类型、时间和关键字检索；用量趋势、费用估算、产品内 API 文档与 OpenAPI JSON 下载 |
+| 观测与文档 | 请求日志组合筛选、故障转移请求追踪；租户审计按成员、类型、时间和关键字检索；用量趋势、费用估算、产品内 API 文档、OpenAPI 规范预览与 JSON 下载 |
 
 上游密钥使用 AES-256-GCM 加密，外部调用 Key 使用哈希存储。服务端日志保存调用元数据，不保存提示词、回复正文或密钥。
 
-控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。桌面端将页面标题并入顶栏，正文只保留必要说明与操作；窄屏在正文显示标题，以留出搜索与按钮空间。全站外层边距与二级标签栏位置统一，模型实验室的对话与媒体页共用边界。侧栏主入口标出二级模块，折叠前后的开关、导航图标和租户头像保持同一轴线，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。对话页让消息区随窗口伸缩，输入区贴底并可继续编辑下一条草稿；实际命中模型只在回复标题显示一次，路由细节按需展开。输入框聚焦保持单层反馈，生成设置按需展开，在窄屏以侧边浮层呈现。
+控制台提供浅色与深色科技主题，默认跟随系统外观；手动切换后记住选择。桌面端将页面标题并入顶栏，正文只保留必要说明与操作；窄屏在正文显示标题，以留出搜索与按钮空间。全站页面边距、模块内部留白、筛选区、卡片和表格采用统一的间距尺度，模型实验室的对话与媒体页共用边界。侧栏平台名称左侧显示路由图标，展开态的收起按钮置于右侧；折叠态按钮与导航图标共用同一中心轴，租户切换列表从头像侧边弹出；窄屏使用横向导航和紧凑顶部栏。服务商卡片每 10 秒自动更新调用健康状态，回到页面时立即刷新。对话页让消息区随窗口伸缩，输入区贴底并可继续编辑下一条草稿；运行模型和状态合并为一个响应式操作条，实际命中模型只在回复标题显示一次，路由细节按需展开。输入框聚焦保持单层反馈，生成设置按需展开，在窄屏以侧边浮层呈现。
 
-模型实验室的 Tokens/s 表示“端到端输出吞吐”：以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表模型纯解码速度。上游没有提供逐 Token 时间戳时不展示推测的 TPOT；缺少可信输出 Token 用量时也不显示 Tokens/s。
+模型实验室每条回复展示总耗时、输出 Token 数、TTFB（首个响应数据）、TTFT（首个内容或思考增量）、TPS（端到端输出吞吐）及估算 TPOT。TPS 以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表纯解码速度。TPOT 按 `(总耗时 - TTFT) / (输出 Token 数 - 1)` 估算，只在流式输出出现多个有时间间隔的增量且上游返回可信用量时展示；网络分块不等于 Token，因此不把分块间隔冒充真实 TPOT。HTTP 完整响应无法测量 TTFT/TPOT，缺少可靠数据时显示「—」。
 
 故障转移以“服务商 + 模型”为候选单位：默认服务商置顶，前三个兼容候选优先安排首选服务商默认模型、该服务商另一个模型、下一服务商模型，再尝试其余模型与备用密钥，受“最多尝试次数”和总超时限制。延迟优先与加权轮询也可在首选失败后回退到同服务商或其他服务商的模型。自动对话会过滤媒体模型与不支持请求能力的模型，过滤项不占尝试次数。路由页面可预览候选顺序、协议、健康状态和过滤原因，预览不调用上游。实验室选择具体模型时，该模型作为起始模型并显式启用同服务商、跨服务商回退；API 使用 `provider::model` 时固定模型，但仍可切换同模型备用密钥。流式响应一旦已经输出首个增量，不会切换候选。
 
@@ -72,21 +72,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.4
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.5
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.4
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.5
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.4-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.4 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.5-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.5 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -295,8 +295,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.4
-SWITCHBOARD_VERSION=2.0.4 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.5
+SWITCHBOARD_VERSION=2.0.5 docker compose up -d
 docker compose ps
 ```
 

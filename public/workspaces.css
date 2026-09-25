@@ -178,6 +178,56 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
  #content.chat-workspace .lab-prompts { margin-top: 12px; }
 }
 
+/* One spacing scale for page sections and content inside every module. */
+:root { --space-xs: 6px; --space-sm: 10px; --space-md: 16px; --space-lg: 24px; }
+#content>.heading,#content>.dashboard-heading { margin-bottom: var(--space-md); }
+#content .section-space { margin-top: var(--space-md); }
+#content .section-title { margin: var(--space-md) 0 var(--space-sm); gap: var(--space-sm); }
+#content .panel { padding: var(--space-md); }
+#content .cards,#content .metrics { gap: var(--space-md); margin-bottom: var(--space-md); }
+#content .card,#content .metric { padding: var(--space-md); }
+#content .filter-bar,#content .log-filters { gap: var(--space-sm); padding: var(--space-sm) var(--space-md); margin-bottom: var(--space-md); }
+#content .record-heading { margin-bottom: var(--space-md); }
+#content .record-filters { padding: var(--space-md); gap: var(--space-sm); margin-bottom: var(--space-sm); }
+#content .record-details { gap: var(--space-sm) var(--space-md); }
+#content .record-table th,#content .record-table td { padding: var(--space-sm) var(--space-md); }
+#content .lab-nav-row { margin-bottom: var(--space-md); }
+#content .api-section h2 { margin-bottom: var(--space-sm); }
+#content .api-openapi-source { margin-top: var(--space-md); }
+#content .api-openapi-source pre { max-height: 440px; overflow: auto; font-size: 11px; }
+
+/* The brand and toggle share the same 39px glyph axis as navigation icons. */
+@media (min-width: 721px) {
+ body .sidebar .sidebar-heading { display: flex; padding-left: 9px; padding-right: 0; gap: 8px; min-height: 48px; }
+ body .sidebar .sidebar-heading .brand { display: flex; min-width: 0; order: 0; gap: 8px; }
+ body .sidebar .sidebar-heading .brand-mark { display: block; width: 32px; height: 32px; padding: 5px; }
+ body .sidebar .sidebar-heading .brand-wordmark { font-size: 17px; }
+ body .sidebar .sidebar-heading .brand small { font-size: 7px; letter-spacing: 1px; }
+ body .sidebar .sidebar-toggle { order: 1; margin-left: auto; width: 32px; height: 32px; }
+ body.sidebar-compact .sidebar .sidebar-heading { padding-left: 9px; justify-content: flex-start; }
+ body.sidebar-compact .sidebar .sidebar-heading .brand { display: none; }
+ body.sidebar-compact .sidebar .sidebar-toggle { margin-left: 0; }
+ body.sidebar-compact .sidebar .nav-item { padding-left: 16px; }
+}
+
+/* Conversation controls and status form one responsive strip. */
+#content.chat-workspace .lab-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); }
+#content.chat-workspace .lab-toolbar .lab-model-quick { flex: 1 1 320px; }
+#content.chat-workspace .lab-toolbar .lab-session-summary { order: 3; display: flex; align-items: center; width: 100%; padding: 0; margin: 0; gap: var(--space-md); border: 0; border-top: 1px solid var(--ui-border); border-radius: 0; box-shadow: none; background: transparent; }
+#content.chat-workspace .lab-toolbar .lab-session-summary>div { display: inline-flex; align-items: center; gap: var(--space-xs); min-width: 0; padding: 7px 0 0; border: 0; }
+#content.chat-workspace .lab-toolbar .lab-session-summary>div:last-child { margin-left: 0; }
+#content.chat-workspace .lab-messages { padding-top: var(--space-md); padding-bottom: var(--space-md); }
+#content.chat-workspace .lab-prompts { margin-top: var(--space-md); }
+#content.chat-workspace .lab-settings-body { padding: var(--space-md); }
+#content.chat-workspace .lab-settings label { margin-bottom: var(--space-md); }
+#content.chat-workspace .lab-metric-note { margin: var(--space-md) 0 0; color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
+#content.chat-workspace .lab-response-meta span { font-size: 10px; line-height: 1.5; }
+@media (max-width: 720px) {
+ #content .panel,#content .card,#content .metric { padding: var(--space-md); }
+ #content.chat-workspace .lab-toolbar .lab-session-summary { gap: var(--space-sm); }
+ #content.chat-workspace .lab-toolbar .lab-session-summary>div:nth-child(3) { display: none; }
+}
+
 /* A single page chrome: page identity lives in the top bar; content starts with context/actions. */
 @media (min-width: 721px) {
  body>main>header { height: 64px; gap: 10px; padding-inline: max(var(--page-gutter),calc((100% - 1800px)/2 + var(--page-gutter))); }

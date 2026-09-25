@@ -17,7 +17,7 @@ import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
 import {gzipSync,gunzipSync} from 'node:zlib';
 import {readdirSync,readFileSync,writeFileSync,mkdirSync,renameSync,unlinkSync,existsSync} from 'node:fs';
-import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual} from 'node:crypto';
+import {randomBytes,createCipheriv,createDecipheriv,timingSafeEqual,createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 const root=path.dirname(fileURLToPath(import.meta.url));
@@ -381,7 +381,7 @@ function staticServe(req,res,absolute,type,{immutable=false}={}){
   if(existsSync(absolute+'.gz')){try{gz=readFileSync(absolute+'.gz');raw=gunzipSync(gz);}catch{}}
   if(!raw)raw=readFileSync(absolute);
   if(!gz&&compressible.test(type)&&raw.length>=1024)gz=gzipSync(raw);
-  cached={raw,gz,etag:'W/"'+raw.length.toString(16)+'-'+(gz?gz.length:0).toString(16)+'"'};
+  cached={raw,gz,etag:'"'+createHash('sha256').update(raw).digest('hex').slice(0,24)+'"'};
   staticCache.set(absolute,cached);
  }
  const headers={'content-type':type,'cache-control':immutable?'public, max-age=31536000, immutable':'no-cache','etag':cached.etag,'vary':'accept-encoding'};

@@ -49,5 +49,13 @@ test('HTTP/SSE 共用配额、并发无超发、旧令牌开关与 WebSocket 每
   const denied=once(ws,'message');ws.send(JSON.stringify({type:'chat',id:'blocked',input}));assert.equal(JSON.parse((await denied)[0]).type,'error');assert.equal(upstreamCalls,1);
   ws.close();await once(ws,'close');
   assert.equal((await request('/v1/models',undefined,wsKey.token)).status,403);
+  const verification=await (await request('/api/keys',{name:'verified client'})).json();
+  const listing=await (await request('/api/keys')).json();
+  assert.ok(JSON.stringify(listing).includes('verified client'));
+  assert.ok(!JSON.stringify(listing).includes(verification.token),'列表不得泄露完整密钥');
+  assert.equal((await request('/v1/models',undefined,verification.token)).status,200);
+  const chat=await request('/v1/chat/completions',input,verification.token);
+  assert.equal(chat.status,200);assert.equal((await chat.json()).choices[0].message.content,'ok');
+  assert.equal((await request('/v1/models',undefined,'invalid-client-key')).status,401);
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}
 });

@@ -698,11 +698,8 @@ body.theme-dark .media-task, body.theme-dark .media-transcript { background: var
   .provider-model-heading small { white-space: normal; text-align: right; }
 }
 
-/* Keep the collapse control on the same navigation axis in both states. */
+/* Brand/toggle placement is defined alongside the shared navigation axis in workspaces.css. */
 @media (min-width: 721px) {
-  body:not(.sidebar-compact) .sidebar .sidebar-heading { padding-left: 9px; }
-  body:not(.sidebar-compact) .sidebar .sidebar-heading .brand-mark { display: none; }
-  .sidebar .sidebar-toggle { order: -1; margin-left: 0; }
   body:not(.sidebar-compact) .sidebar .workspace-chip { padding-left: 0; }
   body:not(.sidebar-compact) .sidebar .tenant-button { padding-left: 9px; }
 }

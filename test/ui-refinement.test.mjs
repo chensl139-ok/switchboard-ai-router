@@ -28,6 +28,23 @@ test('模型实验室突出直接选模型、运行摘要和生成中草稿',()=
  assert.match(source,/lab-settings-toggle/);assert.match(source,/id="lab-transport-label"/);
 });
 
+test('OpenAPI 入口在站内显示规范，不把 SPA hash 误当页面路由',()=>{
+ const docs=read('public/api-docs.js'),spec=read('openapi.mjs');
+ assert.match(docs,/id="view-openapi"/);
+ assert.match(docs,/section\('openapi','OpenAPI 规范'/);
+ assert.match(docs,/#view-openapi'\)\.onclick=.*#docs-openapi'\)\.scrollIntoView/);
+ assert.doesNotMatch(docs,/href="\/v1\/openapi\.json"/);
+ assert.match(spec,/version:appVersion/);
+});
+
+test('侧栏、模块内部间距和静态缓存由统一规则约束',()=>{
+ const css=read('public/workspaces.css'),server=read('server.mjs');
+ assert.match(css,/--space-sm: 10px; --space-md: 16px/);
+ assert.match(css,/sidebar-heading \.brand-mark \{ display: block/);
+ assert.match(css,/sidebar-compact \.sidebar \.nav-item \{ padding-left: 16px/);
+ assert.match(server,/createHash\('sha256'\)\.update\(raw\)/);
+});
+
 test('租户浮层不被折叠侧栏裁切，并支持键盘切换与明确提示',()=>{
  const app=read('public/app.js'),css=read('public/interface.css');
  assert.match(app,/document\.body\.append\(popover\)/);
@@ -91,12 +108,12 @@ test('服务商序号不覆盖文案，实验室对话整合状态、媒体不�
  assert.match(css,/\.provider-card \.card-top \.provider-rank,[\s\S]*position: static/);
  assert.match(app,/id="lab-page-actions"/);
  assert.match(chat,/root\.querySelector\('#lab-page-actions'\)/);
- assert.match(chat,/\.lab-toolbar'\)\.after\(\$\('\.lab-session-summary'\)\)/);
+ assert.match(chat,/\.lab-toolbar'\)\.append\(\$\('\.lab-session-summary'\)\)/);
  assert.doesNotMatch(media,/class="media-session-summary"/);
  assert.match(media,/id="media-status" role="status"/);
  assert.match(media,/function setStatus\(label\)/);
  assert.match(css,/\.lab-main>\.lab-session-summary/);
- assert.match(css,/body:not\(\.sidebar-compact\) \.sidebar \.sidebar-heading \.brand-mark \{ display: none; \}/);
+ assert.match(read('public/workspaces.css'),/\.sidebar-heading \.brand-mark \{ display: block;/);
  assert.match(css,/#global-search, body\.theme-dark #global-search \{ flex: 0 1 112px/);
  assert.match(css,/\.sidebar \.nav-group\+\.nav-group, \.sidebar-compact \.sidebar \.nav-group\+\.nav-group \{ margin-top: 0; padding-top: 0; border: 0; \}/);
  assert.match(compare,/compare-nav-row/);

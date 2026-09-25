@@ -4,7 +4,7 @@ import {modelCapabilities} from './model-capability.js';
 import {renderModelCompare,stopModelCompare} from './model-compare.js';
 import {setLabBusy} from './lab-composer.js';
 import {createLabTiming} from './lab-performance.js';
-let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,streamingVerbose:false,maxTokens:2048,tools:'[]'};
+let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
 const headerValue=(response,name)=>{const value=response.headers.get(name);if(!value)return '';try{return decodeURIComponent(value)}catch{return value}};
@@ -38,9 +38,9 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  <div class="lab-settings-divider"></div><label>模型思考<select id="lab-thinking"><option value="auto">模型默认</option><option value="enabled">开启思考</option><option value="disabled">关闭思考</option></select></label><p class="lab-help" id="lab-thinking-help">思考开关控制模型推理，不只是隐藏显示。</p>
  <label class="lab-switch"><span>思考区可见性<small>仅调整界面，独立于模型思考开关</small></span><input id="lab-show-thinking" type="checkbox" role="switch"></label>
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
- <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><label class="lab-switch"><span>详尽统计<small>TTFT / 端到端输出速率（需上游用量）</small></span><input id="lab-verbose" type="checkbox" role="switch"></label></aside></div>`);
+ <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><p class="lab-metric-note">指标随每条回复展示。TPS 是端到端输出吞吐，TPOT 为有流式增量和上游 Token 用量时的估算；无可靠数据会显示「—」。</p></aside></div>`);
  const $=selector=>root.querySelector(selector);
- $('.lab-toolbar').after($('.lab-session-summary'));
+ $('.lab-toolbar').append($('.lab-session-summary'));
  const settingsPanel=$('.lab-settings'),settingsHeading=settingsPanel.querySelector('.lab-settings-heading');
  const settingsBody=document.createElement('div');settingsBody.id='lab-settings-body';settingsBody.className='lab-settings-body';
  while(settingsHeading.nextSibling)settingsBody.append(settingsHeading.nextSibling);settingsPanel.append(settingsBody);
@@ -53,7 +53,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-prompt').value=draft;
  const resizePrompt=()=>{const el=$('#lab-prompt');el.style.height='auto';el.style.height=Math.min(180,el.scrollHeight)+'px';};
  $('#lab-prompt').oninput=()=>{draft=$('#lab-prompt').value;resizePrompt();};resizePrompt();
-  $('#lab-model').value=settings.target;$('#lab-transport').value=settings.transport;$('#lab-thinking').value=settings.thinking;$('#lab-show-thinking').checked=settings.showThinking;$('#lab-verbose').checked=settings.streamingVerbose;$('#lab-tools').value=settings.tools;
+  $('#lab-model').value=settings.target;$('#lab-transport').value=settings.transport;$('#lab-thinking').value=settings.thinking;$('#lab-show-thinking').checked=settings.showThinking;$('#lab-tools').value=settings.tools;
  function selectedCapability(){
   if(settings.target==='auto'){
    if(!['manual','fallback'].includes(state.strategy))return null;
@@ -64,14 +64,12 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  function updateSummary(){const turns=history.filter(m=>m.role==='user').length;$('#lab-turn-count').textContent=`${turns} 轮`;const names={sse:'SSE 流式',ws:'WebSocket',http:'HTTP 完整'};$('#lab-transport-label').textContent=names[settings.transport]||settings.transport;}
  function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';const capability=selectedCapability();$('#lab-thinking').querySelector('option[value=disabled]').disabled=capability?.canDisable===false;$('#lab-thinking-help').textContent=capability?.reason||'按实际选中的模型校验关闭能力；不支持的默认目标会拒绝请求。';updateSummary();}
  function statLine(m){
+  if(m.status==='失败'||m.status==='已停止')return '';
   const parts=[];
-  if(m.status!=='生成中'&&m.durationMs)parts.push((m.durationMs/1000).toFixed(1)+' 秒');
-  if(m.totalTokens)parts.push(m.totalTokens+' tokens');
-  if(m.status!=='生成中'&&m.stats?.tps)parts.push('端到端 '+m.stats.tps.toFixed(1)+' tok/s');
-  if(settings.streamingVerbose&&m.stats){
-   if(m.stats.ttft!=null)parts.push('TTFT '+m.stats.ttft+'ms');
-   if(m.stats.tpot!=null)parts.push('TPOT '+m.stats.tpot+'ms');
-  }
+  if(m.status==='生成中')return m.stats?.ttft!=null?'TTFT '+m.stats.ttft+' ms':'';
+  if(m.durationMs!=null)parts.push('耗时 '+(m.durationMs/1000).toFixed(2)+' s');
+  if(m.outputTokens!=null)parts.push('输出 '+m.outputTokens+' tokens');
+  if(m.stats){parts.push('TTFB '+(m.stats.ttfb==null?'—':m.stats.ttfb+' ms'));parts.push('TTFT '+(m.stats.ttft==null?'—':m.stats.ttft+' ms'));parts.push('TPS '+(m.stats.tps==null?'—':m.stats.tps.toFixed(1)+' tok/s'));parts.push('估算 TPOT '+(m.stats.tpot==null?'—':m.stats.tpot.toFixed(1)+' ms/token'));}
   return parts.join(' · ');
  }
  function routeDetails(m,index){
@@ -80,7 +78,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   return `<details class="lab-route-details ${route.fallback?'is-fallback':''}" data-route="${index}" ${m.routeOpen?'open':''}><summary>${esc(summary)}</summary><div><span>协议 ${esc(route.protocol||'自动适配')}</span><span>策略 ${esc(route.reason||'自动路由')}</span></div></details>`;
  }
  function draw(){const list=$('#lab-messages');if(!list)return;const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
-  list.innerHTML=history.length?history.map((m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&settings.streamingVerbose&&m.status==='生成中'&&m.stats?`<span class="lab-live-stats">${esc(statLine({stats:m.stats}))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${routeDetails(m,index)}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer">${esc((typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text').map(p=>p.text).join('\n'):'')|| (m.status==='生成中'?'':m.tool_calls?.length?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':''))}</div>${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'&&statLine(m)?`<div class="lab-response-meta"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`).join(''):
+  list.innerHTML=history.length?history.map((m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&m.status==='生成中'&&m.stats?.ttft!=null?`<span class="lab-live-stats">${esc(statLine(m))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${routeDetails(m,index)}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer">${esc((typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text').map(p=>p.text).join('\n'):'')|| (m.status==='生成中'?'':m.tool_calls?.length?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':''))}</div>${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'&&statLine(m)?`<div class="lab-response-meta" title="TTFB：首个响应数据；TTFT：首个输出；TPS：端到端输出吞吐；TPOT：有连续流式增量和上游用量时的估算"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`).join(''):
   `<div class="lab-empty"><span class="lab-empty-icon">${spark}</span><h2>开始一段模型对话</h2><p>可直接使用自动路由，或在上方指定服务商与模型。</p><div class="lab-prompts"><button type="button" data-example="用一个生活中的例子解释什么是 API。"><small>解释</small>讲清一个概念</button><button type="button" data-example="用 Python 编写一个带注释的快速排序函数。"><small>代码</small>完成编程任务</button><button type="button" data-example="给一个 AI 模型路由平台写三条简洁的产品介绍。"><small>创意</small>探索产品表达</button></div></div>`;
   list.querySelectorAll('[data-thought]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.thought)];if(m)m.thinkingOpen=el.open;}));
   list.querySelectorAll('[data-route]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.route)];if(m)m.routeOpen=el.open;}));
@@ -120,7 +118,6 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-transport').onchange=()=>{settings.transport=$('#lab-transport').value;updateSummary();};
  $('#lab-thinking').onchange=()=>settings.thinking=$('#lab-thinking').value;
  $('#lab-show-thinking').onchange=()=>{settings.showThinking=$('#lab-show-thinking').checked;draw();};
- $('#lab-verbose').onchange=()=>{settings.streamingVerbose=$('#lab-verbose').checked;draw();};
  $('#lab-max-tokens').onchange=()=>settings.maxTokens=Number($('#lab-max-tokens').value);
  $('#lab-clear').onclick=()=>{if(!controller){history=[];pendingImages=[];draft='';$('#lab-prompt').value='';resizePrompt();drawImages();draw();$('#lab-error').textContent='';}};
  $('#lab-stop').onclick=()=>controller?.abort();
@@ -146,9 +143,9 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
    let result;
    if(settings.transport==='http'){
     const res=await fetch('/api/chat',{method:'POST',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},body:JSON.stringify(input),signal:request.signal});
-    const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result={...data.choices[0].message,route:responseRoute(res)};response.label=data.model||response.label;response.totalTokens=data.usage?.total_tokens;
-   }else result=await streamChat(settings.transport,token,input,(update,meta)=>{Object.assign(response,update);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const live=timing.observe(meta?.hasOutput);if(settings.streamingVerbose)response.stats={ttft:live.ttft};draw();},request.signal,tenantId);
-   Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const measured=timing.finish(response.outputTokens);response.durationMs=measured.durationMs;response.stats=settings.transport==='http'?{}:{ttft:measured.ttft,tpot:measured.tpot,tps:measured.tps};response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
+    timing.markFirstByte();const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result={...data.choices[0].message,route:responseRoute(res)};response.label=data.model||response.label;response.totalTokens=data.usage?.total_tokens;response.outputTokens=data.usage?.completion_tokens;
+   }else result=await streamChat(settings.transport,token,input,(update,meta)=>{Object.assign(response,update);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const live=timing.observe(meta?.hasOutput);response.stats={ttft:live.ttft};draw();},request.signal,tenantId,()=>timing.markFirstByte());
+   Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const measured=timing.finish(response.outputTokens,{streamed:settings.transport!=='http'});response.durationMs=measured.durationMs;response.stats={ttfb:measured.ttfb,ttft:measured.ttft,tpot:measured.tpot,tps:measured.tps};response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
   finally{if(controller===request)controller=null;if(root.isConnected){busy(false);draw();$('#lab-prompt').focus();}void refresh();}
  };
