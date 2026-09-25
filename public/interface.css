@@ -664,6 +664,14 @@ body.theme-dark .provider-card .card-top .provider-rank {
 .media-kind.selected .media-kind-icon, body.theme-dark .media-kind.selected .media-kind-icon { background: var(--ui-accent); color: #fff; }
 .media-workspace { grid-template-columns: minmax(320px, .8fr) minmax(0,1.2fr); gap: 12px; align-items: stretch; }
 .media-form-panel, .media-result-panel { min-height: 420px; padding: 19px; }
+.media-vision-controls[hidden], .media-vision-usage[hidden], .media-result-actions button[hidden] { display: none; }
+.media-vision-controls { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.media-vision-controls label { min-width: 0; }
+.media-vision-controls select { width: 100%; }
+.media-result-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+.media-result-actions button { min-height: 30px; padding: 5px 9px; font-size: 11px; }
+.media-result:has(.media-transcript) { justify-content: flex-start; }
+.media-vision-usage { padding-top: 12px; border-top: 1px solid var(--ui-border); color: var(--ui-muted); font-size: 11px; }
 .media-form-panel .panel-title, .media-result-panel .panel-title { border-color: var(--ui-border); }
 .media-form-panel form { max-width: none; }
 .media-form-panel textarea { min-height: 105px; }
@@ -678,6 +686,7 @@ body.theme-dark .provider-card .card-top .provider-rank {
 .media-status[data-state="未完成"], .media-status[data-state="生成失败"] { background: #fcebe8; color: #a64338; }
 body.theme-dark .media-task, body.theme-dark .media-transcript { background: var(--ui-surface-soft); color: var(--ui-text); }
 @media (max-width: 980px) { .media-workspace, .lab-layout { grid-template-columns: 1fr; } .lab-settings { position: static; max-height: none; } .media-form-panel, .media-result-panel { min-height: 0; } }
+@media (max-width: 540px) { .media-vision-controls { grid-template-columns: 1fr; gap: 0; } .media-result-actions { justify-content: flex-start; } }
 @media (max-height: 820px) and (min-width: 721px) {
   #content:has(.lab-layout) .lab-empty { justify-content: center; padding: 8px 12px; }
   #content:has(.lab-layout) .lab-empty-icon { display: none; }

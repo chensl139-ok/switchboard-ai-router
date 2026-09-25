@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.14](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.14) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.15](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.15) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -33,7 +33,7 @@
 
 对话调用默认最大输出为 8192 Tokens；实验室或 API 请求显式设置的值优先。各服务商和模型自身的输出上限仍以对应上游为准。
 
-`moss-vl-1.0` 虽采用 VLM 架构，当前服务商接口仅提供单轮图片／视频理解，不是普通文本对话模型。平台将其列为「视觉理解 · 非对话」，在媒体实验室调用，不参与自动对话路由；通过 `/v1/responses` 显式指定模型、文字指令和图片或视频，且只能同步调用。详见 [API 接入说明](API.md#媒体与专用模型接口)。
+`moss-vl-1.0` 虽采用 VLM 架构，当前服务商接口仅提供单轮图片／视频理解，不是普通文本对话模型。平台将其列为「视觉理解 · 非对话」，在媒体实验室调用，不参与自动对话路由；通过 `/v1/responses` 显式指定模型、文字指令和图片或视频，且只能同步调用。媒体实验室可填写上游可访问的 HTTPS URL 或已上传到上游的 `file_id`，目前不提供视觉素材上传；可设置最大输出 Tokens 并复制理解结果。详见 [API 接入说明](API.md#媒体与专用模型接口)。
 
 对话回复支持 Markdown 标题、列表、表格、引用、链接及代码块，流式输出时逐步呈现；代码块和整条回复可分别复制。模型返回的 HTML 不直接执行，危险协议链接被禁用；外链图片只提供链接，不自动请求图片，以免对第三方泄露浏览器访问。
 
@@ -80,21 +80,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.14
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.15
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.14
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.15
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.14-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.14 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.15-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.15 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -310,8 +310,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.14
-SWITCHBOARD_VERSION=2.0.14 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.15
+SWITCHBOARD_VERSION=2.0.15 docker compose up -d
 docker compose ps
 ```
 
