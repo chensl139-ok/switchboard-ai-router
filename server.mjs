@@ -126,7 +126,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  const discovery=createDiscovery({state,listModels,save});
  const {payloadFor,requestFor}=createUpstreamAdapter({unseal});
  function planRoutes(input,{sequenceValue=sequence,now=Date.now()}={}){
-  const planned=selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:(p.channelOverride||channelFor(p,p.model))==='metered'||!p.meteredSecret?p.prices:{}}));
+  const planned=selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:p.prices}));
   if(input.model&&input.model!=='auto'&&planned[0]&&!modelCapabilities(planned[0].model).chat)throw fail('所选模型不是对话模型，请在媒体实验室使用',400);
   if(input.model&&input.model!=='auto')payloadFor(planned[0],input);
   const compatible=[],excluded=[];
@@ -134,7 +134,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    if(!modelCapabilities(candidate.model).chat){excluded.push({providerId:candidate.id,model:candidate.model,reason:'对话路由跳过媒体或非对话模型',status:400});continue;}
    try{payloadFor(candidate,input);compatible.push(candidate);}catch(error){excluded.push({providerId:candidate.id,model:candidate.model,reason:error.message,status:error.status||400});}
   }
-  if((!input.model||input.model==='auto')&&['fallback','latency','weighted'].includes(state.strategy)&&compatible.length>1){
+  if((!input.model||input.model==='auto')&&['fallback','latency','weighted','rules'].includes(state.strategy)&&compatible.length>1){
    const primary=compatible[0],alternate=compatible.find(route=>route.id===primary.id&&route.model!==primary.model),other=compatible.find(route=>route.id!==primary.id);
    const head=[primary,alternate,other].filter(Boolean);
    compatible.splice(0,compatible.length,...head,...compatible.filter(route=>!head.includes(route)));
@@ -145,7 +145,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http'}={}){
   if(!input||typeof input!=='object'||Array.isArray(input))throw fail('请求格式错误');
   input=normalizeRequest('chat',input);
-  input={...input,max_tokens:input.max_tokens===undefined?2048:input.max_tokens};
+  input={...input,max_tokens:input.max_tokens===undefined?8192:input.max_tokens};
   if(input.stream!==undefined&&typeof input.stream!=='boolean')throw fail('stream 必须为布尔值');
   if(Date.now()-windowStart>=60000){windowStart=Date.now();windowUsed=0;}
   if(++windowUsed>state.routing.requestsPerMinute)throw fail('每分钟请求数已达上限',429);
@@ -259,7 +259,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      if(!p.models.includes(b.model)){if(p.models.length>=500)throw fail('每个服务商最多配置 500 个模型');p.models.push(b.model);}p.model ||= b.model;save();return json(res,200,safe());
     }
     if(req.method==='POST'&&url.pathname==='/v1/messages/count_tokens'){
-     const input=normalizeRequest('messages',{...await body(req),max_tokens:2048});const [p]=selectRoutes(input);
+     const input=normalizeRequest('messages',{...await body(req),max_tokens:8192});const [p]=selectRoutes(input);
      if(protocolForModel(p,p.model)!=='anthropic')throw fail('该路由不支持原生 Anthropic Token 计数，请选择 Anthropic 上游',501);
      const payload=anthropicPayload(input,p.model);delete payload.stream;delete payload.max_tokens;delete payload.temperature;delete payload.top_p;
      const r=await fetcher(p.baseUrl+'/messages/count_tokens',{method:'POST',headers:{'content-type':'application/json',...(p.anthropicAuth==='bearer'?{authorization:'Bearer '+unseal(credentialFor(p,p.model,p.channelOverride))}:{'x-api-key':unseal(credentialFor(p,p.model,p.channelOverride))}),'anthropic-version':'2023-06-01'},body:JSON.stringify(payload),redirect:'error',signal:AbortSignal.timeout(15000)});
@@ -368,7 +368,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
- server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();};server.on('close',()=>{clearInterval(warmTimer);usageStore.close();});
+ server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();};server.on('close',()=>{clearInterval(warmTimer);usageStore.close();});
  return server;
 }
 // gzip 静态 HTML/JS/CSS；带 ETag + 静态资源 immutable 缓存，命中时 304

@@ -134,7 +134,7 @@ function renderPage(root){
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;
   case 'audit':void renderAudit({esc});root.querySelector('.heading')?.insertAdjacentHTML('afterend',membersTabs);break;
   case 'account':void renderAccount({profile,esc,toast,onReady:accountReady});break;
-  case 'analytics':void renderAnalytics({api,esc});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
+  case 'analytics':void renderAnalytics({api,esc,isOwner:profile?.role==='owner',toast});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'logs':void renderLogs({api,esc,state});break;
   case 'routing':renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});break;

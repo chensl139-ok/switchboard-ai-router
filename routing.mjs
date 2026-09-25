@@ -60,14 +60,17 @@ export function createRouter(state,usageStore){
   }
   let candidates=[...available].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
   if(state.strategy==='manual')candidates=candidates.filter(p=>p.id===state.active);
-  else if(!['economy','fallback','latency','weighted'].includes(state.strategy))candidates=candidates.filter(p=>!recentlyFailed(p,p.model,now));
+  else if(!['economy','fallback','latency','weighted','rules'].includes(state.strategy))candidates=candidates.filter(p=>!recentlyFailed(p,p.model,now));
   if(state.strategy==='economy'){
    if(input.messages.some(m=>contentParts(m.content).some(p=>p.type==='image_url')))throw fail('经济优先尚不估算图片费用，请显式指定模型或选择其他策略');
-   const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||2048;
-   const priced=candidates.flatMap(p=>p.models.filter(model=>credentialFor(p,model)&&(!p.meteredSecret||channelFor(p,model)==='metered')&&usablePrice(p.prices?.[model],currency,now)&&!recentlyFailed(p,model,now)).map(model=>({...p,model,channelOverride:channelFor(p,model),routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
+   const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||8192;
+   const priced=candidates.flatMap(p=>p.models.filter(model=>credentialChannels(p,model).length&&usablePrice(p.prices?.[model],currency,now)&&!recentlyFailed(p,model,now)).map(model=>({...p,model,channelOverride:credentialChannels(p,model)[0],routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
    priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
    if(!priced.length)throw fail('没有同币种且价格有效的候选模型，请同步或录入价格；未知价格不会当作免费',503);
-   return priced.slice(0,maxAttempts);
+   const first=priced[0],next=priced.find(route=>route!==first),other=priced.find(route=>route.id!==first.id);
+   const head=[first,next,other].filter((route,index,all)=>route&&all.indexOf(route)===index);
+   const ordered=uniqueRoutes([...head,...priced.filter(route=>!head.includes(route)),...priced.flatMap(route=>credentialRoutes(route,route.model,route.routeReason,undefined).slice(1).map(backup=>({...backup,estimatedRequestCost:route.estimatedRequestCost})))]);
+   return ordered.slice(0,maxAttempts);
   }
   let reason='默认服务商优先，失败时按优先级回退';
   if(state.strategy==='weighted'&&candidates.length){
@@ -79,7 +82,16 @@ export function createRouter(state,usageStore){
    candidates.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active));
   }
   candidates=candidates.map(p=>({...p,routeReason:reason}));
-  if(['fallback','latency','weighted'].includes(state.strategy)){
+  if(state.strategy==='rules'){
+   const text=[...input.messages].reverse().find(m=>m.role==='user')?.content;
+   const query=plainText(text||'').toLowerCase();
+   const rule=(state.rules||[]).find(r=>r.keywords.some(word=>query.includes(word.toLowerCase())));
+   const provider=rule&&candidates.find(p=>p.id===rule.providerId);
+   if(provider&&provider.models.includes(rule.model)&&hasModelCredential(provider,rule.model)&&!recentlyFailed(provider,rule.model,now)){
+    candidates=[{...provider,model:rule.model,routeReason:`匹配规则：${rule.name}`},...candidates.filter(p=>p.id!==provider.id)];
+   }else candidates=candidates.map(p=>({...p,routeReason:rule?'规则目标不可用，按默认优先级故障转移':'未匹配任务规则，按默认优先级故障转移'}));
+  }
+  if(['fallback','latency','weighted','rules'].includes(state.strategy)){
    // Reserve the first three slots for the primary model, an in-provider model,
    // and another provider. A large model catalog must not starve cross-provider failover.
    const groups=candidates.map(p=>modelRoutes(p,p.model,now,undefined,true)).filter(group=>group.length);
@@ -87,14 +99,7 @@ export function createRouter(state,usageStore){
    const head=[first[0],alternate,...groups.slice(1).map(group=>group[0])].filter(Boolean);
    candidates=[...head,...groups.flat().filter(route=>!head.includes(route))];
   }
-  if(state.strategy==='rules'){
-   const text=[...input.messages].reverse().find(m=>m.role==='user')?.content;
-   const query=plainText(text||'').toLowerCase();
-   const rule=(state.rules||[]).find(r=>r.keywords.some(word=>query.includes(word.toLowerCase())));
-   const provider=rule&&candidates.find(p=>p.id===rule.providerId);
-   if(provider&&provider.models.includes(rule.model)&&hasModelCredential(provider,rule.model))candidates.unshift({...provider,model:rule.model,routeReason:`匹配规则：${rule.name}`});
-  }
-  if(!['fallback','latency','weighted','economy'].includes(state.strategy)){
+  if(!['fallback','latency','weighted','rules','economy'].includes(state.strategy)){
    const groups=candidates.map(p=>credentialRoutes(p,p.model,p.routeReason,p.channelOverride));candidates=[...groups.map(group=>group[0]),...groups.flatMap(group=>group.slice(1))];
   }
   candidates=uniqueRoutes(candidates);
@@ -112,7 +117,7 @@ export function validateRouting(body,providers){
  if(!Array.isArray(rules)||rules.length>30)throw fail('规则最多 30 条');
  for(const r of rules){
   if(!r||typeof r.name!=='string'||!r.name.trim()||r.name.length>80||!Array.isArray(r.keywords)||!r.keywords.length||r.keywords.length>20||r.keywords.some(k=>typeof k!=='string'||!k.trim()||k.length>100))throw fail('规则名称或关键词无效');
-  if(!providers.some(p=>p.id===r.providerId&&p.enabled&&p.models.includes(r.model)))throw fail('规则引用的服务商或模型不可用');
+  if(!providers.some(p=>p.id===r.providerId&&p.enabled&&p.models.includes(r.model)&&hasModelCredential(p,r.model)))throw fail('规则引用的服务商或模型不可用');
  }
  const routing={currency:'USD',timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5,...body.routing};
  if(!['USD','CNY'].includes(routing.currency))throw fail('经济优先币种须为 USD 或 CNY');

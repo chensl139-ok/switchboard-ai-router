@@ -272,6 +272,11 @@ dialog, body.theme-dark dialog { background: var(--ui-surface); border-color: va
 
 /* Usage analytics */
 #usage-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.usage-data-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.usage-data-actions h2 { margin: 0 0 5px; font-size: 16px; }
+.usage-data-actions p { margin: 0; }
+.usage-data-buttons { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+@media (max-width: 760px) { .usage-data-actions { align-items: stretch; flex-direction: column; } .usage-data-buttons { flex-shrink: 1; } }
 .usage-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .usage-metric {
   min-width: 0;

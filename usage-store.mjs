@@ -24,6 +24,21 @@ export class UsageStore {
   this.routeQueue=this.routeQueue.then(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeCache.clear();}).catch(()=>{});
  }
  migrate(logs){if(this.db.prepare("SELECT value FROM metadata WHERE key='legacy_import'").get())return;for(const log of logs)this.record({...log,usageKnown:false});this.db.prepare("INSERT INTO metadata VALUES('legacy_import','done')").run();}
+ statisticsSince(days){
+  const period=new Date(Date.now()-days*86400000).toISOString();
+  const reset=this.db.prepare("SELECT value FROM metadata WHERE key='statistics_since'").get()?.value;
+  return reset&&reset>period?reset:period;
+ }
+ resetStatistics(mode){
+  if(!['reset','clear'].includes(mode))throw Error('不支持的统计操作');
+  const at=new Date().toISOString(),deletedCalls=mode==='clear'?this.db.prepare('SELECT count(*) AS total FROM calls').get().total:0;
+  this.db.exec('BEGIN IMMEDIATE');
+  try{
+   if(mode==='clear')this.db.exec('DELETE FROM calls');
+   this.db.prepare("INSERT INTO metadata(key,value) VALUES('statistics_since',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at);
+   this.db.exec('COMMIT');this.routeCache.clear();return {mode,at,deletedCalls};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
  logs({page=1,limit=50,provider='',status='',apiKeyId='',q='',days='',requestId=''}={}){
   page=Math.max(1,Math.min(10000,Math.trunc(Number(page))||1));limit=Math.max(1,Math.min(100,Math.trunc(Number(limit))||50));
   const clauses=['1=1'],args=[];
@@ -39,11 +54,11 @@ export class UsageStore {
   return {items,total,page,limit,retentionDays:90};
  }
  summary(days=7){
-  days=Math.max(1,Math.min(90,Math.trunc(Number(days))||7));const since=new Date(Date.now()-days*86400000).toISOString();
+  days=Math.max(1,Math.min(90,Math.trunc(Number(days))||7));const since=this.statisticsSince(days);
   const totals=this.db.prepare(`SELECT count(*) AS attempts,count(DISTINCT request_id) AS requests,
-   sum(CASE WHEN status=200 THEN 1 ELSE 0 END) AS successes,sum(CASE WHEN status<>200 THEN 1 ELSE 0 END) AS failures,
+   coalesce(sum(CASE WHEN status=200 THEN 1 ELSE 0 END),0) AS successes,coalesce(sum(CASE WHEN status<>200 THEN 1 ELSE 0 END),0) AS failures,
    coalesce(sum(tokens),0) AS tokens,coalesce(sum(input_tokens),0) AS inputTokens,coalesce(sum(output_tokens),0) AS outputTokens,
-   sum(CASE WHEN usage_known=0 THEN 1 ELSE 0 END) AS unknownUsage,
+   coalesce(sum(CASE WHEN usage_known=0 THEN 1 ELSE 0 END),0) AS unknownUsage,
    coalesce(round(avg(CASE WHEN status=200 THEN latency END)),0) AS averageLatency FROM calls WHERE time>=?`).get(since);
   const requestOutcomes=`SELECT request_id,min(time) AS first_time,max(CASE WHEN status=200 THEN 1 ELSE 0 END) AS succeeded FROM calls WHERE time>=? GROUP BY request_id`;
   const final=this.db.prepare(`SELECT count(*) AS requests,coalesce(sum(succeeded),0) AS requestSuccesses FROM (${requestOutcomes})`).get(since);
@@ -57,10 +72,10 @@ export class UsageStore {
    coalesce(sum(tokens),0) AS tokens,round(avg(latency)) AS latency FROM calls WHERE time>=? GROUP BY provider_id,provider,model ORDER BY attempts DESC`).all(since);
   const costs=this.db.prepare(`SELECT currency,sum(estimated_cost) AS amount,count(*) AS pricedAttempts FROM calls WHERE time>=? AND estimated_cost IS NOT NULL GROUP BY currency`).all(since);
   const keys=this.db.prepare(`SELECT api_key_id AS apiKeyId,count(*) AS attempts,coalesce(sum(tokens),0) AS tokens FROM calls WHERE time>=? GROUP BY api_key_id ORDER BY attempts DESC`).all(since);
-  return {days,totals,daily,providers,keys,costs,retentionDays:RETENTION_DAYS,costNotice:'基于当时单价与上游用量的估算，不等同于供应商账单；图片按返回张数估算，其他未知用量或价格不估算费用。'};
+  return {days,statisticsSince:this.db.prepare("SELECT value FROM metadata WHERE key='statistics_since'").get()?.value||null,totals,daily,providers,keys,costs,retentionDays:RETENTION_DAYS,costNotice:'基于当时单价与上游用量的估算，不等同于供应商账单；图片按返回张数估算，其他未知用量或价格不估算费用。'};
  }
  audit(days=30){
-  days=Math.max(1,Math.min(90,Math.trunc(Number(days))||30));const since=new Date(Date.now()-days*86400000).toISOString();
+  days=Math.max(1,Math.min(90,Math.trunc(Number(days))||30));const since=this.statisticsSince(days);
   const members=this.db.prepare(`SELECT actor_id AS actorId,count(DISTINCT request_id) AS requests,count(*) AS attempts,
    sum(CASE WHEN status=200 THEN 1 ELSE 0 END) AS successes,coalesce(sum(tokens),0) AS tokens,
    coalesce(sum(input_tokens),0) AS inputTokens,coalesce(sum(output_tokens),0) AS outputTokens,

@@ -103,7 +103,7 @@ export function normalizeRequest(kind,raw){
  if(raw.text?.format&&raw.text.format.type!=='text')throw protocolError('当前不支持 Responses text.format 结构化输出');
  if(raw.previous_response_id||raw.conversation||raw.background||raw.store===true)throw protocolError('Responses 当前为无状态接口，不支持 previous_response_id/conversation/background/store=true');
  if(raw.n!==undefined&&raw.n!==1||raw.best_of!==undefined&&raw.best_of!==1||raw.echo)throw protocolError('当前仅支持单个生成结果，不支持 best_of/echo');
- const input={[NORMALIZED]:true,model:raw.model||'auto',stream:raw.stream??false,max_tokens:raw.max_tokens??raw.max_completion_tokens??raw.max_output_tokens??2048};
+ const input={[NORMALIZED]:true,model:raw.model||'auto',stream:raw.stream??false,max_tokens:raw.max_tokens??raw.max_completion_tokens??raw.max_output_tokens??8192};
  if(typeof input.model!=='string'||input.model.length>300)throw protocolError('模型 ID 无效');
  if(kind==='messages'&&raw.max_tokens===undefined)throw protocolError('Anthropic Messages 需要 max_tokens');
  input.messages=kind==='messages'?anthropicMessages(raw.messages,raw.system):kind==='responses'?responsesMessages(raw.input):kind==='completions'?[{role:'user',content:text(raw.prompt,'prompt')}]:chatMessages(raw.messages);

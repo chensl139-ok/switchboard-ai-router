@@ -27,8 +27,10 @@ test('故障转移后的请求按最终成功统计，失败尝试仍计入上�
 });
 
 test('首页按独立请求显示最终成功率，不把已挽回的失败尝试当成失败请求',()=>{
- const rate={textContent:''},detail={textContent:''};
- const root={querySelector(selector){return selector==='#dashboard-final-rate'?rate:detail;}};
- renderDashboardSummary(root,{days:7,totals:{requests:3,requestSuccesses:2,attempts:4,successes:2}});
+ const rate={textContent:''},detail={textContent:''},average={textContent:''},failures={textContent:'',classList:{toggle(){}}};
+ const nodes={'#dashboard-final-rate':rate,'#dashboard-final-detail':detail,'#dashboard-average-latency':average,'#dashboard-failed-attempts':failures};
+ const root={querySelector(selector){return nodes[selector]||null;}};
+ renderDashboardSummary(root,{days:7,totals:{requests:3,requestSuccesses:2,attempts:4,successes:2,averageLatency:128,failures:2}});
  assert.equal(rate.textContent,'67%');assert.match(detail.textContent,/2 \/ 3 次最终成功/);
+ assert.equal(average.textContent,'128 ms');assert.equal(failures.textContent,'2');
 });

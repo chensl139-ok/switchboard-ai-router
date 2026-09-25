@@ -1,3 +1,4 @@
+import {accountRequest,confirmAction} from './accounts.js';
 const formatCount=value=>Number(value||0).toLocaleString('zh-CN');
 const formatLatency=value=>value?`${formatCount(value)} ms`:'—';
 
@@ -49,9 +50,9 @@ function renderUsageProviders(rows,esc){
  }).join('');
 }
 
-export async function renderAnalytics({api,esc}){
+export async function renderAnalytics({api,esc,isOwner=false,toast=()=>{}}){
  const root=document.querySelector('#content');
- root.innerHTML=`<div class="heading usage-heading"><div><div class="eyebrow">USAGE ANALYTICS</div><h1>用量分析</h1><p>查看调用趋势、上游健康和模型用量。数据按当前租户隔离。</p></div><select id="usage-days" aria-label="统计周期"><option value="7">最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option></select></div><div id="usage-content" aria-live="polite"><div class="view-loading" role="status"><span class="loading-dot"></span>正在读取用量…</div></div>`;
+ root.innerHTML=`<div class="heading usage-heading"><div><div class="eyebrow">USAGE ANALYTICS</div><h1>用量分析</h1><p>查看调用趋势、上游健康和模型用量。数据按当前租户隔离。</p></div><select id="usage-days" aria-label="统计周期"><option value="7">最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option></select></div><div id="usage-content" aria-live="polite"><div class="view-loading" role="status"><span class="loading-dot"></span>正在读取用量…</div></div>${isOwner?'<section class="panel section-space usage-data-actions"><div><h2>统计数据管理</h2><p class="muted">仅影响当前租户；账号、API Key、配额规则和服务商配置不受影响。操作会写入租户审计。</p></div><div class="usage-data-buttons"><button type="button" id="usage-reset">重置统计起点</button><button type="button" id="usage-clear" class="danger-text">清除请求记录</button></div></section>':''}`;
  const content=root.querySelector('#usage-content');
  let loadVersion=0;
  async function load(){
@@ -60,12 +61,15 @@ export async function renderAnalytics({api,esc}){
   try{
    const summary=await api('/api/analytics?days='+root.querySelector('#usage-days').value);
    if(version!==loadVersion||!root.isConnected)return;
-   content.innerHTML=`${renderUsageOverview(summary,esc)}<section class="panel usage-models"><div class="usage-section-head"><div><div class="eyebrow">MODEL BREAKDOWN</div><h2>服务商与模型</h2><p>按上游尝试次数排序，便于定位低成功率模型。</p></div><label class="usage-search"><span class="sr-only">筛选服务商或模型</span><input id="usage-model-search" type="search" placeholder="筛选服务商或模型"></label></div><div class="table-wrap"><table><thead><tr><th>服务商 / 模型</th><th>尝试</th><th>成功率</th><th>Tokens</th><th>平均耗时</th></tr></thead><tbody>${renderUsageProviders(summary.providers||[],esc)}</tbody></table></div><p class="usage-empty" id="usage-model-empty" hidden>没有匹配的模型。</p>${summary.providers?.length?'':'<p class="usage-empty">当前周期暂无模型调用。</p>'}</section><div class="usage-disclaimer">${esc(summary.costNotice)} 详细日志保留 ${formatCount(summary.retentionDays)} 天。</div>`;
+   content.innerHTML=`${summary.statisticsSince?`<p class="usage-disclaimer">当前统计起点：${esc(new Date(summary.statisticsSince).toLocaleString('zh-CN'))}；此前请求日志可能仍可查询。</p>`:''}${renderUsageOverview(summary,esc)}<section class="panel usage-models"><div class="usage-section-head"><div><div class="eyebrow">MODEL BREAKDOWN</div><h2>服务商与模型</h2><p>按上游尝试次数排序，便于定位低成功率模型。</p></div><label class="usage-search"><span class="sr-only">筛选服务商或模型</span><input id="usage-model-search" type="search" placeholder="筛选服务商或模型"></label></div><div class="table-wrap"><table><thead><tr><th>服务商 / 模型</th><th>尝试</th><th>成功率</th><th>Tokens</th><th>平均耗时</th></tr></thead><tbody>${renderUsageProviders(summary.providers||[],esc)}</tbody></table></div><p class="usage-empty" id="usage-model-empty" hidden>没有匹配的模型。</p>${summary.providers?.length?'':'<p class="usage-empty">当前周期暂无模型调用。</p>'}</section><div class="usage-disclaimer">${esc(summary.costNotice)} 详细日志保留 ${formatCount(summary.retentionDays)} 天。</div>`;
    const search=content.querySelector('#usage-model-search');
    search.oninput=()=>{let visible=0;const query=search.value.trim().toLowerCase();content.querySelectorAll('[data-usage-search]').forEach(row=>{row.hidden=!row.dataset.usageSearch.includes(query);if(!row.hidden)visible++;});content.querySelector('#usage-model-empty').hidden=visible>0||!summary.providers?.length;};
   }catch(error){if(version===loadVersion&&root.isConnected)content.innerHTML=`<div class="panel usage-error" role="alert">${esc(error.message)}</div>`;}
  }
  root.querySelector('#usage-days').onchange=()=>void load();
+ if(isOwner)for(const [mode,label,description] of [['reset','重置统计起点','图表和成员用量从此刻重新累计；旧请求日志仍可查询，API Key 配额计数不变。'],['clear','清除请求记录','永久删除当前租户的请求日志与用量记录，无法在平台内恢复；API Key 和配置保留，配额计数不变。']]){
+  root.querySelector('#usage-'+mode).onclick=()=>confirmAction(root,label+'？',description,async()=>{await accountRequest('usage/'+mode,{confirm:mode});toast(mode==='reset'?'统计起点已重置':'当前租户请求记录已清除');await load();},toast);
+ }
  await load();
 }
 export {renderLogs} from './request-logs.js';

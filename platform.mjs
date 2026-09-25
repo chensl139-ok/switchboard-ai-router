@@ -77,6 +77,14 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     }
     if(req.method!=='POST')throw fail('接口不存在',404);
     const data=await body(req);
+    if(route==='usage/reset'||route==='usage/clear'){
+     if(current.role!=='owner')throw fail('仅租户所有者可重置或清除统计数据',403);
+     const mode=route==='usage/reset'?'reset':'clear';
+     if(data.confirm!==mode)throw fail('请确认统计操作',400);
+     const result=engine(current.tenantId).resetStatistics(mode);
+     accounts.mutate(()=>accounts.event(current.tenantId,current.userId,mode==='reset'?'usage.statistics.reset':'usage.statistics.clear',mode==='reset'?`统计起点 ${result.at}`:`清除 ${result.deletedCalls} 条请求记录`));
+     return json(res,200,result);
+    }
     if(route==='tenants'){const tenant=accounts.createTenant(current,data.name);return json(res,201,tenant);}
     if(route==='tenants/delete'){
      const removed=accounts.deleteTenant(current,data.tenantId);

@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![Container](https://img.shields.io/badge/ghcr.io-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[最新版本 v2.0.9](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.9) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
+[最新版本 v2.0.10](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.10) · [更新记录](CHANGELOG.md) · [API 接入说明](API.md) · [租户与权限](TENANCY.md)
 
 ## 主要功能
 
@@ -31,7 +31,11 @@
 
 模型实验室每条回复展示总耗时、输出 Token 数、TTFB（首个响应数据）、TTFT（首个内容或思考增量）、TPS（端到端输出吞吐）及估算 TPOT。TPS 以上游返回的输出 Token 数除以完整请求耗时，包含首字延迟和故障转移耗时，不代表纯解码速度。TPOT 按 `(最后一个可见输出增量时间 - 第一个可见输出增量时间) / (上游输出 Token 数 - 1)` 估算，不再把结束帧和网络收尾时间计入生成。只有多个相隔足够时间的流式增量且上游报告输出 Token 用量时才展示；网络分块、隐藏思考和服务商 Token 口径仍可能影响准确性，不能视作供应商的精确逐 Token 解码指标。HTTP 完整响应无法测量 TTFT/TPOT，缺少可靠数据时显示「—」。
 
+对话调用默认最大输出为 8192 Tokens；实验室或 API 请求显式设置的值优先。各服务商和模型自身的输出上限仍以对应上游为准。
+
 故障转移以“服务商 + 模型”为候选单位：默认服务商置顶，前三个兼容候选优先安排首选服务商默认模型、该服务商另一个模型、下一服务商模型，再尝试其余模型与备用密钥，受“最多尝试次数”和总超时限制。延迟优先与加权轮询也可在首选失败后回退到同服务商或其他服务商的模型。自动对话会过滤媒体模型与不支持请求能力的模型，过滤项不占尝试次数。路由页面可预览候选顺序、协议、健康状态和过滤原因，预览不调用上游。实验室选择具体模型时，该模型作为起始模型并显式启用同服务商、跨服务商回退；API 使用 `provider::model` 时固定模型，但仍可切换同模型备用密钥。流式响应一旦已经输出首个增量，不会切换候选。
+
+六种策略各有实际选路语义：固定模型只使用所选服务商的默认模型和备用密钥；故障转移按优先级安排服务商内、跨服务商候选；加权轮询按权重选择首选服务商；最低延迟在有足够成功样本时按平均耗时排序；任务规则按用户消息命中首条关键词规则并选其目标模型；经济优先按有效的同币种价格估算总成本。后五种策略均受熔断、协议兼容性和尝试预算约束，任务规则与经济优先也保留同服务商及跨服务商的回退路径。经济优先的价格可能是 OpenRouter 参考价，不等于供应商账单；价格未知或过期的模型不会被视为免费。
 
 ## 快速开始
 
@@ -72,21 +76,21 @@ docker compose ps
 正式 Release 同时发布 `linux/amd64` 与 `linux/arm64` 镜像：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.9
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.10
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.9
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.10
 ```
 
 若使用 Release 中的离线镜像包：
 
 ```sh
-gzip -dc switchboard-ai-router-v2.0.9-oci.tar.gz | docker load
-SWITCHBOARD_VERSION=2.0.9 docker compose up -d
+gzip -dc switchboard-ai-router-v2.0.10-oci.tar.gz | docker load
+SWITCHBOARD_VERSION=2.0.10 docker compose up -d
 ```
 
 发布产物包括源码 ZIP/TAR.GZ、`SHA256SUMS`、多架构 OCI 镜像包，以及带 SBOM/Provenance 的 GHCR 镜像。
@@ -132,6 +136,8 @@ SWITCHBOARD_VERSION=2.0.9 docker compose up -d
 ### 组织用量审计
 
 所有者和管理员可在「组织审计」按 7／30／90 天查看每位成员的请求数、上游尝试、最终成功率、输入／输出 Token、费用估算和最近使用时间。最终成功率按独立请求计算，故障转移后成功也计为成功；每次失败尝试仍留在请求日志和服务商健康中。租户操作记录支持按操作人、类型、时间范围和关键字组合筛选，服务端分页覆盖所有保留事件，并展示原始事件标识。控制台调用直接归属登录成员；新建 API Key 自动归属创建人。升级前创建的 Key 和旧版环境令牌无法可靠推断个人身份，因此保留为“未归属”，不会伪造审计关系。管理配置变更和飞书登录事件也会记录操作者。
+
+租户所有者还可在「用量分析」重置统计起点，或清除当前租户的请求日志与用量记录。前者保留历史日志，后者不可从平台恢复；两者都需确认并写入租户审计，且不会修改 API Key、配额计数、账号和服务商配置，也不会清除其他租户的数据。
 
 ### 忘记密码
 
@@ -300,8 +306,8 @@ Docker 升级：
 
 ```sh
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.9
-SWITCHBOARD_VERSION=2.0.9 docker compose up -d
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.10
+SWITCHBOARD_VERSION=2.0.10 docker compose up -d
 docker compose ps
 ```
 

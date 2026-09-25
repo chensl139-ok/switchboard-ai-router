@@ -4,6 +4,7 @@ const actions={
  'member.join':['加入组织','member'],'member.join.sso':['通过飞书加入','member'],'member.invite':['邀请成员','member'],
  'member.remove':['移除成员','member'],'member.role':['修改角色','member'],'invite.revoke':['撤销邀请','member'],
  'tenant.create':['创建租户','tenant'],'tenant.delete':['删除租户','tenant'],
+ 'usage.statistics.reset':['重置统计起点','tenant'],'usage.statistics.clear':['清除请求记录','tenant'],
  '/api/models/discover':['旧版模型发现记录（不代表配置变更）','other'],
  '/api/provider':['保存服务商','provider'],'/api/provider/delete':['删除服务商','provider'],
  '/api/provider/reorder':['调整服务商顺序','provider'],'/api/provider/switch-model':['切换默认模型','provider'],'/api/models/register':['加入模型调用列表','provider'],

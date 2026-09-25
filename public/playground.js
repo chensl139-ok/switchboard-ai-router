@@ -4,7 +4,7 @@ import {modelCapabilities} from './model-capability.js';
 import {renderModelCompare,stopModelCompare} from './model-compare.js';
 import {setLabBusy} from './lab-composer.js';
 import {createLabTiming} from './lab-performance.js';
-let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:2048,tools:'[]'};
+let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:8192,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
 const headerValue=(response,name)=>{const value=response.headers.get(name);if(!value)return '';try{return decodeURIComponent(value)}catch{return value}};
