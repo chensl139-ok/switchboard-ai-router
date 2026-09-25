@@ -4,6 +4,7 @@ import {modelCapabilities} from './model-capability.js';
 import {renderModelCompare,stopModelCompare} from './model-compare.js';
 import {setLabBusy} from './lab-composer.js';
 import {createLabTiming} from './lab-performance.js';
+import {renderAssistantMarkdown} from './markdown.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:8192,tools:'[]'};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
@@ -77,8 +78,18 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   const route=m.route,summary=route.fallback?`故障转移 · 第 ${Number(route.attempt)||1} 次命中`:'路由详情';
   return `<details class="lab-route-details ${route.fallback?'is-fallback':''}" data-route="${index}" ${m.routeOpen?'open':''}><summary>${esc(summary)}</summary><div><span>协议 ${esc(route.protocol||'自动适配')}</span><span>策略 ${esc(route.reason||'自动路由')}</span></div></details>`;
  }
+ const answerCache=new WeakMap();
+ function answerHtml(m){
+  const content=typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(part=>part.type==='text').map(part=>part.text).join('\n'):'';
+  const text=content|| (m.status==='生成中'?'':m.tool_calls?.length?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':'');
+  if(m.role!=='assistant')return esc(text);
+  const cached=answerCache.get(m);if(cached?.text===text)return cached.html;
+  const html=renderAssistantMarkdown(text);answerCache.set(m,{text,html});return html;
+ }
+ let drawTimer=null;
+ const scheduleDraw=()=>{if(drawTimer)return;drawTimer=setTimeout(()=>{drawTimer=null;if(root.isConnected)draw();},40);};
  function draw(){const list=$('#lab-messages');if(!list)return;const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
-  list.innerHTML=history.length?history.map((m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&m.status==='生成中'&&m.stats?.ttft!=null?`<span class="lab-live-stats">${esc(statLine(m))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${routeDetails(m,index)}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer">${esc((typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text').map(p=>p.text).join('\n'):'')|| (m.status==='生成中'?'':m.tool_calls?.length?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':''))}</div>${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'&&statLine(m)?`<div class="lab-response-meta" title="TTFB：首个响应数据；TTFT：首个输出；TPS：端到端输出吞吐；TPOT：有连续流式增量和上游用量时的估算"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`).join(''):
+  list.innerHTML=history.length?history.map((m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&m.status==='生成中'&&m.stats?.ttft!=null?`<span class="lab-live-stats">${esc(statLine(m))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${routeDetails(m,index)}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer">${answerHtml(m)}</div>${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'&&statLine(m)?`<div class="lab-response-meta" title="TTFB：首个响应数据；TTFT：首个输出；TPS：端到端输出吞吐；TPOT：有连续流式增量和上游用量时的估算"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`).join(''):
   `<div class="lab-empty"><span class="lab-empty-icon">${spark}</span><h2>开始一段模型对话</h2><p>可直接使用自动路由，或在上方指定服务商与模型。</p><div class="lab-prompts"><button type="button" data-example="用一个生活中的例子解释什么是 API。"><small>解释</small>讲清一个概念</button><button type="button" data-example="用 Python 编写一个带注释的快速排序函数。"><small>代码</small>完成编程任务</button><button type="button" data-example="给一个 AI 模型路由平台写三条简洁的产品介绍。"><small>创意</small>探索产品表达</button></div></div>`;
   list.querySelectorAll('[data-thought]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.thought)];if(m)m.thinkingOpen=el.open;}));
   list.querySelectorAll('[data-route]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.route)];if(m)m.routeOpen=el.open;}));
@@ -121,7 +132,23 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-max-tokens').onchange=()=>settings.maxTokens=Number($('#lab-max-tokens').value);
  $('#lab-clear').onclick=()=>{if(!controller){history=[];pendingImages=[];draft='';$('#lab-prompt').value='';resizePrompt();drawImages();draw();$('#lab-error').textContent='';}};
  $('#lab-stop').onclick=()=>controller?.abort();
- $('#lab-messages').addEventListener('click',async e=>{const copy=e.target.closest('[data-copy-reply]');if(copy){const btn=copy;const msg=history[Number(btn.dataset.copyReply)];const text=typeof msg?.content==='string'?msg.content:Array.isArray(msg?.content)?msg.content.filter(p=>p.type==='text').map(p=>p.text).join('\n'):'';try{await navigator.clipboard.writeText(text);btn.textContent='已复制';}catch{$('#lab-error').textContent='无法访问剪贴板，请手动选中回复复制';}return;}const button=e.target.closest('[data-example]');if(button){$('#lab-prompt').value=button.dataset.example;draft=button.dataset.example;resizePrompt();$('#lab-prompt').focus();}});
+ $('#lab-messages').addEventListener('click',async e=>{
+  const codeButton=e.target.closest('[data-copy-code]');
+  if(codeButton){
+   const code=codeButton.closest('.lab-code-block')?.querySelector('pre code')?.textContent||'';
+   try{await navigator.clipboard.writeText(code);codeButton.textContent='已复制';}catch{$('#lab-error').textContent='无法访问剪贴板，请手动选中代码复制';}
+   return;
+  }
+  const copy=e.target.closest('[data-copy-reply]');
+  if(copy){
+   const msg=history[Number(copy.dataset.copyReply)];
+   const value=typeof msg?.content==='string'?msg.content:Array.isArray(msg?.content)?msg.content.filter(part=>part.type==='text').map(part=>part.text).join('\n'):'';
+   try{await navigator.clipboard.writeText(value);copy.textContent='已复制';}catch{$('#lab-error').textContent='无法访问剪贴板，请手动选中回复复制';}
+   return;
+  }
+  const button=e.target.closest('[data-example]');
+  if(button){$('#lab-prompt').value=button.dataset.example;draft=button.dataset.example;resizePrompt();$('#lab-prompt').focus();}
+ });
  $('#lab-prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229&&!controller){e.preventDefault();if(!e.repeat)$('#lab-form').requestSubmit();}});
  $('#lab-form').onsubmit=async e=>{
   e.preventDefault();e.stopPropagation();if(controller)return;if(addingImages){$('#lab-error').textContent='图片正在读取，请稍后发送';return;}
@@ -144,9 +171,9 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
    if(settings.transport==='http'){
     const res=await fetch('/api/chat',{method:'POST',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},body:JSON.stringify(input),signal:request.signal});
     timing.markFirstByte();const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result={...data.choices[0].message,route:responseRoute(res)};response.label=data.model||response.label;response.totalTokens=data.usage?.total_tokens;response.outputTokens=data.usage?.completion_tokens;
-   }else result=await streamChat(settings.transport,token,input,(update,meta)=>{Object.assign(response,update);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const live=timing.observe(meta?.hasOutput);response.stats={ttft:live.ttft};draw();},request.signal,tenantId,()=>timing.markFirstByte());
+  }else result=await streamChat(settings.transport,token,input,(update,meta)=>{Object.assign(response,update);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const live=timing.observe(meta?.hasOutput);response.stats={ttft:live.ttft};scheduleDraw();},request.signal,tenantId,()=>timing.markFirstByte());
    Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const measured=timing.finish(response.outputTokens,{streamed:settings.transport!=='http'});response.durationMs=measured.durationMs;response.stats={ttfb:measured.ttfb,ttft:measured.ttft,tpot:measured.tpot,tps:measured.tps};response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
-  finally{if(controller===request)controller=null;if(root.isConnected){busy(false);draw();$('#lab-prompt').focus();}void refresh();}
+  finally{if(controller===request)controller=null;if(drawTimer){clearTimeout(drawTimer);drawTimer=null;}if(root.isConnected){busy(false);draw();$('#lab-prompt').focus();}void refresh();}
  };
 }
