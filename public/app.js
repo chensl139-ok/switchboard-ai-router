@@ -1,7 +1,7 @@
-import {renderMediaLab,stopMediaLab} from './media-lab.js';
+import {renderMediaLab,stopMediaLab,resetMediaLab} from './media-lab.js';
 import {renderModelCatalog} from './model-catalog.js';
 import {renderApiGuide} from './api-docs.js';
-import {startAccountUI,showLogin,accountRequest,renderMembers,renderAccount,confirmAction} from './accounts.js';
+import {startAccountUI,showLogin,refreshAccountStatus,accountRequest,renderMembers,renderAccount,confirmAction} from './accounts.js';
 import {renderAnalytics,renderLogs} from './analytics.js';
 import {renderPrices} from './prices.js';
 import {renderPlayground,stopPlayground,resetPlayground} from './playground.js';
@@ -11,12 +11,14 @@ import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.j
 import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from './dashboard.js';
 import {renderAudit} from './audit.js';
 import {modelCapabilities} from './model-capability.js';
+import {renderSubscriptions} from './subscriptions.js';
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
 let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
-const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室'};
+const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
-const managerViews=new Set(['keys','members','prices','routing','audit']);
+const managerViews=new Set(['keys','members','prices','routing','audit','subscription']);
+document.querySelector('.sidebar [data-tab="account"]')?.insertAdjacentHTML('beforebegin','<button type="button" class="nav-item" data-tab="subscription" title="组织订阅" aria-label="组织订阅"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span class="nav-name">组织订阅</span><span class="nav-indicator" aria-hidden="true"></span></button>');
 document.querySelector('#provider-form [name="protocol"]').closest('label').insertAdjacentHTML('afterend','<label>Anthropic 鉴权方式<select name="anthropicAuth"><option value="x-api-key">x-api-key（官方默认）</option><option value="bearer">Authorization: Bearer（部分网关）</option></select></label>');
 document.querySelector('[data-tab="providers"] .nav-name').textContent='服务商与模型';
 document.querySelector('[data-tab="models"]')?.remove();
@@ -78,7 +80,7 @@ function syncNavigation(){
  $('#breadcrumb').textContent=names[tab];
  for(const button of document.querySelectorAll('nav button[data-tab]')){
   const view=button.dataset.tab;
-  button.hidden=(!isManager()&&['keys','members','routing'].includes(view))||(profile?.role==='viewer'&&groups.playground.includes(view));
+  button.hidden=(!isManager()&&['keys','members','routing','subscription'].includes(view))||(profile?.role==='viewer'&&groups.playground.includes(view));
   const active=(groups[view]||[view]).includes(tab);
   button.classList.toggle('selected',active);
   if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
@@ -132,13 +134,14 @@ function renderPage(root){
   case 'media':renderMediaLab({state,tenantId:profile?.tenantId,esc,embedded:true});break;
   case 'api':renderApiGuide({esc,toast});break;
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;
-  case 'audit':void renderAudit({esc});root.querySelector('.heading')?.insertAdjacentHTML('afterend',membersTabs);break;
+  case 'audit':void renderAudit({esc,profile});root.querySelector('.heading')?.insertAdjacentHTML('afterend',membersTabs);break;
   case 'account':void renderAccount({profile,esc,toast,onReady:accountReady});break;
   case 'analytics':void renderAnalytics({api,esc,isOwner:profile?.role==='owner',toast});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'logs':void renderLogs({api,esc,state});break;
   case 'routing':renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});break;
   case 'keys':void renderApiKeys({api,esc,toast});break;
+  case 'subscription':void renderSubscriptions({profile,esc,toast});break;
  }
 }
 
@@ -206,7 +209,7 @@ $('#fetch-models').onclick=async()=>{
  }catch(e){if(epoch===modelEpoch)$('#model-status').textContent=e.message}
  finally{if(epoch===modelEpoch){b.disabled=false;b.textContent='↻ 重新获取所有模型'}}
 };
-$('#logout').onclick=async()=>{try{await accountRequest('logout',{});profile=null;state=null;token='';resetPlayground();stopMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';showLogin();}catch(e){toast(e.message)}};
+ $('#logout').onclick=async()=>{try{await accountRequest('logout',{});profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
 $('#close-edit').onclick=closeEdit;
 $('#cancel-edit').onclick=closeEdit;
 $('#edit').addEventListener('close',()=>{formDirty=false;resetModels();editingProviderId='';modelChannelAssignments={};});
@@ -226,10 +229,10 @@ document.addEventListener('change',async e=>{const id=e.target.dataset.providerM
 
 async function accountReady(value){
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
- if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();stopMediaLab();tab='overview';}
+ if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();resetMediaLab();tab='overview';}
  renderTenantChip(profile);
- document.querySelector('#current-account').textContent=profile.user.name+' · '+({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]||profile.role);
- state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing','audit'].includes(tab))tab='overview';render();
+ document.querySelector('#current-account').textContent=profile.user.name+' · '+(profile.platformAccess?'平台主账号':({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]||profile.role));
+ state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing','audit','subscription'].includes(tab))tab='overview';render();
 }
 try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=error.message;}
 
@@ -242,7 +245,9 @@ function renderTenantChip(profile){
  document.querySelector('#tenant-popover')?.remove();navigationHint.hidden=true;
  const current=profile.tenants.find(t=>t.id===profile.tenantId)||profile.tenants[0];
  const initial=name=>String(name||'?').trim().slice(0,1).toUpperCase();
- chip.innerHTML=`<button type="button" class="tenant-button" id="tenant-button" aria-haspopup="menu" aria-controls="tenant-popover" aria-expanded="false" aria-label="当前租户：${esc(current?.name||'默认租户')}，点击切换"><span class="tenant-avatar">${esc(initial(current?.name))}</span><svg class="tenant-compact-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M9 5V3h6v2M8 10h2m4 0h2m-8 4h2m4 0h2m-5 6v-4h2v4"/></svg><span class="workspace-copy">${esc(current?.name||'默认租户')}<small>数据与密钥按租户隔离</small></span><svg class="nav-icon tenant-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>`;
+ const canSwitch=profile.platformAccess&&profile.tenants.length>1;
+ chip.innerHTML=`<button type="button" class="tenant-button" id="tenant-button" ${canSwitch?'aria-haspopup="menu" aria-controls="tenant-popover" aria-expanded="false"':'disabled'} aria-label="当前租户：${esc(current?.name||'默认租户')}${canSwitch?'，点击切换':'，仅可访问此租户'}"><span class="tenant-avatar">${esc(initial(current?.name))}</span><svg class="tenant-compact-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M9 5V3h6v2M8 10h2m4 0h2m-8 4h2m4 0h2m-5 6v-4h2v4"/></svg><span class="workspace-copy">${esc(current?.name||'默认租户')}<small>数据与密钥按租户隔离</small></span>${canSwitch?'<svg class="nav-icon tenant-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>':''}</button>`;
+ if(!canSwitch)return;
  const button=chip.querySelector('#tenant-button'),popover=document.createElement('div');popover.className='tenant-popover';popover.id='tenant-popover';popover.setAttribute('role','menu');popover.setAttribute('aria-label','切换租户');popover.hidden=true;
  popover.innerHTML=`<div class="tenant-popover-label">工作空间 · 切换租户</div>${profile.tenants.map(t=>`<button type="button" role="menuitemradio" aria-checked="${t.id===profile.tenantId}" data-tenant="${esc(t.id)}" class="${t.id===profile.tenantId?'selected':''}"><span class="tenant-avatar">${esc(initial(t.name))}</span><span>${esc(t.name)}</span>${t.id===profile.tenantId?'<span class="tenant-check">✓</span>':''}</button>`).join('')}`;document.body.append(popover);
  bindNavigationHint(button,()=>`切换租户 · ${current?.name||'默认租户'}`,()=>document.body.classList.contains('sidebar-compact')&&innerWidth>720);

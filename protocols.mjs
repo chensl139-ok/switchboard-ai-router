@@ -4,7 +4,11 @@ export const generationPaths={'/api/chat':'chat','/v1/chat/completions':'chat','
 export const protocolError=(message,status=400)=>Object.assign(new Error(message),{status});
 export function apiToken(headers){
  const auth=headers.authorization,key=headers['x-api-key'];let bearer='';
- if(auth){if(typeof auth!=='string'||!/^Bearer\s+\S+$/i.test(auth))throw protocolError('Authorization 必须为 Bearer API_KEY',401);bearer=auth.replace(/^Bearer\s+/i,'');}
+ if(auth){
+  if(typeof auth==='string'&&/^Bearer\s+Bearer(?:\s|$)/i.test(auth))throw protocolError('Authorization 重复包含 Bearer；ANTHROPIC_AUTH_TOKEN 只填写原始 API Key',401);
+  if(typeof auth!=='string'||!/^Bearer\s+\S+$/i.test(auth))throw protocolError('Authorization 格式应为 Bearer <API Key>；客户端配置只填写原始密钥',401);
+  bearer=auth.replace(/^Bearer\s+/i,'');
+ }
  if(key!==undefined&&(typeof key!=='string'||!key.trim()))throw protocolError('x-api-key 格式无效',401);
  if(key&&bearer&&key!==bearer)throw protocolError('两个鉴权头包含不同的 API Key',401);
  return bearer||key||'';
@@ -52,10 +56,11 @@ function chatMessages(value){
  });
 }
 function anthropicMessages(value,system){
- if(!Array.isArray(value)||!value.length)throw protocolError('messages 不能为空');const messages=[];
- if(system!==undefined)messages.push({role:'system',content:plainText(system)});
+ if(!Array.isArray(value)||!value.length)throw protocolError('messages 不能为空');const messages=[],systemParts=[];
+ if(system!==undefined)systemParts.push(plainText(system));
  for(const m of value){
-  if(!['user','assistant'].includes(m.role))throw protocolError('Anthropic 消息角色只能为 user/assistant');
+  if(m.role==='system'){systemParts.push(plainText(m.content));continue;}
+  if(!['user','assistant'].includes(m.role))throw protocolError('Anthropic 消息角色只能为 user/assistant/system');
   if(typeof m.content==='string'){messages.push({role:m.role,content:m.content});continue;}
   if(!Array.isArray(m.content))throw protocolError('content 格式无效');
   const normal=[],calls=[],thinking=[];
@@ -67,6 +72,7 @@ function anthropicMessages(value,system){
   }
   if(normal.length||calls.length||thinking.length)messages.push({role:m.role,content:normal,...(calls.length?{tool_calls:calls}:{}),...(thinking.length?{_thinkingBlocks:thinking}: {})});
  }
+ if(systemParts.length)messages.unshift({role:'system',content:systemParts.filter(Boolean).join('\n')});
  return messages;
 }
 function responsesMessages(value){
@@ -114,7 +120,7 @@ export function normalizeRequest(kind,raw){
  if(raw.allow_fallback!==undefined){if(typeof raw.allow_fallback!=='boolean')throw protocolError('allow_fallback 必须为布尔值');input.allow_fallback=raw.allow_fallback;}
  for(const field of ['temperature','top_p','thinking_mode'])if(raw[field]!==undefined)input[field]=raw[field];
  const stop=raw.stop??raw.stop_sequences;if(stop!==undefined){const values=typeof stop==='string'?[stop]:stop;if(!Array.isArray(values)||values.length>4||values.some(s=>typeof s!=='string'||!s||s.length>1000))throw protocolError('stop 最多四个非空字符串');input.stop=values;}
- if(raw.thinking!==undefined){if(kind!=='messages'||!['enabled','disabled'].includes(raw.thinking?.type))throw protocolError('thinking 格式不支持');input.thinking_mode=raw.thinking.type;input._nativeThinking=raw.thinking;if(raw.thinking.type==='enabled'&&(!Number.isInteger(raw.thinking.budget_tokens)||raw.thinking.budget_tokens<1024||raw.thinking.budget_tokens>=input.max_tokens))throw protocolError('thinking budget_tokens 需至少 1024 且小于 max_tokens');}
+ if(raw.thinking!==undefined){if(kind!=='messages'||!['enabled','disabled','adaptive'].includes(raw.thinking?.type))throw protocolError('thinking 格式不支持');input.thinking_mode=raw.thinking.type==='adaptive'?'auto':raw.thinking.type;input._nativeThinking=raw.thinking;if(raw.thinking.type==='enabled'&&(!Number.isInteger(raw.thinking.budget_tokens)||raw.thinking.budget_tokens<1024||raw.thinking.budget_tokens>=input.max_tokens))throw protocolError('thinking budget_tokens 需至少 1024 且小于 max_tokens');}
  if(kind==='completions'&&raw.tools?.length)throw protocolError('传统 Completions 不支持 tools');
  input.tools=tools(raw.tools,kind);input.tool_choice=choice(raw.tool_choice,kind);
  if(raw.parallel_tool_calls!==undefined){if(typeof raw.parallel_tool_calls!=='boolean')throw protocolError('parallel_tool_calls 必须为布尔值');input.parallel_tool_calls=raw.parallel_tool_calls;}

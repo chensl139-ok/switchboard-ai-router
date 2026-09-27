@@ -106,9 +106,14 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
 .record-heading h2 { margin-bottom: 5px; }
 .record-heading p { margin: 0; font-size: 12px; color: var(--ui-muted); line-height: 1.6; }
 .record-heading button { flex: none; }
+.record-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.audit-clear-dialog label { display: block; margin-bottom: 12px; }
+.audit-clear-dialog input { display: block; width: 100%; margin-top: 6px; }
 .record-filters { display: grid; grid-template-columns: minmax(200px,2fr) repeat(3,minmax(115px,1fr)) auto; align-items: end; gap: 10px; padding: 14px; border: 1px solid var(--ui-border); border-radius: 10px; background: var(--ui-surface-soft); margin: 0 0 12px; }
 .record-filters label { margin: 0; min-width: 0; color: var(--ui-muted); font-size: 11px; }
 .record-filters input,.record-filters select { margin: 5px 0 0; min-height: 36px; width: 100%; max-width: none; font-size: 12px; }
+.record-filters .record-routine-filter { display: flex; align-items: center; gap: 8px; grid-column: 1/-2; align-self: center; white-space: normal; }
+.record-filters .record-routine-filter input { width: 15px; height: 15px; min-height: 0; margin: 0; flex: none; }
 .record-filter-actions { display: flex; gap: 6px; }
 .record-filter-actions button { min-height: 36px; padding: 7px 12px; font-size: 12px; }
 .record-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; margin: 0 0 8px; color: var(--ui-muted); font-size: 11px; }

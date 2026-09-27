@@ -2,6 +2,22 @@
 
 外部调用使用产品中签发的租户 API Key。接口共享租户隔离、Key 有效期、配额、全局并发和路由策略，不提供匿名调用。
 
+## 3 步开始
+
+1. 在平台「API Key 管理」创建当前组织的 Key；完整值仅展示一次。
+2. 在「服务商与模型」启用上游并注册模型；`auto` 表示按本组织的路由策略选择模型。
+3. 在本地终端设置 `ROUTER_API_KEY`，执行下方请求：
+
+```sh
+export ROUTER_API_KEY='你的平台调用密钥'
+curl -sS 'http://127.0.0.1:3100/v1/chat/completions' \
+  -H "Authorization: Bearer $ROUTER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"你好"}],"max_tokens":128}'
+```
+
+应返回包含 `choices` 的 JSON。非本机调用时将 `127.0.0.1` 换成实际可访问的 HTTPS 域名。完整可交互说明位于控制台 `/#api`。
+
 ## 接口矩阵
 
 | 接口 | 支持范围 | 流式 |
@@ -36,15 +52,17 @@ Anthropic SDK 自动携带 `anthropic-version`，模型列表将返回 Anthropic
 示例统一使用 `ROUTER_API_KEY` 环境变量，避免误用机器环境中已有的 OpenAI/Anthropic 供应商密钥。
 
 ```python
+import os
 from openai import OpenAI
-client = OpenAI(base_url="http://127.0.0.1:3100/v1", api_key="YOUR_ROUTER_KEY")
+client = OpenAI(base_url="http://127.0.0.1:3100/v1", api_key=os.environ["ROUTER_API_KEY"])
 response = client.responses.create(model="auto", input="你好", store=False)
 print(response.output_text)
 ```
 
 ```python
+import os
 from anthropic import Anthropic
-client = Anthropic(base_url="http://127.0.0.1:3100", api_key="YOUR_ROUTER_KEY")
+client = Anthropic(base_url="http://127.0.0.1:3100", api_key=os.environ["ROUTER_API_KEY"])
 message = client.messages.create(
     model="auto", max_tokens=512,
     messages=[{"role": "user", "content": "你好"}]
@@ -53,6 +71,61 @@ print(message.content)
 ```
 
 如果机器设置了额外的 ANTHROPIC_AUTH_TOKEN，需清除它或显式禁用 SDK 的 authToken，避免与路由 Key 冲突。Node 示例已设置 authToken:null。
+
+### Codex CLI（基础 Responses 兼容）
+
+在用户级 `~/.codex/config.toml` 配置自定义提供商；模型 ID 要替换为本组织明确支持 Responses 的已注册模型，不建议使用 `auto`：
+
+```toml
+model_provider = "switchboard"
+model = "provider::responses-model"
+
+[model_providers.switchboard]
+name = "Switchboard"
+base_url = "http://127.0.0.1:3100/v1"
+env_key = "SWITCHBOARD_API_KEY"
+wire_api = "responses"
+```
+
+运行前在本地设置 `SWITCHBOARD_API_KEY`。网关目前只实现无状态 Responses 子集，不支持服务端会话续接、内置工具等；因此这属于基础请求接入说明，**不保证 Codex CLI 完整功能可用**。配置字段以 [Codex 官方文档](https://developers.openai.com/codex/config-reference)为准。
+
+### Claude Code CLI（原生 Claude 模型）
+
+```sh
+export ANTHROPIC_BASE_URL="http://127.0.0.1:3100"
+export ANTHROPIC_AUTH_TOKEN="$ROUTER_API_KEY"
+export ANTHROPIC_MODEL="provider::claude-model"
+claude
+```
+
+模型 ID 需替换为已配置的原生 Anthropic Messages 协议 Claude 模型。`ANTHROPIC_BASE_URL` 是网关根地址，**不加 `/v1`**。不要把 Claude Code 通过网关路由到非 Claude 模型；复杂工具调用等功能需按真实上游验证，不能假定完整兼容。此环境变量方案针对 CLI，而非 Claude 桌面端。参阅 [Claude Code 网关接入说明](https://code.claude.com/docs/en/llm-gateway-connect)。
+
+需要长期使用时，可将相同变量放入用户级 `~/.claude/settings.json` 的 `env` 中（以下为示范，请替换 Key 和模型 ID）：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://switchboard.tail7fa45b.ts.net",
+    "ANTHROPIC_AUTH_TOKEN": "替换为本组织的 Switchboard API Key",
+    "ANTHROPIC_MODEL": "provider::claude-model"
+  }
+}
+```
+
+若文件已存在，只合并 `env` 字段，不要覆盖其他 Claude Code 设置。此方式会在本机以明文保存 Key；不要将 Key 放进可能被提交的项目级 `.claude/settings.json`。启动 `claude` 后用 `/status` 核对网关地址和认证来源。Claude 桌面 App 不读取这份 CLI 配置，应在其第三方推理设置中单独配置。[官方持久化配置说明](https://code.claude.com/docs/en/llm-gateway-connect#set-in-a-settings-file)
+
+`ANTHROPIC_AUTH_TOKEN` **只填写平台签发的完整原始 Key**，不要写 `Bearer ` 前缀，也不要使用服务商的上游密钥。Claude Code 会自动生成 `Authorization: Bearer <Key>`。若已有自己的权限、插件或主题设置，仅合并上述 `env` 属性；不要把示例当成整份文件覆盖。`CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576` 不是网关所需项，只有选定模型确实支持 1M 上下文时才能设置。
+
+先在本机设置 `ROUTER_API_KEY`，做一个不消耗生成次数的鉴权检查：
+
+```sh
+curl -sS 'https://switchboard.tail7fa45b.ts.net/v1/models' \
+  -H "Authorization: Bearer $ROUTER_API_KEY"
+```
+
+通过后运行 `claude doctor`，进入 Claude Code 用 `/status` 检查 Base URL 和凭据来源，再执行 `claude -p 'Reply exactly OK.'` 进行最小调用。`401 Authorization 重复包含 Bearer` 说明配置值多写了前缀；`401 API Key 无效` 说明格式已通过，但 Key 与当前租户已保存的有效 Key 不匹配，可在「API Key 管理」创建新 Key。错误响应不会回显密钥；如需排查，请记录 `x-request-id`。
+
+**关于自动路由：** `model=auto` 可能命中 Kimi 等非 Claude 模型。平台的 Anthropic 兼容入口已处理 Claude Code 的附加 `system` 消息和 `adaptive` 思考参数，简单对话及部分工具调用可工作，但不能因此推断完整 Claude Code 功能、上下文长度或未来版本兼容。生产接入请固定已注册的原生 Anthropic Messages 协议 Claude 模型；当前租户若没有此类模型，应先配置，而不是把 `auto` 当作稳定的 Claude Code 模型。[Claude Code 网关兼容说明](https://code.claude.com/docs/en/llm-gateway)
 
 ## 图片
 

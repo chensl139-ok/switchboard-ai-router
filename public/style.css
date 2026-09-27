@@ -15,6 +15,8 @@ body.theme-dark{--sidebar-surface:#151d17;--sidebar-surface-raised:#182119;--sid
 .workspace-chip{position:relative;display:flex;align-items:center;gap:10px;padding:0;border:0;border-radius:10px;background:transparent;box-shadow:none;margin-bottom:29px;min-height:62px}
 .tenant-button{display:flex;align-items:center;gap:10px;width:100%;padding:12px 11px;border:1px solid var(--sidebar-line);border-radius:10px;background:var(--sidebar-surface-raised);box-shadow:0 2px 3px #1e443303;cursor:pointer;font:inherit;text-align:left;min-height:62px;transition:border-color .16s}
 .tenant-button:hover{border-color:var(--sidebar-muted)}
+.tenant-button:disabled{cursor:default;opacity:1}
+.tenant-button:disabled:hover{border-color:var(--sidebar-line)}
 .tenant-button .tenant-caret{width:14px;height:14px;margin-left:auto;color:var(--sidebar-muted)}
 .tenant-avatar{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--sidebar-line);border-radius:8px;background:var(--sidebar-active-bg);color:var(--sidebar-accent);font-size:13px;font-weight:650;flex:none}
 .sidebar-compact .tenant-button{padding:12px;justify-content:center;background:transparent;border-color:transparent;box-shadow:none}
@@ -245,10 +247,18 @@ body.theme-dark .metric small{color:#6b7f72}
 /* 危险区 */
 .danger-zone{border-color:#e8c8bf;background:#fdf6f4}
 .danger-zone h2{color:#a43f2e}
+.tenant-delete-list{display:grid;gap:8px;margin-top:14px}
+.tenant-delete-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #eadbd5;border-radius:10px;background:#fff}
+.tenant-delete-row strong{font-size:13px;color:#263b42}
+.tenant-delete-row .muted{margin-left:auto;text-align:right;font-size:12px}
+.tenant-delete-row button{margin-left:auto}
 .danger-primary,.confirm-dialog .danger-primary{background:#b4472f;border-color:#b4472f;color:#fff}
 .danger-primary:hover{background:#97361f}
 body.theme-dark .danger-zone{background:#2a1c17;border-color:#4d2a20}
 body.theme-dark .danger-zone h2{color:#e5866f}
+body.theme-dark .tenant-delete-row{background:#211b19;border-color:#49342e}
+body.theme-dark .tenant-delete-row strong{color:#e7dbd4}
+@media(max-width:620px){.tenant-delete-row{align-items:flex-start;flex-direction:column}.tenant-delete-row .muted,.tenant-delete-row button{margin-left:0;text-align:left}}
 
 /* 全局搜索结果 */
 .search-results{position:absolute;top:calc(100% + 6px);right:0;min-width:260px;background:#fff;border:1px solid #e2e8e3;border-radius:10px;padding:6px;box-shadow:0 14px 40px #102e3224;z-index:15;display:grid;gap:2px}
@@ -482,3 +492,5 @@ body.theme-dark .analytics-cost strong{color:#cde0d3}
 body.theme-dark .analytics-cost span{color:#8fa89a}
 #account-recover{display:block;width:100%;font-size:12px;margin-top:4px}
 #reset-result:not(:empty){max-width:480px;margin-top:14px}
+.sso-options{display:grid;gap:8px;margin-top:20px}
+.sso-options .sso-button{margin-top:0}

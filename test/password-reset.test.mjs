@@ -11,11 +11,15 @@ test('一个租户的管理员不能重置兼属另一租户的账户',async()=>
  try{
   const accounts=new Accounts(dir,'a'.repeat(32));
   const owner=accounts.resolve(await accounts.setup({bootstrapToken:'a'.repeat(32),name:'Owner',email:'owner@example.test',password:'owner-password-123'}));
+  const adminInvite=accounts.invite(owner,{email:'admin@example.test',role:'admin'});
+  const admin=accounts.resolve(await accounts.register({name:'Admin',email:'admin@example.test',password:'admin-password-123',inviteCode:adminInvite.code}));
   const invited=accounts.invite(owner,{email:'member@example.test',role:'member'});
   const member=accounts.resolve(await accounts.register({name:'Member',email:'member@example.test',password:'member-password-123',inviteCode:invited.code}));
-  assert.equal(accounts.issuePasswordReset(owner,member.userId).code.length,48);
-  accounts.createTenant(member,'Personal');
-  assert.throws(()=>accounts.issuePasswordReset(owner,member.userId),{status:403});
+  assert.equal(accounts.issuePasswordReset(admin,member.userId).code.length,48);
+  const personal=accounts.createTenant(owner,'Personal');
+  // 模拟升级前已同时加入多个租户的历史账户，验证重置码仍受全部租户权限约束。
+  accounts.mutate(()=>accounts.state.members.push({tenantId:personal.id,userId:member.userId,role:'owner'}));
+  assert.throws(()=>accounts.issuePasswordReset(admin,member.userId),{status:403});
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 

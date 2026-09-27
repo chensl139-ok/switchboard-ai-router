@@ -26,6 +26,10 @@ test('审计先按租户隔离，再组合筛选和分页；可检索前 200 条
   account.state.audit.find(item=>item.target==='服务商 0').time=new Date(now-40*86400000).toISOString();
   assert.equal(account.auditPage(caller,{days:30,q:'服务商 0'}).total,0);
   assert.equal(account.auditPage(caller,{days:90,q:'服务商 0'}).total,1);
+  account.event('default','a','account.login.feishu','cli_example/ou_example');
+  account.event('default','a','/api/models/discover','旧版发现');
+  assert.equal(account.auditPage(caller).total,241,'默认列表应隐藏历史登录和旧版只读发现记录');
+  assert.equal(account.auditPage(caller,{includeRoutine:'1'}).total,243,'需要时仍可查询已保存的例行历史记录');
   assert.throws(()=>account.auditPage({role:'member',tenantId:'default'}),{status:403});
  }finally{rmSync(dir,{recursive:true,force:true});}
 });

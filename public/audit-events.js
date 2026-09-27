@@ -1,15 +1,15 @@
 import {auditCategories} from './audit-format.js';
 
-export async function renderAuditEvents({root,request,esc}){
+export async function renderAuditEvents({root,request,esc,canClear=false}){
  let page=1,version=0,timer,items=[];
  root.classList.add('record-explorer');
- root.innerHTML=`<div class="record-heading"><div><h2>租户操作审计</h2><p>追溯谁在何时进行了什么操作；仅展示当前租户已保留的记录。</p></div><button type="button" data-refresh>刷新</button></div>
- <form class="record-filters"><label>搜索<input name="q" type="search" placeholder="成员、操作、对象或事件 ID" autocomplete="off"></label><label>时间范围<select name="days"><option value="7">最近 7 天</option><option value="30" selected>最近 30 天</option><option value="90">最近 90 天</option><option value="">全部保留记录</option></select></label><label>操作类型<select name="category"><option value="">全部类型</option>${Object.entries(auditCategories).map(([id,name])=>`<option value="${id}">${name}</option>`).join('')}</select></label><label>操作人<select name="actor"><option value="">全部成员</option></select></label><div class="record-filter-actions"><button class="primary">查询</button><button type="reset">重置</button></div></form>
+ root.innerHTML=`<div class="record-heading"><div><h2>租户操作审计</h2><p>默认只看最近 7 天的管理变更；历史登录等例行记录可按需展开。</p></div><div class="record-heading-actions"><button type="button" data-refresh>刷新</button>${canClear?'<button type="button" class="danger-text" data-clear-audit>清除全部审计日志</button>':''}</div></div>
+ <form class="record-filters"><label>搜索<input name="q" type="search" placeholder="成员、操作、对象或事件 ID" autocomplete="off"></label><label>时间范围<select name="days"><option value="7" selected>最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option><option value="">全部保留记录</option></select></label><label>操作类型<select name="category"><option value="">全部类型</option>${Object.entries(auditCategories).map(([id,name])=>`<option value="${id}">${name}</option>`).join('')}</select></label><label>操作人<select name="actor"><option value="">全部成员</option></select></label><label class="record-routine-filter"><input name="includeRoutine" type="checkbox" value="1">包含历史登录等例行记录</label><div class="record-filter-actions"><button class="primary">查询</button><button type="reset">重置</button></div></form>
  <div class="record-meta"><span data-summary role="status">正在读取操作记录…</span><span data-updated></span></div><div class="record-alert" role="alert"></div><div class="record-table" data-results></div><div class="record-pagination"><span data-range></span><div><button type="button" data-prev>上一页</button><span data-page></span><button type="button" data-next>下一页</button></div></div>`;
  const form=root.querySelector('form'),results=root.querySelector('[data-results]'),prev=root.querySelector('[data-prev]'),next=root.querySelector('[data-next]');
  async function load(){
   clearTimeout(timer);const current=++version;
-  const params=new URLSearchParams(new FormData(form));params.set('page',String(page));params.set('limit','20');
+  const params=new URLSearchParams(new FormData(form));params.set('page',String(page));params.set('limit','10');
   root.setAttribute('aria-busy','true');prev.disabled=next.disabled=true;
   root.querySelector('[data-summary]').textContent='正在查询…';root.querySelector('.record-alert').textContent='';
   try{
@@ -29,9 +29,18 @@ export async function renderAuditEvents({root,request,esc}){
  const search=()=>{page=1;void load();};
  form.onsubmit=event=>{event.preventDefault();search();};
  form.onreset=()=>{queueMicrotask(search);};
- form.onchange=event=>{if(event.target.tagName==='SELECT')search();};
+ form.onchange=event=>{if(event.target.tagName==='SELECT'||event.target.name==='includeRoutine')search();};
  form.elements.q.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(root.isConnected)search();},300);};
  root.querySelector('[data-refresh]').onclick=()=>void load();
+ root.querySelector('[data-clear-audit]')?.addEventListener('click',()=>{
+  const phrase='清除全部审计日志',dialog=document.createElement('dialog');dialog.className='confirm-dialog audit-clear-dialog';
+  dialog.innerHTML='<h2>清空所有租户操作审计？</h2><p>这将永久删除全部租户的操作审计记录，无法从平台恢复。请求日志、用量、API Key 和实验室历史不会被清除。</p><label>输入“清除全部审计日志”以确认<input type="text" autocomplete="off" aria-label="清除全部审计日志确认文字"></label><p class="record-alert" role="alert"></p><div class="confirm-actions"><button type="button" data-cancel>取消</button><button type="button" class="danger-primary" data-confirm disabled>永久清除</button></div>';
+  root.append(dialog);dialog.showModal();const input=dialog.querySelector('input'),confirm=dialog.querySelector('[data-confirm]');input.focus();
+  input.oninput=()=>confirm.disabled=input.value!==phrase;
+  dialog.querySelector('[data-cancel]').onclick=()=>dialog.close();dialog.onclose=()=>dialog.remove();
+  confirm.onclick=async()=>{confirm.disabled=true;try{const result=await request('audit/clear',{confirm:input.value});dialog.close();page=1;await load();root.querySelector('[data-updated]').textContent=`已清除 ${result.deleted.toLocaleString()} 条操作审计记录`;}
+   catch(error){dialog.querySelector('.record-alert').textContent=error.message;confirm.disabled=input.value!==phrase;}};
+ });
  prev.onclick=()=>{page--;void load();};next.onclick=()=>{page++;void load();};
  results.onclick=event=>{const button=event.target.closest('[data-detail]');if(!button)return;const detail=results.querySelector('#audit-detail-'+button.dataset.detail);detail.hidden=!detail.hidden;button.setAttribute('aria-expanded',String(!detail.hidden));button.textContent=detail.hidden?'详情':'收起';};
  await load();

@@ -18,9 +18,42 @@ test('切换媒体任务、模型或视觉输入类型时清空旧结果并阻�
  assert.match(source,/if\(\$\('#media-kind'\)\.value!==kind\)clearSelection\(\)/);
  assert.match(source,/\$\('#media-model'\)\.onchange=\(\)=>\{clearSelection\(\)/);
  assert.match(source,/\$\('#media-vision-type'\)\.onchange=\(\)=>\{clearSelection\(\)/);
- assert.match(source,/selectionEpoch\+\+;controller\?\.abort\(\);controller=null;stopPolling\(\);taskId=null/);
+ assert.match(source,/selectionEpoch\+\+;controller=null;stopPolling\(\);taskId=null;recordId=null/);
+ assert.match(source,/await persist\('submitted'/);
  assert.match(source,/if\(!active\(\)\|\|epoch!==selectionEpoch\|\|id!==taskId\)return/);
  assert.match(source,/current=\(\)=>active\(\)&&epoch===selectionEpoch/);
+});
+
+test('模型实验室切换页面保留任务，历史按账号租户保存；登录页仅一个飞书入口',()=>{
+ const media=read('public/media-lab.js'),chat=read('public/playground.js'),account=read('public/accounts.js');
+ assert.match(media,/export function stopMediaLab\(\)\{viewEpoch\+\+;controller=null/);
+ assert.match(media,/await persist\('submitted'/);assert.match(media,/mountLabHistory\(root,\{area:'media'/);
+ assert.match(chat,/export function stopPlayground\(\)\{stopModelCompare\(\);\}/);
+ assert.match(chat,/mountLabHistory\(root,\{area:'chat'/);
+ assert.match(account,/id="feishu-login"/);assert.match(account,/id="feishu-choice"/);
+ assert.doesNotMatch(account,/使用 \$\{safeText\(provider\.label\)\} 飞书登录/);
+});
+
+test('组织审计默认聚焦近期管理变更，不在账户页重复铺开',()=>{
+ const audit=read('public/audit-events.js'),account=read('public/accounts.js'),organization=read('public/audit.js');
+ assert.match(audit,/最近 7 天/);assert.match(audit,/params\.set\('limit','10'\)/);
+ assert.match(audit,/name="includeRoutine"/);assert.doesNotMatch(account,/renderAuditEvents/);
+ assert.match(organization,/select\(0\)/);
+});
+
+test('仅主账号看到清空全部租户审计入口，危险操作要求输入确认文字',()=>{
+ const audit=read('public/audit-events.js'),organization=read('public/audit.js');
+ assert.match(organization,/canClear:profile\.platformAccess/);
+ assert.match(audit,/canClear\?'<button type="button" class="danger-text" data-clear-audit>/);
+ assert.match(audit,/input\.value!==phrase/);
+ assert.match(audit,/request\('audit\/clear',\{confirm:input\.value\}\)/);
+});
+
+test('飞书企业绑定按钮使用独立紧凑操作栏，不被表单网格拉伸',()=>{
+ const account=read('public/accounts.js'),css=read('public/interface.css');
+ assert.match(account,/<div class="enterprise-binding-actions"><small class="field-help">/);
+ assert.match(css,/\.enterprise-binding-actions\{grid-column:1\/-1;display:flex/);
+ assert.match(css,/\.enterprise-binding-actions button\{flex:none;width:auto;min-width:126px/);
 });
 
 test('贴图预览放入对话输入框并保持横向排列',()=>{
@@ -52,6 +85,47 @@ test('OpenAPI 入口在站内显示规范，不把 SPA hash 误当页面路由',
  assert.match(docs,/#view-openapi'\)\.onclick=.*#docs-openapi'\)\.scrollIntoView/);
  assert.doesNotMatch(docs,/href="\/v1\/openapi\.json"/);
  assert.match(spec,/version:appVersion/);
+});
+
+test('实验室历史按需读取详情，对话增量只更新末条消息',()=>{
+ const history=read('public/lab-history-client.js'),chat=read('public/playground.js'),media=read('public/media-lab.js'),css=read('public/interface.css');
+ assert.match(history,/labHistoryRequest\(tenantId,'\/item\?id='/);assert.match(history,/document\.visibilityState==='visible'/);
+ assert.match(history,/lab-history-more/);assert.match(history,/lab-history-dialog/);
+ assert.match(chat,/draw\(true\)/);assert.match(chat,/list\.lastElementChild\.outerHTML=messageHtml/);
+ assert.match(chat,/if\(m\.status==='生成中'\)return esc\(text\)/);
+ assert.match(media,/刷新远程任务状态/);assert.match(css,/\.lab-history-dialog-content\{overflow:auto/);
+});
+
+test('API 文档以 Cherry Studio 为最后一节，OpenAPI 原文仅展开时渲染',()=>{
+ const source=read('public/api-docs.js');
+ assert.ok(source.indexOf("section('admin'")<source.indexOf("section('cherry'"));
+ assert.match(source,/\['admin','管理接口'\],\['cherry','Cherry Studio'\]/);
+ assert.match(source,/source\.addEventListener\('toggle'/);
+ assert.doesNotMatch(source,/root\.querySelector\('#api-openapi-json'\)\.textContent=JSON\.stringify/);
+});
+
+test('API 文档提供可复制的快速请求和 Codex / Claude Code 接入边界，Key 页只复制环境变量示例',()=>{
+ const docs=read('public/api-docs.js'),keys=read('public/api-keys.js'),subscriptions=read('public/subscriptions.js'),spec=read('openapi.mjs');
+ assert.match(docs,/section\('start','3 步完成首次调用'/);
+ assert.match(docs,/section\('clients','接入 Codex 与 Claude Code'/);
+ assert.match(docs,/wire_api = "responses"/);
+ assert.match(docs,/ANTHROPIC_BASE_URL/);
+ assert.match(docs,/claudeSettings=JSON\.stringify\(\{env:/);
+ assert.match(docs,/data-copy-code="claude-settings"/);
+ assert.match(docs,/完整 Key 会以明文保存在文件里/);
+ assert.match(docs,/ANTHROPIC_AUTH_TOKEN.*只填写平台签发的原始 API Key/);
+ assert.match(docs,/自动路由与 Claude Code 排错/);
+ assert.match(docs,/claude-key-check/);
+ assert.match(docs,/CLAUDE_CODE_MAX_CONTEXT_TOKENS/);
+ assert.match(docs,/data-copy-code="quick-curl"/);
+ assert.match(keys,/id="key-curl-example"/);
+ assert.match(keys,/Authorization: Bearer \$ROUTER_API_KEY/);
+ assert.match(keys,/ANTHROPIC_AUTH_TOKEN.*只填完整原始 Key/);
+ assert.doesNotMatch(keys,/exampleCurl=.*result\.token/);
+ assert.match(spec,/bearerAuth\.description=.*不要重复写 Bearer 前缀/);
+ assert.match(spec,/Claude Code 接入建议固定原生 Anthropic Messages 协议的 Claude 模型/);
+ assert.match(subscriptions,/maxApiKeys/);
+ assert.match(subscriptions,/尚未生效/);
 });
 
 test('侧栏、模块内部间距和静态缓存由统一规则约束',()=>{

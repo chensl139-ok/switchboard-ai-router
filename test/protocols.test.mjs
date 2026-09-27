@@ -15,6 +15,23 @@ test('对话请求默认最大输出为 8192 Tokens，调用方指定值保持�
  assert.equal(normalizeRequest('chat',{messages:[{role:'user',content:'hi'}]}).max_tokens,8192);
  assert.equal(normalizeRequest('chat',{messages:[{role:'user',content:'hi'}],max_tokens:256}).max_tokens,256);
 });
+test('重复 Bearer 与无效 Authorization 格式给出可操作提示，原始 Key 仍可使用',()=>{
+ assert.throws(()=>apiToken({authorization:'Bearer Bearer srk_example'}),/重复包含 Bearer/);
+ assert.throws(()=>apiToken({authorization:'srk_example'}),/格式应为 Bearer/);
+ assert.equal(apiToken({authorization:'Bearer srk_example'}),'srk_example');
+ assert.equal(apiToken({'x-api-key':'srk_example'}),'srk_example');
+});
+test('Claude Code 附加的 system 消息归并到系统提示，不阻断 Anthropic 入口',()=>{
+ const request=normalizeRequest('messages',{model:'auto',max_tokens:32,system:[{type:'text',text:'原有系统提示'}],thinking:{type:'adaptive',display:'omitted'},messages:[{role:'user',content:'你好'},{role:'system',content:[{type:'text',text:'附加系统提示'}]}]});
+ assert.equal(request.messages[0].role,'system');
+ assert.equal(request.messages[0].content,'原有系统提示\n附加系统提示');
+ assert.equal(request.thinking_mode,'auto');
+ assert.deepEqual(request.messages.slice(1).map(message=>message.role),['user']);
+ const payload=anthropicPayload(request,'claude-test');
+ assert.equal(payload.system,'原有系统提示\n附加系统提示');
+ assert.equal(payload.thinking.type,'adaptive');
+ assert.deepEqual(payload.messages.map(message=>message.role),['user']);
+});
 test('请求转换保留图片、工具和工具结果；未知模态不静默丢弃',()=>{
  const canonical=normalizeRequest('messages',{model:'x',max_tokens:32,system:[{type:'text',text:'system'}],tools:[{name:'weather',input_schema:schema}],messages:[{role:'user',content:[{type:'text',text:'look'},{type:'image',source:{type:'url',url:'https://images.example/a.png'}}]},{role:'assistant',content:[{type:'tool_use',id:'call1',name:'weather',input:{city:'杭州'}}]},{role:'user',content:[{type:'tool_result',tool_use_id:'call1',content:'sunny'}]}]});
  assert.equal(canonical.messages[1].content[1].image_url.url,'https://images.example/a.png');assert.equal(canonical.messages[2].tool_calls[0].id,'call1');assert.equal(canonical.messages[3].tool_call_id,'call1');

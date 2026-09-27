@@ -1,9 +1,11 @@
 const actions={
- 'account.setup':['初始化账户','account'],'account.login.feishu':['飞书登录','account'],'account.password':['修改密码','account'],
+ 'account.setup':['初始化账户','account'],'account.login.feishu':['飞书登录','account'],'account.link.feishu':['连接飞书账户','account'],'account.password':['修改密码','account'],
  'account.password.reset.issue':['签发密码重置码','account'],'account.password.reset':['重置密码','account'],
  'member.join':['加入组织','member'],'member.join.sso':['通过飞书加入','member'],'member.invite':['邀请成员','member'],
  'member.remove':['移除成员','member'],'member.role':['修改角色','member'],'invite.revoke':['撤销邀请','member'],
- 'tenant.create':['创建租户','tenant'],'tenant.delete':['删除租户','tenant'],
+ 'tenant.create':['创建租户','tenant'],'tenant.rename':['修改租户名称','tenant'],'tenant.delete':['删除租户','tenant'],
+ 'tenant.feishu.bind':['绑定飞书企业','tenant'],'tenant.feishu.unbind':['解绑飞书企业','tenant'],
+ 'subscription.plan.upsert':['维护订阅套餐草案','tenant'],'subscription.assign':['分配组织订阅','tenant'],
  'usage.statistics.reset':['重置统计起点','tenant'],'usage.statistics.clear':['清除请求记录','tenant'],
  '/api/models/discover':['旧版模型发现记录（不代表配置变更）','other'],
  '/api/provider':['保存服务商','provider'],'/api/provider/delete':['删除服务商','provider'],
