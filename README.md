@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[v2.0.1 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.1) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+[v2.1.0 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.0) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 能做什么
 
@@ -22,7 +22,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.0.1。GHCR 提供 `2.0.1`、`2.0` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release，但这些版本的 GHCR 在线镜像已清理。
+当前发布版本为 v2.1.0。GHCR 提供 `2.1.0`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
 
 ## 五分钟部署
 
@@ -46,14 +46,14 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 ```sh
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.0.1
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.0
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.0.1
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.0
 ```
 
 上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
