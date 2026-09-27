@@ -14,7 +14,7 @@ if(existsSync(tenantsDir))for(const name of readdirSync(tenantsDir)){
  const dir=path.join(tenantsDir,name);
  if(statSync(dir).isDirectory())directories.push(dir);
 }
-const files=directories.map(dir=>({dir,accounts:path.join(dir,'accounts.json'),keys:path.join(dir,'api-keys.json'),state:path.join(dir,'state.json'),usage:path.join(dir,'usage.sqlite')}));
+const files=directories.map(dir=>({dir,accounts:path.join(dir,'accounts.json'),keys:path.join(dir,'api-keys.json'),keyUsage:path.join(dir,'api-key-usage.sqlite'),state:path.join(dir,'state.json'),usage:path.join(dir,'usage.sqlite')}));
 const report=files.map(({dir,accounts,keys,state,usage})=>{
  const row={tenant:path.relative(dataDir,dir)||'default',audit:0,calls:0,keys:0,legacyLogs:0};
  if(existsSync(accounts))row.audit=(JSON.parse(readFileSync(accounts,'utf8')).audit||[]).length;
@@ -37,9 +37,10 @@ const protect=dir=>{for(const entry of readdirSync(dir,{withFileTypes:true})){
 }};
 protect(backup);
 const atomicJson=(filename,value)=>{const temp=filename+'.history-tmp';writeFileSync(temp,JSON.stringify(value),{mode:0o600});renameSync(temp,filename);};
-for(const {dir,accounts,keys,state,usage} of files){
+for(const {dir,accounts,keys,keyUsage,state,usage} of files){
  if(existsSync(accounts)){const value=JSON.parse(readFileSync(accounts,'utf8'));value.audit=[];atomicJson(accounts,value);}
  if(existsSync(keys)){const value=JSON.parse(readFileSync(keys,'utf8'));for(const key of value.keys||[]){Object.assign(key,{requests:0,successes:0,failures:0,knownTokens:0,day:'',dailyUsed:0,minute:0,minuteUsed:0,lastUsedAt:null});}atomicJson(keys,value);}
+ if(existsSync(keyUsage)){const db=new DatabaseSync(keyUsage);try{db.exec('DELETE FROM counters; PRAGMA wal_checkpoint(TRUNCATE);');}finally{db.close();}}
  if(existsSync(state)){const value=JSON.parse(readFileSync(state,'utf8'));delete value.logs;atomicJson(state,value);}
  if(existsSync(usage)){const db=new DatabaseSync(usage);try{db.exec('DELETE FROM calls; PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);');}finally{db.close();}}
  for(const name of readdirSync(dir))if(/^state\.json\.backup-|^usage\.sqlite\.corrupt-/.test(name)){

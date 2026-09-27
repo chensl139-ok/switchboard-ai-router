@@ -1,13 +1,26 @@
 import {existsSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {randomBytes,createHash,timingSafeEqual} from 'node:crypto';
 import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const error=(message,status=400)=>Object.assign(new Error(message),{status});
 export class ApiKeyStore {
  constructor(dir,{now=()=>Date.now(),tenantId=null,legacyEnabled=true}={}){
   this.file=path.join(dir,'api-keys.json');this.now=now;this.tenantId=tenantId;
   this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{legacyEnabled,keys:[]};
+  this.db=new DatabaseSync(path.join(dir,'api-key-usage.sqlite'));
+  this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS counters(
+   id TEXT PRIMARY KEY,requests INTEGER NOT NULL,successes INTEGER NOT NULL,failures INTEGER NOT NULL,
+   known_tokens INTEGER NOT NULL,day TEXT NOT NULL,daily_used INTEGER NOT NULL,minute INTEGER NOT NULL,
+   minute_used INTEGER NOT NULL,last_used_at TEXT)`);
+  this.readCounter=this.db.prepare('SELECT * FROM counters WHERE id=?');
+  this.writeCounter=this.db.prepare(`INSERT INTO counters VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+   requests=excluded.requests,successes=excluded.successes,failures=excluded.failures,known_tokens=excluded.known_tokens,
+   day=excluded.day,daily_used=excluded.daily_used,minute=excluded.minute,minute_used=excluded.minute_used,last_used_at=excluded.last_used_at`);
+  for(const key of this.state.keys){const row=this.readCounter.get(key.id);if(row)this.applyCounter(key,row);else this.persistCounter(key);}
  }
+ applyCounter(key,row){Object.assign(key,{requests:row.requests,successes:row.successes,failures:row.failures,knownTokens:row.known_tokens,day:row.day,dailyUsed:row.daily_used,minute:row.minute,minuteUsed:row.minute_used,lastUsedAt:row.last_used_at});}
+ persistCounter(key){this.writeCounter.run(key.id,key.requests||0,key.successes||0,key.failures||0,key.knownTokens||0,key.day||'',key.dailyUsed||0,key.minute||0,key.minuteUsed||0,key.lastUsedAt||null);}
  persist(){
   const snapshot=this.state;
   const temp=this.file+'.tmp';
@@ -59,15 +72,15 @@ export class ApiKeyStore {
  }
  owner(id){return this.state.keys.find(key=>key.id===id)?.createdBy||null;}
  admit(id){
-  return this.mutate(()=>{
-   const key=this.state.keys.find(k=>k.id===id);if(!key||this.status(key)!=='active')throw error('API Key 已停用、未生效或过期',403);
-   const now=this.now(),day=new Date(now).toISOString().slice(0,10),minute=Math.floor(now/60000);
-   const daily=key.day===day?key.dailyUsed:0,rate=key.minute===minute?key.minuteUsed:0;
-   if(key.totalLimit!==null&&key.requests>=key.totalLimit)throw error('API Key 总调用配额已用完',429);
-   if(key.dailyLimit!==null&&daily>=key.dailyLimit)throw error('API Key 今日调用配额已用完（UTC 零点重置）',429);
-   if(key.rpmLimit!==null&&rate>=key.rpmLimit)throw error('API Key 每分钟调用频率超限',429);
-   key.requests++;key.day=day;key.dailyUsed=daily+1;key.minute=minute;key.minuteUsed=rate+1;key.lastUsedAt=new Date(now).toISOString();
-  });
+  const key=this.state.keys.find(k=>k.id===id);if(!key||this.status(key)!=='active')throw error('API Key 已停用、未生效或过期',403);
+  const now=this.now(),day=new Date(now).toISOString().slice(0,10),minute=Math.floor(now/60000);
+  const daily=key.day===day?key.dailyUsed:0,rate=key.minute===minute?key.minuteUsed:0;
+  if(key.totalLimit!==null&&key.requests>=key.totalLimit)throw error('API Key 总调用配额已用完',429);
+  if(key.dailyLimit!==null&&daily>=key.dailyLimit)throw error('API Key 今日调用配额已用完（UTC 零点重置）',429);
+  if(key.rpmLimit!==null&&rate>=key.rpmLimit)throw error('API Key 每分钟调用频率超限',429);
+  const next={...key,requests:key.requests+1,day,dailyUsed:daily+1,minute,minuteUsed:rate+1,lastUsedAt:new Date(now).toISOString()};
+  this.persistCounter(next);Object.assign(key,next);
  }
- complete(id,success,tokens=0){this.mutate(()=>{const key=this.state.keys.find(k=>k.id===id);if(!key)return;if(success)key.successes++;else key.failures++;if(Number.isSafeInteger(tokens)&&tokens>=0)key.knownTokens+=tokens;});}
+ complete(id,success,tokens=0){const key=this.state.keys.find(k=>k.id===id);if(!key)return;const next={...key,successes:key.successes+(success?1:0),failures:key.failures+(success?0:1),knownTokens:key.knownTokens+(Number.isSafeInteger(tokens)&&tokens>=0?tokens:0)};this.persistCounter(next);Object.assign(key,next);}
+ close(){if(!this.closed){this.db.close();this.closed=true;}}
 }

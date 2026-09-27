@@ -9,21 +9,23 @@ export class UsageStore {
     provider_id TEXT, provider TEXT, model TEXT, status INTEGER, latency INTEGER, input_tokens INTEGER, output_tokens INTEGER,
     tokens INTEGER, usage_known INTEGER, currency TEXT, estimated_cost REAL, price_source TEXT, reason TEXT, transport TEXT);
    CREATE INDEX IF NOT EXISTS calls_time ON calls(time); CREATE INDEX IF NOT EXISTS calls_request ON calls(request_id);
+   CREATE INDEX IF NOT EXISTS calls_route_id ON calls(provider_id,model,time DESC);
+   CREATE INDEX IF NOT EXISTS calls_route_name ON calls(provider,model,time DESC);
    CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT);`);
   this.insert=this.db.prepare(`INSERT OR IGNORE INTO calls VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   this.prune=this.db.prepare('DELETE FROM calls WHERE time < ?');
-  this.routeHits=this.db.prepare(`SELECT status,latency,time FROM calls WHERE (provider_id=? OR provider=?) AND model=? AND time>=? ORDER BY time DESC LIMIT 200`);
+  this.routeHits=this.db.prepare(`SELECT status,latency,time FROM calls WHERE (provider_id=? OR (provider_id IS NULL AND provider=?)) AND model=? AND time>=? ORDER BY time DESC LIMIT 200`);
   this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();
-  this.routeCache=new Map();this.routeQueue=Promise.resolve();
+  this.routeCache=new Map();this.prune.run(this.routeSince);
   this.sweep=setInterval(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();},6*3600000);this.sweep.unref?.();
  }
  record(log){
   this.insert.run(log.id,log.requestId||log.id,log.time,
    log.actorId||null,log.apiKeyId||null,log.providerId||null,log.provider||'',log.model||'',log.status,log.latency||0,
    log.inputTokens??null,log.outputTokens??null,log.tokens||0,log.usageKnown?1:0,log.currency||null,log.estimatedCost??null,log.priceSource||null,log.reason||'',log.transport||'http');
-  this.routeQueue=this.routeQueue.then(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeCache.clear();}).catch(()=>{});
+  this.routeCache.delete((log.providerId||'')+'|'+(log.provider||'')+'|'+(log.model||''));
  }
- migrate(logs){if(this.db.prepare("SELECT value FROM metadata WHERE key='legacy_import'").get())return;for(const log of logs)this.record({...log,usageKnown:false});this.db.prepare("INSERT INTO metadata VALUES('legacy_import','done')").run();}
+ migrate(logs){if(this.db.prepare("SELECT value FROM metadata WHERE key='legacy_import'").get())return;for(const log of logs)this.record({...log,usageKnown:false});this.prune.run(this.routeSince);this.db.prepare("INSERT INTO metadata VALUES('legacy_import','done')").run();}
  statisticsSince(days){
   const period=new Date(Date.now()-days*86400000).toISOString();
   const reset=this.db.prepare("SELECT value FROM metadata WHERE key='statistics_since'").get()?.value;

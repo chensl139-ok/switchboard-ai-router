@@ -3,7 +3,7 @@ import {generationPaths,apiToken,clientError} from './protocols.mjs';
 import {safeFetch} from './network.mjs';
 import http from 'node:http';
 import path from 'node:path';
-import {rmSync} from 'node:fs';
+import {rmSync,existsSync,mkdirSync,renameSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {createHmac,randomUUID} from 'node:crypto';
 import {createApp} from './server.mjs';
@@ -17,7 +17,7 @@ const configAuditActions=new Map([
  ['/api/models/register','加入模型调用列表'],['/api/prices','修改模型价格'],['/api/prices/sync','导入参考价格'],
  ['/api/provider','保存服务商配置'],['/api/provider/switch-model','切换服务商模型'],['/api/provider/reorder','调整服务商顺序'],['/api/provider/delete','删除服务商'],['/api/routing','修改路由策略']
 ]);
-export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfig()}={}){
+export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfig(),removeTenantData=rmSync}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
  const accounts=new Accounts(dir,admin),oauth=new FeishuOAuth(oauthConfig,{fetcher:identityFetcher}),engines=new Map(),limits=new Map();
  let activeRequests=0;const globalLimit=Number(process.env.GLOBAL_MAX_CONCURRENCY)||20;
@@ -87,10 +87,16 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     }
     if(route==='tenants'){const tenant=accounts.createTenant(current,data.name);return json(res,201,tenant);}
     if(route==='tenants/delete'){
-     const removed=accounts.deleteTenant(current,data.tenantId);
+     accounts.validateDeleteTenant(current,data.tenantId);
+     const tenantPath=path.join(dir,'tenants',data.tenantId),pendingRoot=path.join(dir,'tenant-deletion-pending');
+     let pendingPath=null;
+     if(existsSync(tenantPath)){mkdirSync(pendingRoot,{recursive:true,mode:0o700});pendingPath=path.join(pendingRoot,data.tenantId+'-'+randomUUID());renameSync(tenantPath,pendingPath);}
+     let removed;
+     try{removed=accounts.deleteTenant(current,data.tenantId);}
+     catch(error){if(pendingPath)renameSync(pendingPath,tenantPath);throw error;}
      engines.get(removed.deleted)?.close();
      engines.delete(removed.deleted);
-     try{rmSync(path.join(dir,'tenants',removed.deleted),{recursive:true,force:true});}catch(error){console.error(JSON.stringify({level:'error',event:'tenant_dir_cleanup_failed',tenantId:removed.deleted,message:error?.message||String(error)}));}
+     if(pendingPath)try{removeTenantData(pendingPath,{recursive:true,force:true});}catch(error){console.error(JSON.stringify({level:'error',event:'tenant_dir_cleanup_failed',tenantId:removed.deleted,path:pendingPath,message:error?.message||String(error)}));return json(res,202,{...removed,cleanupPending:true});}
      return json(res,200,removed);
     }
     if(route==='switch'){accounts.switchTenant(current,data.tenantId);return json(res,200,accounts.me(session(req)));}
@@ -109,7 +115,11 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已切换，请刷新后重试',409);
     req.principal=current;
     if(req.method==='POST'&&configAuditActions.has(url.pathname)){
-     res.once('finish',()=>{if(res.statusCode<400){try{accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,configAuditActions.get(url.pathname)));}catch{console.error('audit_write_failed');}}});
+     const writeHead=res.writeHead;let audited=false;
+     res.writeHead=function(status,...args){
+      if(status<400&&!audited){accounts.mutate(()=>accounts.event(current.tenantId,current.userId,url.pathname,configAuditActions.get(url.pathname)));audited=true;}
+      return writeHead.call(this,status,...args);
+     };
     }
     if(req.method==='POST'&&(generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
     engine(current.tenantId).emit('request',req,res);return;

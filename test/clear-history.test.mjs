@@ -13,6 +13,7 @@ test('历史清理保留身份、API Key 和路由配置，并先备份',()=>{
  const keys={legacyEnabled:false,keys:[{id:'k',digest:'key-digest',totalLimit:5,requests:3,successes:2,failures:1,knownTokens:20,day:'2026-09-25',dailyUsed:3,minute:7,minuteUsed:3,lastUsedAt:'past'}]};
  const state={providers:[{id:'p',secret:'encrypted'}],active:'p',logs:[{id:'legacy'}]};
  writeFileSync(path.join(data,'accounts.json'),JSON.stringify(accounts));writeFileSync(path.join(data,'api-keys.json'),JSON.stringify(keys));writeFileSync(path.join(data,'state.json'),JSON.stringify(state));writeFileSync(path.join(data,'state.json.backup-old'),JSON.stringify(state));
+ const keyDb=new DatabaseSync(path.join(data,'api-key-usage.sqlite'));keyDb.exec("CREATE TABLE counters(id TEXT PRIMARY KEY);INSERT INTO counters VALUES('k');");keyDb.close();
  const db=new DatabaseSync(path.join(data,'usage.sqlite'));db.exec("CREATE TABLE calls(id TEXT);CREATE TABLE metadata(key TEXT);INSERT INTO calls VALUES('old');INSERT INTO metadata VALUES('legacy_import');");db.close();
  try{
   const script=path.resolve('scripts/clear-history.mjs');
@@ -22,6 +23,7 @@ test('历史清理保留身份、API Key 和路由配置，并先备份',()=>{
   const a=JSON.parse(readFileSync(path.join(data,'accounts.json'))),k=JSON.parse(readFileSync(path.join(data,'api-keys.json'))),s=JSON.parse(readFileSync(path.join(data,'state.json')));
   assert.deepEqual(a.audit,[]);assert.deepEqual(a.users,accounts.users);assert.deepEqual(a.sessions,accounts.sessions);
   assert.equal(k.keys[0].digest,'key-digest');assert.equal(k.keys[0].totalLimit,5);assert.equal(k.keys[0].requests,0);assert.equal(k.keys[0].lastUsedAt,null);
+  const clearedKeys=new DatabaseSync(path.join(data,'api-key-usage.sqlite'),{readOnly:true});assert.equal(clearedKeys.prepare('SELECT count(*) n FROM counters').get().n,0);clearedKeys.close();
   assert.deepEqual(s.providers,state.providers);assert.equal('logs' in s,false);assert.equal(existsSync(path.join(data,'state.json.backup-old')),false);
   const cleaned=new DatabaseSync(path.join(data,'usage.sqlite'),{readOnly:true});assert.equal(cleaned.prepare('SELECT count(*) n FROM calls').get().n,0);assert.equal(cleaned.prepare('SELECT count(*) n FROM metadata').get().n,1);cleaned.close();
  }finally{rmSync(root,{recursive:true,force:true});}

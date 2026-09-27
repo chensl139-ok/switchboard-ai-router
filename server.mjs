@@ -54,16 +54,24 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  usageStore.migrate(legacyLogs);
  // 每次请求都会在路由层查阅（健康/熔断/延迟），预热一次 SWR 缓存；usageStore 仅作为查询通道注入，不参与持久化序列化
  const {selectRoutes,healthOf}=createRouter(state,usageStore);
- const warmHealth=()=>{try{usageStore.logs({limit:100});for(const p of state.providers)for(const m of [p.model,...(p.models||[])].filter(Boolean))usageStore.routeLogs({id:p.id,name:p.name,model:m});}catch{}};
+ const warmHealth=()=>{try{for(const p of state.providers)for(const m of new Set([p.model,...(p.models||[])].filter(Boolean)))usageStore.routeLogs({id:p.id,name:p.name,model:m});}catch{}};
  warmHealth();const warmTimer=setInterval(()=>{try{warmHealth();}catch{}},30000);warmTimer.unref?.();
  state.rules??=[];state.routing??={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5};
  for(const p of state.providers)p.weight??=1;
  const ensureActiveProvider=()=>{if(!state.providers.some(p=>p.id===state.active&&p.enabled&&hasCredential(p)))state.active=state.providers.find(p=>p.enabled&&hasCredential(p))?.id||'';if(state.active){state.providers.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active)||a.priority-b.priority);state.providers.forEach((p,index)=>p.priority=index);}};
  ensureActiveProvider();
  let sequence=0;
- let writeChain=Promise.resolve(),lastSaved='';
- const save=()=>{const payload=JSON.stringify(state);if(payload===lastSaved)return writeChain;writeChain=writeChain.then(()=>new Promise(resolve=>{setImmediate(()=>{try{writeFileSync(file+'.tmp',payload,{mode:0o600});renameSync(file+'.tmp',file);lastSaved=payload;}catch(e){console.error('state_persist_failed',e?.message||e);}resolve();});}));return writeChain;};
- const record=log=>{try{usageStore.record(log);save();}catch{console.error('request_log_persistence_failed');}};
+ let lastSaved=JSON.stringify(state),lastPersisted=structuredClone(state);
+ const save=()=>{
+  const payload=JSON.stringify(state);if(payload===lastSaved)return;
+  try{writeFileSync(file+'.tmp',payload,{mode:0o600});renameSync(file+'.tmp',file);lastSaved=payload;lastPersisted=structuredClone(state);}
+  catch(error){
+   console.error('state_persist_failed',error?.message||error);
+   for(const key of Object.keys(state))delete state[key];Object.assign(state,structuredClone(lastPersisted));
+   throw fail('配置保存失败，请检查数据目录',500);
+  }
+ };
+ const record=log=>{try{usageStore.record(log);}catch{console.error('request_log_persistence_failed');}};
  const safe=()=>({...state,logs:usageStore.logs({limit:50}).items,providers:state.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:!!secret,hasMeteredKey:!!meteredSecret})),presets});
  const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
  const fail=(message,status=400)=>Object.assign(new Error(message),{status});
@@ -374,7 +382,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
- server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();};server.on('close',()=>{clearInterval(warmTimer);usageStore.close();});
+ server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();apiKeys.close();};server.on('close',server.closeStore);
  return server;
 }
 // gzip 静态 HTML/JS/CSS；带 ETag + 静态资源 immutable 缓存，命中时 304

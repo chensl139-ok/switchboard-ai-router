@@ -34,7 +34,10 @@ export function selectRoutes(state,input,options={}){
 export function createRouter(state,usageStore){
  const healthOf=(provider,model,now=Date.now())=>routeHealth(state,provider,model,now,usageStore);
  const recentlyFailed=(provider,model,now)=>healthOf(provider,model,now).circuitOpen;
- const latencyScore=(provider,now)=>healthOf(provider,provider.model,now).averageLatency;
+ const latencyScore=(provider,now)=>{
+  const model=[provider.model,...provider.models].find(model=>hasModelCredential(provider,model)&&!recentlyFailed(provider,model,now));
+  return model?healthOf(provider,model,now).averageLatency:Infinity;
+ };
  const modelRoutes=(provider,firstModel,now,channelOverride,skipOpen=false)=>[firstModel,...provider.models.filter(model=>model!==firstModel)]
   .map((model,index)=>({model,index}))
   .filter(({model,index})=>hasModelCredential(provider,model,channelOverride)&&((index===0&&!skipOpen)||!recentlyFailed(provider,model,now)))
@@ -77,7 +80,7 @@ export function createRouter(state,usageStore){
    candidates=weightedFirst(candidates,sequence);reason='按服务商权重轮询';
   }else if(state.strategy==='latency'){
    candidates.sort((a,b)=>latencyScore(a,now)-latencyScore(b,now)||a.priority-b.priority);
-   reason='近一小时至少 3 条成功样本的平均耗时，无样本按优先级';
+   reason='实际候选模型近一小时至少 3 条成功样本的平均耗时，无样本按优先级';
   }else{
    candidates.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active));
   }
