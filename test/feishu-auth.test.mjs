@@ -53,6 +53,27 @@ test('现有账户须主动连接飞书，随后按 Open ID 登录；邮箱不�
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
+test('已绑定企业成员可免邀请首次飞书登录，缺少邮箱也不影响；身份保持租户隔离',async()=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'feishu-auto-join-')),accounts=new Accounts(dir,'a'.repeat(32));
+ try{
+  await accounts.setup({name:'Owner',email:'owner@example.com',password,bootstrapToken:'a'.repeat(32)});
+  accounts.platformFeishuAppId='cli_moss';accounts.feishuAppsByTenant=new Map([['default','cli_moss']]);
+  const config={appId:'cli_moss',tenantId:'default',allowedTenantKey:'moss',autoJoin:true,defaultRole:'member'};
+  const identity={openId:'ou_colleague',tenantKey:'moss',email:'',name:'Colleague'};
+  const member=accounts.resolve(accounts.loginWithFeishu(identity,config));
+  assert.equal(member.role,'member');assert.equal(member.platformAccess,false);
+  assert.equal(accounts.me(member).tenants.length,1);
+  assert.match(member.email,/^feishu-.+@accounts\.invalid$/);
+  assert.equal(accounts.state.users.length,2);
+  assert.equal(accounts.resolve(accounts.loginWithFeishu(identity,config)).userId,member.userId);
+  assert.equal(accounts.state.users.length,2,'再次登录不应重复创建账号');
+  assert.throws(()=>accounts.loginWithFeishu({...identity,openId:'ou_other',tenantKey:'other'},config),/无权访问/);
+  assert.throws(()=>accounts.loginWithFeishu({...identity,openId:'ou_other',tenantKey:''},{...config,allowedTenantKey:''}),/无法验证飞书企业身份/);
+  assert.throws(()=>accounts.loginWithFeishu({...identity,openId:'ou_owner',email:'owner@example.com'},config),/先用密码登录/);
+  assert.throws(()=>accounts.loginWithFeishu({...identity,openId:'ou_disabled'},{...config,autoJoin:false}),/尚未连接/);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
 test('飞书绑定和登录回调完整流程使用一次性 state，不按邮箱冒认',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'feishu-platform-'));
  const oauthConfig=feishuConfig({FEISHU_APP_ID:'cli_test',FEISHU_APP_SECRET:'secret',FEISHU_REDIRECT_URI:'https://gateway.example.com/api/account/sso/feishu/callback',FEISHU_ALLOWED_TENANT_KEY:'tenant'});

@@ -15,11 +15,11 @@ export class FeishuBindings {
  unseal(value){try{const [iv,tag,data]=value.split('.').map(part=>Buffer.from(part,'base64')),decipher=createDecipheriv('aes-256-gcm',this.key,iv);decipher.setAuthTag(tag);return Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8');}catch{throw Error('飞书企业配置无法解密；请检查 ADMIN_TOKEN 是否与加密时一致');}}
  configs(){
   const configs=this.envConfigs.filter(config=>!Object.hasOwn(this.state.overrides,config.tenantId));
-  for(const [tenantId,entry] of Object.entries(this.state.overrides))if(entry){configs.push({...entry,tenantId,appSecret:this.unseal(entry.secretCiphertext),enabled:true,legacy:false,autoJoin:false,defaultRole:'member'});}
+  for(const [tenantId,entry] of Object.entries(this.state.overrides))if(entry){configs.push({...entry,tenantId,appSecret:this.unseal(entry.secretCiphertext),enabled:true,legacy:false,autoJoin:entry.autoJoin!==false,defaultRole:'member'});}
   if(new Set(configs.map(config=>config.key)).size!==configs.length||new Set(configs.map(config=>config.appId)).size!==configs.length||new Set(configs.map(config=>config.tenantId)).size!==configs.length)throw Error('飞书应用标识、App ID 和平台租户必须一一对应');
   return configs;
  }
- metadata(){return this.configs().map(({key,label,tenantId,appId,allowedTenantKey})=>({key,label,tenantId,appId,tenantKey:allowedTenantKey||'',source:Object.hasOwn(this.state.overrides,tenantId)?'managed':'environment'}));}
+ metadata(){return this.configs().map(({key,label,tenantId,appId,allowedTenantKey,autoJoin})=>({key,label,tenantId,appId,tenantKey:allowedTenantKey||'',autoJoin:Boolean(autoJoin),source:Object.hasOwn(this.state.overrides,tenantId)?'managed':'environment'}));}
  save(next){const file=this.file+'.tmp';writeFileSync(file,JSON.stringify(next),{mode:0o600});renameSync(file,this.file);this.state=next;}
  bind(input,tenants){
   const tenantId=String(input?.tenantId||''),label=String(input?.label||'').trim(),appId=String(input?.appId||'').trim(),secret=String(input?.appSecret||''),tenantKey=String(input?.tenantKey||'').trim();
@@ -31,7 +31,7 @@ export class FeishuBindings {
   if(this.configs().some(config=>config.tenantId!==tenantId&&config.appId===appId))throw fail('此飞书应用已绑定其他租户',409);
   const key=existing?.key||'bound-'+tenantId.replaceAll('-','').slice(0,24);if(this.configs().some(config=>config.tenantId!==tenantId&&config.key===key))throw fail('飞书企业标识冲突',409);
   const next=structuredClone(this.state);
-  next.overrides[tenantId]={key,label,appId,secretCiphertext:this.seal(secret||existing.appSecret),redirectUri,allowedTenantKey:tenantKey,legacy:tenantId==='default'&&this.envConfigs.some(config=>config.tenantId==='default'&&config.appId===appId)};
+  next.overrides[tenantId]={key,label,appId,secretCiphertext:this.seal(secret||existing.appSecret),redirectUri,allowedTenantKey:tenantKey,autoJoin:input?.autoJoin===true||input?.autoJoin==='on',legacy:tenantId==='default'&&this.envConfigs.some(config=>config.tenantId==='default'&&config.appId===appId)};
   this.save(next);return this.metadata().find(item=>item.tenantId===tenantId);
  }
  unbind(tenantId){

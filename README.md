@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[v2.1.0 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.0) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+[v2.1.1 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.1) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 能做什么
 
@@ -22,7 +22,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.1.0。GHCR 提供 `2.1.0`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
+当前发布版本为 v2.1.1。GHCR 提供 `2.1.1`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
 
 ## 五分钟部署
 
@@ -46,14 +46,14 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 ```sh
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.0
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.1
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.0
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.1
 ```
 
 上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
@@ -110,13 +110,13 @@ curl -i http://127.0.0.1:3100/v1/chat/completions \
 
 1. 在[飞书开放平台](https://open.feishu.cn/app)使用企业自建应用，并将要登录的同事纳入应用发布版本的可用范围；在「安全设置 → 重定向 URL」添加 `https://你的访问地址/api/account/sso/feishu/callback`。
 2. 第一家企业在本地 `.env` 填写 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_REDIRECT_URI`，可用 `FEISHU_PROVIDER_LABEL` 设置名称。平台主账号可在「账户与租户 → 飞书企业绑定」给新租户添加应用，填写企业名称、App ID、App Secret 和可选 Tenant Key；配置在服务端加密保存，密钥不回显。已有 `FEISHU_ADDITIONAL_APPS_JSON` 配置仍可使用，平台内修改会覆盖对应租户的环境配置，解绑会停用该租户入口。各飞书应用都须登记**同一个** HTTPS 回调 URL。`App Secret` 不要提交到仓库或发送到聊天。对外 HTTPS 访问时设置 `COOKIE_SECURE=true`。
-3. 已有账户先用密码登录并切换到对应租户，在「账户与租户」点「连接飞书账户」；以后在登录页选择所属企业。新同事先取得本企业租户管理员的邀请码，完成受邀注册，再连接飞书。系统按 **App ID + Open ID + 平台租户**识别和落地用户，登录不会自动切换到另一个企业的租户，**不会仅凭飞书返回的邮箱自动认领现有账户**；正常邀请流程不要求申请飞书邮箱权限。
+3. 登录页选择所属企业。平台内绑定的飞书企业应用默认允许该应用可用范围内的成员首次飞书登录时自动创建本租户普通账号，无需邀请码，也不要求飞书邮箱权限；平台主账号可在「账户与租户 → 飞书企业绑定」关闭自动加入。已有邮箱密码账户仍须先登录并在对应租户点「连接飞书账户」，**不会仅凭飞书返回的邮箱自动认领现有账户**。系统按 **App ID + Open ID + 平台租户**识别身份，不能跨企业进入别的租户。Tenant Key 不是 App Secret；它是可选的额外企业校验，可从飞书授权返回的用户身份信息中取得，不必在应用「凭证与基础信息」页寻找。未配置 Tenant Key 时仍以企业自建应用本身的可用范围为准；请确保应用已发布且可用范围符合预期。
 
-**跨企业单入口迁移方案（尚未启用）：**当前两家企业各用一套企业自建应用。飞书 OAuth 发起时就要给出 App ID，因此网页无法在授权前可靠读取用户“当前所在企业”；把其中一家设为默认会让另一家员工进入错误授权流程。要实现真正的单个「使用飞书登录」入口，应申请一套可由两家企业分别安装/授权的跨企业应用，确认其网页授权与回调配置，然后在回调中验证飞书返回的 `tenant_key`，用服务端唯一映射表定位平台租户；未绑定的企业必须拒绝登录。迁移时保留旧入口至两家均安装并完成账户重新连接，不能用邮箱自动合并旧 App 的 Open ID。只有平台主账号能维护企业映射，模思主账号的跨租户权限仍须额外核验模思企业身份。**在该跨企业应用安装前，登录页保留企业选择，以保证 ai test 同事可正常登录；不把界面合并误称为自动识别。**
+**跨企业单入口迁移方案（尚未启用）：**若配置两家独立企业，目前各用一套企业自建应用。飞书 OAuth 发起时就要给出 App ID，因此网页无法在授权前可靠读取用户“当前所在企业”；把其中一家设为默认会让另一家员工进入错误授权流程。要实现真正的单个「使用飞书登录」入口，应申请一套可由两家企业分别安装/授权的跨企业应用，确认其网页授权与回调配置，然后在回调中验证飞书返回的 `tenant_key`，用服务端唯一映射表定位平台租户；未绑定的企业必须拒绝登录。迁移时保留旧入口至两家均安装并完成账户重新连接，不能用邮箱自动合并旧 App 的 Open ID。只有平台主账号能维护企业映射，模思主账号的跨租户权限仍须额外核验模思企业身份。**在该跨企业应用安装前，登录页保留企业选择；不把界面合并误称为自动识别。**
 
-默认 `FEISHU_AUTO_JOIN=false`，避免企业内所有应用可用用户直接加入平台。仅明确需要第一家企业自动加入时，才同时配置 `FEISHU_ALLOWED_TENANT_KEY`、飞书邮箱字段权限及 `FEISHU_AUTO_JOIN=true`；自动加入进入默认租户且使用 `FEISHU_DEFAULT_ROLE`。附加企业应用始终保持邀请制。每个飞书应用只允许映射一个平台租户，已映射的租户不能直接删除。[飞书应用类型说明](https://open.feishu.cn/document/home/app-types-introduction/robots-web-applications-and-mini-programs)
+仅通过环境变量配置而未在平台内绑定的旧应用仍遵循 `FEISHU_AUTO_JOIN`（默认关闭）；开启时须配置 `FEISHU_ALLOWED_TENANT_KEY`，但不再强制要求邮箱字段权限。平台内绑定的应用以「允许本企业成员首次飞书登录时自动加入」开关为准，默认开启；每个应用只映射一个平台租户，已绑定应用的租户不能直接删除。[飞书应用类型说明](https://open.feishu.cn/document/home/app-types-introduction/robots-web-applications-and-mini-programs)
 
-如果没有自有域名，但同事需要直接在浏览器访问，可用主机上的 [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) 获取固定的 `https://主机名.尾网名.ts.net` 地址，转发到本机 `127.0.0.1:3100`；同事无需安装 Tailscale。**Funnel 会把登录页公开到互联网**，不是仅对受邀者可见；应保持邀请制、强密码和 HTTPS，并持续运行主机与 Funnel。不要用随机临时隧道地址作为长期 OAuth 回调。
+如果没有自有域名，但同事需要直接在浏览器访问，可用主机上的 [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) 获取固定的 `https://主机名.尾网名.ts.net` 地址，转发到本机 `127.0.0.1:3100`；同事无需安装 Tailscale。**Funnel 会把登录页公开到互联网**，不是仅对受邀者可见；应保持强密码和 HTTPS、严格管理飞书应用的可用范围，并持续运行主机与 Funnel。启用企业成员自动加入后，该应用可用范围内的成员无需邀请码即可访问对应租户。不要用随机临时隧道地址作为长期 OAuth 回调。
 
 「请求日志」记录请求与上游尝试的元数据，不保存提示词或回复正文；「用量分析」展示成员、模型和 Key 用量及估算费用；「组织审计 → 租户操作」记录配置和成员操作，每个租户最多保留最近 2000 条。默认查看最近 7 天的管理变更、每页 10 条；例行成功飞书登录不再产生操作记录，既有的登录和旧版只读发现记录默认隐藏，勾选后仍可查。账户页不再重复铺开同一份审计。**仅平台主账号**可在租户操作页输入指定确认文字后清空**所有租户**的操作审计；此操作不可从平台恢复，不影响请求日志、用量、API Key、账号或实验室历史。租户所有者可以重置统计起点，或清除本租户请求日志与用量，操作本身会留下审计记录。
 

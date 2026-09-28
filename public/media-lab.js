@@ -15,7 +15,7 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
  <div class="media-kind-grid" role="tablist" aria-label="媒体任务类型">${Object.entries(kinds).map(([id,item],index)=>`<button type="button" role="tab" data-media-kind="${id}" aria-selected="${index===0}" class="media-kind ${index===0?'selected':''}"><span class="media-kind-icon">${{image:'◇',speech:'◖',transcription:'≋',video:'▷',vision:'◉'}[id]}</span><b>${item.label}</b><small>${item.hint}</small></button>`).join('')}</div>
  <div class="media-workspace"><section class="panel media-form-panel"><div class="panel-title"><div><span class="eyebrow">NEW TASK</span><h2 id="media-form-title">图片生成</h2></div><span id="media-provider-note" class="tag" hidden>兼容视频任务接口</span></div><form id="media-form"><select id="media-kind" class="sr-only" aria-label="调用类型">${Object.entries(kinds).map(([id,item])=>`<option value="${id}">${item.label}</option>`).join('')}</select><label>服务商 / 模型<select id="media-model" required></select><small id="media-model-help" class="field-help">只显示已启用并加入调用列表的匹配模型。</small></label><div id="media-vision-controls" class="form-grid media-vision-controls" hidden><label>素材类型<select id="media-vision-type"><option value="image">图片 · 1～5 张</option><option value="video">视频 · 1 个</option></select></label><label>素材来源<select id="media-vision-source"><option value="url">HTTPS URL</option><option value="file_id">上游 file_id</option></select></label></div><label id="media-vision-images-label" hidden>图片 URL（每行一个，最多 5 张）<textarea id="media-vision-images" rows="3" placeholder="https://example.com/photo.jpg"></textarea></label><label id="media-vision-video-label" hidden>视频 URL<input id="media-vision-video" type="url" placeholder="https://example.com/video.mp4"></label><small id="media-vision-help" class="field-help" hidden>URL 须可由上游访问；file_id 指已上传至上游的素材，本平台暂不提供视觉素材上传。</small><label id="media-text-label">提示词<textarea id="media-text" rows="5" required placeholder="描述你希望生成的内容，细节越明确，结果越稳定"></textarea></label><div class="form-grid media-options"><label id="media-size-label">输出尺寸<input id="media-size" value="1024x1024"></label><label id="media-voice-label" hidden>音色 ID<input id="media-voice" placeholder="例如 FunAudioLLM/CosyVoice2-0.5B:alex"></label><label id="media-file-label" hidden>音频文件（最大 50 MB）<input id="media-file" type="file" accept="audio/*"></label><label id="media-image-label" hidden>参考图片 URL（图生视频）<input id="media-image" type="url" placeholder="https://…"></label><label id="media-vision-max-label" hidden>最大输出 Tokens<input id="media-vision-max" type="number" min="1" max="8192" step="1" value="1024"></label></div><div class="media-actions"><button class="primary" id="media-send">生成图片</button><button type="button" id="media-stop" hidden>取消等待</button></div><p id="media-error" role="alert" class="lab-error"></p></form></section>
  <section class="panel media-result-panel"><div class="panel-title"><div><span class="eyebrow">RESULT</span><h2 id="media-result-title">生成结果</h2></div><div class="media-result-actions"><button type="button" id="media-copy" hidden>复制文本</button><span id="media-status" role="status" class="media-status">等待任务</span></div></div><div id="media-result" class="media-result"><div class="media-placeholder"><span>＋</span><b>结果将在这里显示</b><small>任务会保存在历史记录中；视频生成可返回后继续查询</small></div></div><div id="media-vision-usage" class="media-vision-usage" hidden></div></section></div>`);
- const $=selector=>root.querySelector(selector);let taskId=null,recordId=null,polling=false,videoFinished=false,selectionEpoch=0;
+ const $=selector=>root.querySelector(selector);let taskId=null,recordId=null,polling=false,autoPolling=false,videoFinished=false,selectionEpoch=0;
  const historyPanel=mountLabHistory(root,{area:'media',tenantId,onOpen:(row,content,refresh)=>{
   const renderResult=current=>{content.replaceChildren();let result;try{result=JSON.parse(current.result||'{}');}catch{result={text:current.result};}
    const details=document.createElement('div');details.className='lab-history-media-result';if(current.requestId){const task=document.createElement('p');task.className='lab-history-task-id';task.textContent=`任务 ID：${current.requestId}`;details.append(task);}
@@ -53,7 +53,7 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
  function resetResult(){$('#media-result').replaceChildren();$('#media-copy').hidden=true;$('#media-copy').textContent='复制文本';$('#media-vision-usage').hidden=true;$('#media-vision-usage').textContent='';}
  function showLinks(rows,type){const box=$('#media-result');for(const row of rows){const url=safeURL(row.url);if(!url)continue;const wrapper=document.createElement('div');wrapper.className='media-output';const element=document.createElement(type);element.src=url;if(type==='video')element.controls=true;else element.alt='生成图片';wrapper.append(element);const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noreferrer';link.textContent='在新窗口打开 ↗';wrapper.append(link);box.append(wrapper);}}
  const headers=()=>({'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})});
- function stopPolling(){clearInterval(pollTimer);pollTimer=null;polling=false;}
+ function stopPolling(){clearTimeout(pollTimer);pollTimer=null;polling=false;autoPolling=false;}
  function clearSelection(){
   selectionEpoch++;controller=null;stopPolling();taskId=null;recordId=null;videoFinished=false;
   if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null;}
@@ -64,18 +64,20 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
  $('#media-copy').onclick=async()=>{const value=$('#media-result .media-transcript')?.textContent;if(!value)return;try{await navigator.clipboard.writeText(value);$('#media-copy').textContent='已复制';setTimeout(()=>{$('#media-copy').textContent='复制文本';},1800);}catch{$('#media-error').textContent='复制失败，请手动选中文本复制';}};
  async function poll(){
   if(polling||!taskId||!active())return;
-  const id=taskId,epoch=selectionEpoch;polling=true;const button=$('#media-poll');
+  clearTimeout(pollTimer);pollTimer=null;
+  const id=taskId,epoch=selectionEpoch;let nextDelay=5000;polling=true;const button=$('#media-poll');
   if(button){button.disabled=true;button.textContent='正在查询…';}
   try{
    const response=await fetch('/v1/video/status',{method:'POST',headers:headers(),body:JSON.stringify({requestId:id})}),data=await response.json();
    if(!active()||epoch!==selectionEpoch||id!==taskId)return;
-   if(!response.ok)throw Error(data.error?.message||'查询失败');
-   const labels={InQueue:'排队中',InProgress:'生成中',Succeed:'已完成',Failed:'生成失败'};setStatus(labels[data.status]||data.status);
+   if(!response.ok){const error=Error(data.error?.message||'查询失败');error.status=response.status;throw error;}
+   $('#media-error').textContent='';
+   const labels={InQueue:'排队中',InProgress:'生成中',Succeed:'已完成',Failed:'生成失败'};if(data.pendingSync)nextDelay=15000;setStatus(data.pendingSync?'上游暂不可查 · 自动重试':labels[data.status]||data.status);
    if(recordId)try{await labHistoryRequest(tenantId,'',{id:recordId,area:'media',kind:'video',model:$('#media-model').value,title:$('#media-text').value.slice(0,180),status:data.status==='Succeed'?'completed':data.status==='Failed'?'failed':'submitted',requestId:id,result:JSON.stringify({videos:data.results?.videos||[],remoteStatus:data.status}),error:data.status==='Failed'?data.reason||'视频生成失败':''});if(historyPanel.section.open)void historyPanel.refresh();}catch{/* Video polling must remain usable if history storage fails. */}
    if(data.status==='Succeed'){videoFinished=true;stopPolling();resetResult();showLinks(data.results?.videos||[],'video');button?.remove();}
    else if(data.status==='Failed'){videoFinished=true;stopPolling();throw Error(data.reason||'视频生成失败');}
-  }catch(error){if(active()&&epoch===selectionEpoch&&id===taskId)$('#media-error').textContent=error.message;}
-  finally{if(epoch===selectionEpoch)polling=false;if(button?.isConnected){button.disabled=false;button.textContent='立即刷新';}}
+  }catch(error){if(active()&&epoch===selectionEpoch&&id===taskId){$('#media-error').textContent=error.message;if(!videoFinished)setStatus('查询异常 · 可重试');if(error.status===404||error.status===409)stopPolling();else nextDelay=10000;}}
+  finally{if(epoch===selectionEpoch)polling=false;if(button?.isConnected){button.disabled=false;button.textContent='立即刷新';}if(active()&&epoch===selectionEpoch&&id===taskId&&autoPolling&&!videoFinished&&!pollTimer)pollTimer=setTimeout(poll,nextDelay);}
  }
  $('#media-stop').onclick=()=>controller?.abort();
  $('#media-form').onsubmit=async event=>{
@@ -110,7 +112,7 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
     if(kind==='transcription'){const output=document.createElement('p');output.className='media-transcript';output.textContent=data.text||JSON.stringify(data);$('#media-result').append(output);}
     if(kind==='vision'){const text=visionOutputText(data);if(!text)throw Error('视觉理解未返回文本结果');const output=document.createElement('p');output.className='media-transcript';output.textContent=text;$('#media-result').append(output);$('#media-copy').hidden=false;const usage=data.usage||{},input=Number(usage.input_tokens),outputTokens=Number(usage.output_tokens);if(Number.isFinite(input)&&Number.isFinite(outputTokens)){$('#media-vision-usage').textContent=`输入 ${input} tokens · 输出 ${outputTokens} tokens`;$('#media-vision-usage').hidden=false;}}
     if(kind==='video'){
-     taskId=data.requestId;const task=document.createElement('div');task.className='media-task';const code=document.createElement('code');code.textContent=taskId;const button=document.createElement('button');button.id='media-poll';button.type='button';button.textContent='立即刷新';button.onclick=poll;task.append('任务 ID ',code,button);$('#media-result').append(task);setStatus('已提交 · 自动刷新');await poll();if(current()&&!videoFinished&&taskId)pollTimer=setInterval(poll,5000);
+     taskId=data.requestId;const task=document.createElement('div');task.className='media-task';const code=document.createElement('code');code.textContent=taskId;const button=document.createElement('button');button.id='media-poll';button.type='button';button.textContent='立即刷新';button.onclick=poll;task.append('任务 ID ',code,button);$('#media-result').append(task);setStatus('已提交 · 自动刷新');autoPolling=true;await poll();
     }
    }
    if(current()&&kind!=='video')setStatus('已完成');

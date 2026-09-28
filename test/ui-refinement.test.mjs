@@ -4,13 +4,46 @@ import {readFileSync} from 'node:fs';
 
 const read=name=>readFileSync(new URL('../'+name,import.meta.url),'utf8');
 
+test('导航首屏不闪出旧标签，流式消息局部更新且对比页按需加载',()=>{
+ const app=read('public/app.js'),css=read('public/interface.css'),lab=read('public/playground.js'),server=read('server.mjs');
+ assert.match(app,/document\.body\.classList\.remove\('app-ready'\)/);
+ assert.match(app,/render\(\);document\.body\.classList\.add\('app-ready'\)/);
+ assert.match(css,/body:not\(\.app-ready\) \.sidebar \.nav-item\.selected/);
+ assert.match(css,/body>main>header, body\.theme-dark>main>header \{ backdrop-filter: none; \}/);
+ assert.match(lab,/import\('\.\/model-compare\.js'\)/);
+ assert.match(lab,/patchStreamingMessage\(list\.lastElementChild,history\.at\(-1\)\)/);
+ assert.match(lab,/element\.firstChild\.appendData\(text\.slice\(previous\.length\)\)/);
+ assert.match(server,/\/\(\?:build\\\/\)\?assets\\\//);
+});
+
+test('模思品牌图标使用本地 SVG，并由静态路由以 SVG 类型提供',()=>{
+ const html=read('public/index.html'),logo=read('public/mosi.svg'),server=read('server.mjs'),css=read('public/workspaces.css');
+ assert.match(logo,/<svg[^>]+viewBox="0 0 100 100"/);
+ assert.match(html,/<img class="brand-mark" src="\/mosi\.svg"/);
+ assert.match(html,/<link rel="icon" type="image\/svg\+xml" href="\/mosi\.svg"/);
+ assert.match(server,/'\/mosi\.svg':'mosi\.svg'/);
+ assert.match(server,/f\.endsWith\('\.svg'\)\?'image\/svg\+xml'/);
+ assert.match(css,/\.sidebar \.brand-mark \{[\s\S]*?background: #fff;/);
+});
+
+test('删除的内置服务商可从添加弹窗重新选择模板',()=>{
+ const app=read('public/app.js'),server=read('server.mjs');
+ assert.match(app,/id="provider-template"/);
+ assert.match(app,/\.filter\(preset=>!state\.providers\.some\(item=>item\.id===preset\.id\)\)/);
+ assert.match(app,/f\.elements\[key\]\.value=preset\[key\]/);
+ assert.match(server,/providers:state\.providers\.map[\s\S]*?presets\}/);
+});
+
 test('媒体实验室使用通用视频名称并自动轮询异步任务',()=>{
  const source=read('public/media-lab.js');
  assert.match(source,/video:\{label:'视频生成'/);assert.doesNotMatch(source,/视频生成（硅基流动）/);
- assert.match(source,/setInterval\(poll,5000\)/);assert.match(source,/clearInterval\(pollTimer\)/);
+ assert.match(source,/setTimeout\(poll,nextDelay\)/);assert.match(source,/clearTimeout\(pollTimer\)/);
  assert.match(source,/videoCompatible/);assert.match(source,/MEDIA STUDIO/);
  assert.match(source,/kind==='video'\?supported\.find\(item=>\/T2V\/i\.test\(item\.model\)\)/);
  assert.match(source,/imageRequired=\$\('#media-kind'\)\.value==='video'&&\/I2V\/i/);
+ assert.match(source,/data\.pendingSync\?'上游暂不可查 · 自动重试'/);
+ assert.match(source,/\$\('#media-error'\)\.textContent='';[\s\S]*?setStatus\(data\.pendingSync/);
+ assert.match(source,/if\(error\.status===404\|\|error\.status===409\)stopPolling\(\)/);
 });
 
 test('切换媒体任务、模型或视觉输入类型时清空旧结果并阻止迟到响应覆盖',()=>{
@@ -28,7 +61,7 @@ test('模型实验室切换页面保留任务，历史按账号租户保存；�
  const media=read('public/media-lab.js'),chat=read('public/playground.js'),account=read('public/accounts.js');
  assert.match(media,/export function stopMediaLab\(\)\{viewEpoch\+\+;controller=null/);
  assert.match(media,/await persist\('submitted'/);assert.match(media,/mountLabHistory\(root,\{area:'media'/);
- assert.match(chat,/export function stopPlayground\(\)\{stopModelCompare\(\);\}/);
+ assert.match(chat,/export function stopPlayground\(\)\{stopCompare\(\);\}/);
  assert.match(chat,/mountLabHistory\(root,\{area:'chat'/);
  assert.match(account,/id="feishu-login"/);assert.match(account,/id="feishu-choice"/);
  assert.doesNotMatch(account,/使用 \$\{safeText\(provider\.label\)\} 飞书登录/);

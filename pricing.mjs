@@ -66,8 +66,9 @@ export function usageCost(provider,model,usage,now=Date.now()){
 export function normalizeUsage(raw){
  const valid=n=>Number.isSafeInteger(n)&&n>=0;
  const known=valid(raw?.prompt_tokens)&&valid(raw?.completion_tokens);
- const cached=raw?.prompt_tokens_details?.cached_tokens??raw?.prompt_cache_hit_tokens;
+ const detailed=raw?.prompt_tokens_details?.cached_tokens,reported=raw?.prompt_cache_hit_tokens;
+ const cached=detailed??reported;
  const creation=raw?.prompt_tokens_details?.cache_creation_tokens;
- const cacheUsageInvalid=(cached!==undefined&&(!valid(cached)||cached>raw?.prompt_tokens))||(creation!==undefined&&(!valid(creation)||creation+(cached||0)>raw?.prompt_tokens));
- return {known,cachedInputTokens:valid(cached)?cached:0,cacheCreationTokens:valid(creation)?creation:0,cacheUsageInvalid,inputTokens:valid(raw?.prompt_tokens)?raw.prompt_tokens:0,outputTokens:valid(raw?.completion_tokens)?raw.completion_tokens:0,totalTokens:valid(raw?.total_tokens)?raw.total_tokens:known?raw.prompt_tokens+raw.completion_tokens:0};
+ const cacheUsageInvalid=(detailed!==undefined&&reported!==undefined&&detailed!==reported)||(cached!==undefined&&(!valid(cached)||cached>raw?.prompt_tokens))||(raw?.prompt_cache_miss_tokens!==undefined&&(!valid(raw.prompt_cache_miss_tokens)||cached===undefined||cached+raw.prompt_cache_miss_tokens!==raw?.prompt_tokens))||(creation!==undefined&&(!valid(creation)||creation+(cached||0)>raw?.prompt_tokens));
+ return {known,cacheReported:cached!==undefined,cacheCreationReported:creation!==undefined,cachedInputTokens:valid(cached)?cached:0,cacheCreationTokens:valid(creation)?creation:0,cacheUsageInvalid,inputTokens:valid(raw?.prompt_tokens)?raw.prompt_tokens:0,outputTokens:valid(raw?.completion_tokens)?raw.completion_tokens:0,totalTokens:valid(raw?.total_tokens)?raw.total_tokens:known?raw.prompt_tokens+raw.completion_tokens:0};
 }

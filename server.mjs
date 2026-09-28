@@ -196,11 +196,13 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
       if(!committed&&!visible){pendingChunks.push(chunk);pendingBytes+=JSON.stringify(chunk).length;if(pendingBytes<1024*1024)return;committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;pendingBytes=0;return;}
       if(!committed){committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;pendingBytes=0;}
       await onChunk(chunk);
-     },signal,value=>{usage=normalizeUsage({prompt_tokens:value.inputTokens,completion_tokens:value.outputTokens,total_tokens:value.totalTokens,prompt_tokens_details:{cached_tokens:value.cachedInputTokens,cache_creation_tokens:value.cacheCreationTokens}});usage.cacheUsageInvalid=usage.cacheUsageInvalid||value.cacheUsageInvalid;usage.known=usage.known&&value.known;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null);
+     },signal,value=>{usage=value;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null);
      if(pendingChunks.length){committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;}
-     if(onStreamComplete)await onStreamComplete({provider:p.id,model:p.model,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}});
+     const cacheDetails=!usage.cacheUsageInvalid&&(usage.cacheReported||usage.cacheCreationReported)?{prompt_tokens_details:{...(usage.cacheReported?{cached_tokens:usage.cachedInputTokens}:{}),...(usage.cacheCreationReported?{cache_creation_tokens:usage.cacheCreationTokens}:{})}}:{};
+     const publicUsage={prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens,...cacheDetails};
+     if(onStreamComplete)await onStreamComplete({provider:p.id,model:p.model,usage:publicUsage});
      record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
-     succeeded=true;usedTokens=tokens;return {provider:p.id,model:p.model,route:routeInfo,usage:{prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens}};
+     succeeded=true;usedTokens=tokens;return {provider:p.id,model:p.model,route:routeInfo,usage:publicUsage};
     }
     let data=await resp.json();
     const native=p.protocol==='anthropic'?data:null;data=toChatResponse(data,p.protocol,p.model);
@@ -370,15 +372,15 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(!existsSync(built))throw fail('前端资源未构建，请运行 npm run build:web',503);
     return staticServe(req,res,built,'text/javascript; charset=utf-8');
    }
-   if((req.method==='GET'||req.method==='HEAD')&&/^\/build\/assets\/[A-Za-z0-9._-]+\.(js|css)$/.test(url.pathname)){
-    const built=path.join(root,'public',url.pathname.slice(1));
-    if(!existsSync(built)||!path.resolve(built).startsWith(path.join(root,'public','build')+path.sep))throw fail('页面资源不存在',404);
+   if((req.method==='GET'||req.method==='HEAD')&&/^\/(?:build\/)?assets\/[A-Za-z0-9._-]+\.(js|css)$/.test(url.pathname)){
+    const built=path.join(root,'public','build','assets',path.basename(url.pathname));
+    if(!existsSync(built))throw fail('页面资源不存在',404);
     return staticServe(req,res,built,built.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8',{immutable:true});
    }
-   const files={'/':'index.html','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/interface.css':'interface.css','/workspaces.css':'workspaces.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/audit.js':'audit.js','/audit-events.js':'audit-events.js','/audit-format.js':'audit-format.js','/request-logs.js':'request-logs.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
+   const files={'/':'index.html','/mosi.svg':'mosi.svg','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/interface.css':'interface.css','/workspaces.css':'workspaces.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/audit.js':'audit.js','/audit-events.js':'audit-events.js','/audit-format.js':'audit-format.js','/request-logs.js':'request-logs.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
  
    if((req.method!=='GET'&&req.method!=='HEAD')||!files[url.pathname])throw fail('页面不存在',404);
-   const f=files[url.pathname];return staticServe(req,res,path.join(root,'public',f),f.endsWith('.js')?'text/javascript; charset=utf-8':f.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
+   const f=files[url.pathname];return staticServe(req,res,path.join(root,'public',f),f.endsWith('.js')?'text/javascript; charset=utf-8':f.endsWith('.css')?'text/css; charset=utf-8':f.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8');
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});

@@ -60,6 +60,11 @@ test('完整网关流程：鉴权、加密、切换、回退、重启与协议�
  const beforeOrder=(await request('/api/state')).data.providers.map(p=>p.id),reversed=[...beforeOrder].reverse();
  assert.equal((await request('/api/provider/reorder',{ids:reversed})).status,200);assert.deepEqual((await request('/api/state')).data.providers.map(p=>p.id),reversed);
  assert.equal((await request('/api/provider/delete',{id:'automatic'})).status,200);assert.equal((await request('/api/state')).data.providers.some(p=>p.id==='automatic'),false);assert.equal((await request('/api/provider/delete',{id:'automatic'})).status,404);
+ const deepseekPreset=(await request('/api/state')).data.presets.find(p=>p.id==='deepseek');
+ assert.equal((await request('/api/provider/delete',{id:'deepseek'})).status,200);
+ assert.equal((await request('/api/state')).data.presets.some(p=>p.id==='deepseek'),true);
+ assert.equal((await request('/api/provider',{...deepseekPreset,models:[]})).status,200);
+ assert.equal((await request('/api/state')).data.providers.some(p=>p.id==='deepseek'),true);
  assert.equal((await request('/api/provider',{...provider('good','https://good.example/v1'),apiKey:'',models:['test-model'],modelProtocols:{unknown:'anthropic'}})).status,400);
  assert.equal((await request('/api/state')).data.providers.find(p=>p.id==='good').model,'second/model');
  assert.equal((await request('/v1/chat/completions',{...chat,model:'good',upstream_model:'unknown'},gateway)).status,400);

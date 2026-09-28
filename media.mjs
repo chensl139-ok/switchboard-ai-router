@@ -80,7 +80,18 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
   const signal=AbortSignal.any([abort.signal,AbortSignal.timeout(180000)]);let succeeded=false,tokens=0,status=502,cost={estimatedCost:null},usage={known:false};
   try{
    const response=await fetcher(p.baseUrl+pathname.slice(3),{method:'POST',headers,body:requestBody,signal,redirect:'error',maxResponseBytes:64*1024*1024});
-   status=response.status;if(!response.ok){await response.body?.cancel();throw fail(`服务商 ${p.name} 的 ${pathname} 返回 HTTP ${status}，请检查模型能力和参数`,status);}
+   status=response.status;if(!response.ok){
+    await response.body?.cancel();
+    if(poll&&status===404){
+     const submittedAt=job.submittedAt??job.expiresAt-86400000;
+     if(Date.now()-submittedAt<30*60*1000){
+      res.writeHead(202,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      res.end(JSON.stringify({status:'InQueue',pendingSync:true}));succeeded=true;return;
+     }
+     throw fail('服务商尚未找到该视频任务；任务可能已失效，或查询时使用的密钥与提交时不同。请检查服务商密钥后重试查询',404);
+    }
+    throw fail(`服务商 ${p.name} 的 ${pathname} 返回 HTTP ${status}，请检查模型能力和参数`,status);
+   }
    const type=response.headers.get('content-type')||'';
    if(pathname==='/v1/audio/speech'){
     if(!response.body||!(/^(audio\/|application\/octet-stream)/i.test(type)))throw fail('语音接口未返回音频二进制数据',502);
@@ -109,7 +120,7 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
    }
    if(pathname==='/v1/video/submit'){
     if(typeof result.requestId!=='string'||!result.requestId||result.requestId.length>300)throw fail('上游未返回视频任务 ID',502);
-    const id='video_'+randomUUID();jobs[id]={upstreamId:result.requestId,providerId:p.id,baseUrl:p.baseUrl,model:p.model,owner:owner(caller),expiresAt:Date.now()+86400000};save();result={...result,requestId:id};
+    const id='video_'+randomUUID(),submittedAt=Date.now();jobs[id]={upstreamId:result.requestId,providerId:p.id,baseUrl:p.baseUrl,model:p.model,owner:owner(caller),submittedAt,expiresAt:submittedAt+86400000};save();result={...result,requestId:id};
     const videoPrice=priceAt(p.prices?.[p.model],started);if(videoPrice?.billingUnit==='video'&&Number.isFinite(videoPrice.perVideo)&&(videoPrice.expiresAt==null||Date.parse(videoPrice.expiresAt)>started))cost={estimatedCost:videoPrice.perVideo,currency:videoPrice.currency,priceSource:videoPrice.source};
    }
    if(pathname==='/v1/embeddings'){usage=normalizeUsage({prompt_tokens:result.usage?.prompt_tokens,completion_tokens:0,total_tokens:result.usage?.total_tokens});tokens=usage.totalTokens;cost=usageCost(p,p.model,usage,started);}

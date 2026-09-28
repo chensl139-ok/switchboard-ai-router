@@ -82,9 +82,12 @@ export class Accounts {
    let user=this.state.users.find(u=>this.feishuIdentity(u,{appId,tenantId,legacy})?.openId===identity.openId);
    if(!user){
     if(identity.email&&this.state.users.some(u=>u.email===identity.email))throw fail('该邮箱已有账户，请先用密码登录，并在账户与租户中连接飞书',409);
-    if(!autoJoin||!allowedTenantKey)throw fail('飞书账户尚未连接；请先用邀请码注册，再在账户与租户中连接飞书',403);
-    if(!identity.email)throw fail('自动加入需要飞书企业邮箱权限；请先用邀请码注册并连接飞书',403);
-    user={id:randomUUID(),email:identity.email,name:identity.name,password:null,feishuIdentities:[{appId,tenantId,openId:identity.openId,unionId:identity.unionId||undefined}],createdAt:new Date(this.now()).toISOString()};this.state.users.push(user);
+    if(!autoJoin)throw fail('飞书账户尚未连接；请联系本企业管理员开通成员自动加入，或先用邀请码注册并连接飞书',403);
+    if(!appId||appId==='legacy'||!identity.tenantKey)throw fail('无法验证飞书企业身份，请联系管理员检查应用配置',403);
+    const id=randomUUID();
+    // A Feishu email is optional. Never merge an unlinked identity into an existing account by email.
+    const email=identity.email||`feishu-${id}@accounts.invalid`;
+    user={id,email,name:identity.name,password:null,feishuIdentities:[{appId,tenantId,openId:identity.openId,unionId:identity.unionId||undefined}],createdAt:new Date(this.now()).toISOString()};this.state.users.push(user);
     this.state.members.push({tenantId,userId:user.id,role:defaultRole});this.event(tenantId,user.id,'member.join.sso',appId+'/'+identity.openId);
    }
    const member=this.state.members.find(m=>m.userId===user.id&&m.tenantId===tenantId);if(!member&&!(user.id===this.platformOwnerId()&&tenantId==='default'&&appId===this.platformFeishuAppId))throw fail('飞书账户未加入对应的平台租户',403);

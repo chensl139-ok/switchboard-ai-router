@@ -1,3 +1,5 @@
+import {cacheHitMetrics, type CacheHitMetrics} from './cache-metrics.js';
+
 export interface ExperimentChoice {
  id: string;
  providerId: string;
@@ -12,12 +14,13 @@ export interface ExperimentResult {
  elapsedMs: number;
  model: string;
  usage: {input: number | null; output: number | null; total: number | null};
+ cacheHit: CacheHitMetrics | null;
 }
 
 interface GatewayResponse {
  model?: string;
  choices?: Array<{message?: {content?: string | Array<{type: string; text?: string}>; reasoning_content?: string; tool_calls?: unknown[]}}>;
- usage?: {prompt_tokens?: number; completion_tokens?: number; total_tokens?: number};
+ usage?: {prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: {cached_tokens?: number}; prompt_cache_hit_tokens?: number};
  error?: {message?: string};
 }
 
@@ -32,7 +35,7 @@ export function experimentResult(data: GatewayResponse, elapsedMs: number): Expe
  const message = data?.choices?.[0]?.message;
  if (!message || typeof message !== 'object') throw Error('模型返回格式无效');
  const content = typeof message.content === 'string' ? message.content : Array.isArray(message.content) ? message.content.filter(part => part.type === 'text').map(part => part.text || '').join('\n') : '';
- return {content, reasoning: typeof message.reasoning_content === 'string' ? message.reasoning_content : '', toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [], elapsedMs, model: data.model || '', usage: {input: data.usage?.prompt_tokens ?? null, output: data.usage?.completion_tokens ?? null, total: data.usage?.total_tokens ?? null}};
+ return {content, reasoning: typeof message.reasoning_content === 'string' ? message.reasoning_content : '', toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [], elapsedMs, model: data.model || '', usage: {input: data.usage?.prompt_tokens ?? null, output: data.usage?.completion_tokens ?? null, total: data.usage?.total_tokens ?? null}, cacheHit:cacheHitMetrics(data.usage)};
 }
 
 export async function runExperiment(choice: Pick<ExperimentChoice, 'providerId' | 'model'>, prompt: string, maxTokens: number, {token, tenantId, signal, fetcher = fetch}: {token?: string; tenantId?: string; signal?: AbortSignal; fetcher?: typeof fetch} = {}): Promise<ExperimentResult> {

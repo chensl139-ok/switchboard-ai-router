@@ -12,7 +12,8 @@ test('模型实验请求固定选择服务商与模型，拒绝无效参数',()=
 });
 
 test('模型实验结果保留文字、思考、工具及真实用量',()=>{
- assert.deepEqual(experimentResult({model:'claude-haiku-4-5',choices:[{message:{content:[{type:'text',text:'答复'}],reasoning_content:'推理',tool_calls:[{id:'call_1'}]}}],usage:{prompt_tokens:3,completion_tokens:4,total_tokens:7}},42),{content:'答复',reasoning:'推理',toolCalls:[{id:'call_1'}],elapsedMs:42,model:'claude-haiku-4-5',usage:{input:3,output:4,total:7}});
+ assert.deepEqual(experimentResult({model:'claude-haiku-4-5',choices:[{message:{content:[{type:'text',text:'答复'}],reasoning_content:'推理',tool_calls:[{id:'call_1'}]}}],usage:{prompt_tokens:3,completion_tokens:4,total_tokens:7}},42),{content:'答复',reasoning:'推理',toolCalls:[{id:'call_1'}],elapsedMs:42,model:'claude-haiku-4-5',usage:{input:3,output:4,total:7},cacheHit:null});
+ assert.deepEqual(experimentResult({choices:[{message:{content:'ok'}}],usage:{prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:75}}},1).cacheHit,{inputTokens:100,cachedTokens:75,rate:75});
  assert.throws(()=>experimentResult({choices:[]},1));
 });
 

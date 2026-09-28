@@ -1,6 +1,6 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {createPlatform} from '../platform.mjs';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,readFileSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {createPlatform} from '../platform.mjs';
 test('媒体接口：图片格式转换、音频二进制、上传、视频持久化隔离与共用额度',async()=>{
- const dir=mkdtempSync(path.join(tmpdir(),'router-media-'));const seen=[];let polls=0;
+ const dir=mkdtempSync(path.join(tmpdir(),'router-media-'));const seen=[];let polls=0,statusMissing=false;
  const options={dir,admin:'a'.repeat(32),gateway:'g'.repeat(32),fetcher:async(url,opts)=>{
   if(url.startsWith('https://example.com/')){assert.deepEqual(opts.headers,{});return new Response(new Uint8Array([137,80,78,71,13,10,26,10]),{headers:{'content-type':'application/octet-stream'}});}
   assert.equal(opts.headers.authorization,'Bearer upstream-test');assert.equal(opts.redirect,'error');
@@ -9,7 +9,7 @@ test('媒体接口：图片格式转换、音频二进制、上传、视频持�
   if(url.endsWith('/images/generations')){assert.equal(b.model,'image');assert.equal(b.image_size,'512x512');assert.equal(b.batch_size,2);assert.equal(b.n,undefined);return Response.json({images:[{url:'https://example.com/1.png'},{url:'https://example.com/2.png'}]});}
   if(url.endsWith('/audio/speech'))return new Response(new Uint8Array([73,68,51,0,128,255]),{headers:{'content-type':'audio/mpeg'}});
   if(url.endsWith('/video/submit'))return Response.json({requestId:'upstream-job-private'});
-  if(url.endsWith('/video/status')){polls++;assert.deepEqual(b,{requestId:'upstream-job-private'});return Response.json({status:'Succeed',results:{videos:[{url:'https://example.com/video.mp4'}]}});}
+  if(url.endsWith('/video/status')){polls++;assert.deepEqual(b,{requestId:'upstream-job-private'});if(polls===1||statusMissing)return new Response('404 page not found',{status:404});return Response.json({status:'Succeed',results:{videos:[{url:'https://example.com/video.mp4'}]}});}
   throw Error('Unexpected path');
  }};
  let app=createPlatform(options);await new Promise(r=>app.listen(0,'127.0.0.1',r));let base='http://127.0.0.1:'+app.address().port;
@@ -28,12 +28,16 @@ test('媒体接口：图片格式转换、音频二进制、上传、视频持�
   const upload=new FormData();upload.set('model','sf::asr');upload.set('file',new Blob([new Uint8Array([0,128,255])],{type:'audio/wav'}),'clip.wav');const transcription=await request('/v1/audio/transcriptions',upload,auth);assert.equal(transcription.status,200);assert.equal((await transcription.json()).text,'测试转录');
   const video=await request('/v1/video/submit',{model:'sf::video',prompt:'moving cloud',image_size:'1280x720'},auth);assert.equal(video.status,200);const task=(await video.json()).requestId;assert.match(task,/^video_/);assert.notEqual(task,'upstream-job-private');
   assert.equal((await request('/v1/video/status',{requestId:task},{authorization:'Bearer '+other})).status,404);assert.equal(polls,0);
-  assert.equal((await request('/v1/video/status',{requestId:task},auth)).status,200);
+  const pending=await request('/v1/video/status',{requestId:task},auth);assert.equal(pending.status,202);assert.deepEqual(await pending.json(),{status:'InQueue',pendingSync:true});
+  const ready=await request('/v1/video/status',{requestId:task},auth);assert.equal(ready.status,200);assert.equal((await ready.json()).status,'Succeed');
   assert.equal((await request('/v1/audio/speech',{model:'sf::tts',input:'quota'},auth)).status,429);
   const logs=(await (await request('/api/logs',null,session)).json()).items;assert.equal(logs.length,4);assert.equal(logs.find(l=>l.model==='image').estimated_cost,0.2);assert.equal(logs.find(l=>l.model==='tts').estimated_cost,null);
   const encoded=await request('/v1/images/generations',{model:'sf::image',prompt:'encoded image',size:'512x512',n:2,response_format:'b64_json'},{authorization:'Bearer '+other});assert.equal(encoded.status,200);assert.equal((await encoded.json()).data[0].b64_json,'iVBORw0KGgo=');
   await new Promise(r=>app.close(r));app=createPlatform(options);await new Promise(r=>app.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.address().port;
   assert.equal((await request('/v1/video/status',{requestId:task},auth)).status,200);
+  await new Promise(r=>app.close(r));const jobsPath=path.join(dir,'media-jobs.json'),jobs=JSON.parse(readFileSync(jobsPath,'utf8'));jobs[task].submittedAt=Date.now()-31*60*1000;writeFileSync(jobsPath,JSON.stringify(jobs));statusMissing=true;
+  app=createPlatform(options);await new Promise(r=>app.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.address().port;
+  const missing=await request('/v1/video/status',{requestId:task},auth);assert.equal(missing.status,404);const missingError=(await missing.json()).error.message;assert.match(missingError,/视频任务/);assert.match(missingError,/密钥/);assert.doesNotMatch(missingError,/模型能力和参数/);
   const tenant=await (await request('/api/account/tenants',{name:'Other'},session)).json();await request('/api/account/switch',{tenantId:tenant.id},session);assert.equal((await request('/v1/video/status',{requestId:task},session)).status,404);
   const saved=readFileSync(path.join(dir,'media-jobs.json'),'utf8');assert.ok(!saved.includes('upstream-test'));assert.ok(!saved.includes('moving cloud'));
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}

@@ -35,6 +35,7 @@ const providerForm=document.querySelector('#provider-form'),providerTitle=provid
 providerBody.className='provider-form-body';
 while(providerTitle.nextSibling!==providerActions)providerBody.append(providerTitle.nextSibling);
 providerActions.before(providerBody);
+providerBody.insertAdjacentHTML('afterbegin','<label id="provider-template-field">内置服务商模板<select id="provider-template"><option value="">自定义服务商</option></select><small class="field-help">删除后可在此重新添加；密钥与模型需重新配置。</small></label>');
 const defaultModelField=providerForm.elements.model.closest('label');
 const manualModelField=providerForm.elements.models.closest('label');
 const modelPicker=providerForm.querySelector('.model-picker');
@@ -159,7 +160,8 @@ function render(){
  renderPage(root);
 }
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void providerPoll?.refresh();});
-function edit(id){const p=state.providers.find(p=>p.id===id)||{id:'',name:'',baseUrl:'',model:'',protocol:'openai',weight:1,enabled:false};const f=$('#provider-form');f.reset();editingProviderId=id||'';for(const key of ['enabled','apiKey','meteredApiKey'])f.elements[key].disabled=false;resetModels();modelChannelAssignments={...(p.modelChannels||{})};for(const k of ['id','name','baseUrl','model','protocol'])f.elements[k].value=p[k];f.elements.anthropicAuth.value=p.anthropicAuth||'x-api-key';f.elements.models.value=(p.models||[]).join('\n');updateConfiguredModelCount();f.elements.id.readOnly=!!id;f.elements.enabled.checked=p.enabled;if(p.hasMeteredKey||Object.values(modelChannelAssignments).includes('metered')){const adv=f.querySelector('.key-advanced');if(adv)adv.open=true;}$('#edit-error').textContent='';$('#edit').showModal()}
+function edit(id){const p=state.providers.find(p=>p.id===id)||{id:'',name:'',baseUrl:'',model:'',protocol:'openai',weight:1,enabled:false};const f=$('#provider-form');f.reset();editingProviderId=id||'';const template=$('#provider-template');template.replaceChildren(new Option('自定义服务商',''),...(state.presets||[]).filter(preset=>!state.providers.some(item=>item.id===preset.id)).map(preset=>new Option(preset.name,preset.id)));$('#provider-template-field').hidden=!!id;$('#edit .modal-title h2').textContent=id?'配置服务商':'添加服务商';for(const key of ['enabled','apiKey','meteredApiKey'])f.elements[key].disabled=false;resetModels();modelChannelAssignments={...(p.modelChannels||{})};for(const k of ['id','name','baseUrl','model','protocol'])f.elements[k].value=p[k];f.elements.anthropicAuth.value=p.anthropicAuth||'x-api-key';f.elements.models.value=(p.models||[]).join('\n');updateConfiguredModelCount();f.elements.id.readOnly=!!id;f.elements.enabled.checked=p.enabled;if(p.hasMeteredKey||Object.values(modelChannelAssignments).includes('metered')){const adv=f.querySelector('.key-advanced');if(adv)adv.open=true;}$('#edit-error').textContent='';$('#edit').showModal()}
+$('#provider-template').addEventListener('change',event=>{const preset=(state.presets||[]).find(item=>item.id===event.target.value);if(!preset)return;const f=$('#provider-form');for(const key of ['id','name','baseUrl','protocol'])f.elements[key].value=preset[key];f.elements.model.value='';f.elements.models.value='';f.elements.anthropicAuth.value='x-api-key';f.elements.enabled.checked=false;modelChannelAssignments={};updateConfiguredModelCount();resetModels();formDirty=true;});
 let formDirty=false;
 $('#provider-form').addEventListener('input',()=>{formDirty=true;});
 $('#provider-form').elements.clearKey.addEventListener('change',e=>{const f=e.target.form,clearing=e.target.checked;f.elements.enabled.checked=clearing?false:f.elements.enabled.checked;f.elements.enabled.disabled=clearing;f.elements.apiKey.disabled=clearing;f.elements.meteredApiKey.disabled=clearing;resetModels();});
@@ -213,7 +215,7 @@ $('#fetch-models').onclick=async()=>{
 $('#close-edit').onclick=closeEdit;
 $('#cancel-edit').onclick=closeEdit;
 $('#edit').addEventListener('close',()=>{formDirty=false;resetModels();editingProviderId='';modelChannelAssignments={};});
-$('#provider-form').onsubmit=async e=>{e.preventDefault();const f=e.target,submit=f.querySelector('[type=submit]'),b=Object.fromEntries(new FormData(f));if(submit.disabled)return;submit.disabled=true;submit.textContent='保存中…';const clearAll=f.elements.clearKey.checked;b.enabled=clearAll?false:f.elements.enabled.checked;b.clearKey=clearAll;b.clearMeteredKey=clearAll;b.models=f.elements.models.value.split('\n').map(m=>m.trim()).filter(Boolean);b.modelChannels=Object.fromEntries(b.models.filter(model=>modelChannelAssignments[model]==='metered').map(model=>[model,'metered']));try{state=await api('/api/provider',b);formDirty=false;f.elements.apiKey.value='';f.elements.meteredApiKey.value='';$('#edit').close();render();toast(clearAll?'主、备密钥已清除，服务商已停用':'服务商配置已保存，协议与密钥路由已自动匹配')}catch(e){$('#edit-error').textContent=e.message}finally{submit.disabled=false;submit.textContent='保存配置'}};
+$('#provider-form').onsubmit=async e=>{e.preventDefault();const f=e.target,submit=f.querySelector('[type=submit]'),b=Object.fromEntries(new FormData(f));if(submit.disabled)return;submit.disabled=true;submit.textContent='保存中…';const clearAll=f.elements.clearKey.checked;b.enabled=clearAll?false:f.elements.enabled.checked;b.clearKey=clearAll;b.clearMeteredKey=clearAll;b.models=f.elements.models.value.split('\n').map(m=>m.trim()).filter(Boolean);b.modelChannels=Object.fromEntries(b.models.filter(model=>modelChannelAssignments[model]==='metered').map(model=>[model,'metered']));try{if(!editingProviderId&&state.providers.some(provider=>provider.id===b.id))throw Error('路由 ID 已存在，请直接编辑该服务商');state=await api('/api/provider',b);formDirty=false;f.elements.apiKey.value='';f.elements.meteredApiKey.value='';$('#edit').close();render();toast(clearAll?'主、备密钥已清除，服务商已停用':'服务商配置已保存，协议与密钥路由已自动匹配')}catch(e){$('#edit-error').textContent=e.message}finally{submit.disabled=false;submit.textContent='保存配置'}};
 document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;try{
  if(b.dataset.pagetab){navigate(b.dataset.pagetab);return;}
  if(b.dataset.tab){navigate(b.dataset.tab)}
@@ -229,10 +231,12 @@ document.addEventListener('change',async e=>{const id=e.target.dataset.providerM
 
 async function accountReady(value){
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
+ document.body.classList.remove('app-ready');
+ $('#content').innerHTML='<div class="view-loading" role="status"><span class="loading-dot"></span>正在切换工作空间…</div>';
  if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();resetMediaLab();tab='overview';}
  renderTenantChip(profile);
  document.querySelector('#current-account').textContent=profile.user.name+' · '+(profile.platformAccess?'平台主账号':({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]||profile.role));
- state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing','audit','subscription'].includes(tab))tab='overview';render();
+ state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing','audit','subscription'].includes(tab))tab='overview';render();document.body.classList.add('app-ready');
 }
 try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=error.message;}
 
