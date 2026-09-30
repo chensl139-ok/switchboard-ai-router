@@ -49,7 +49,10 @@ export class ApiKeyStore {
  }
  status(key){if(key.deletedAt)return 'deleted';if(!key.enabled)return 'disabled';const now=this.now();if(key.startsAt&&now<Date.parse(key.startsAt))return 'scheduled';if(key.expiresAt&&now>=Date.parse(key.expiresAt))return 'expired';return 'active';}
  publicKey(key){const {digest,...item}=key;return {...item,status:this.status(key),dailyUsed:key.day===new Date(this.now()).toISOString().slice(0,10)?key.dailyUsed:0};}
- list(){return {legacyAvailable:!this.tenantId||this.tenantId==='default',legacyEnabled:this.state.legacyEnabled,keys:this.state.keys.filter(k=>!k.deletedAt).map(k=>this.publicKey(k))};}
+ visible(key,scope){return !key.deletedAt&&(scope===undefined||key.createdBy===scope.userId);}
+ find(id,scope){const key=this.state.keys.find(k=>k.id===id&&this.visible(k,scope));if(!key)throw error('Key 不存在',404);return key;}
+ list(scope){return {legacyAvailable:(!this.tenantId||this.tenantId==='default')&&(scope===undefined||scope.manageLegacy),...(scope===undefined||scope.manageLegacy?{legacyEnabled:this.state.legacyEnabled}:{}),keys:this.state.keys.filter(k=>this.visible(k,scope)).map(k=>this.publicKey(k))};}
+ claimUnassigned(userId){if(!userId||!this.state.keys.some(key=>!key.createdBy))return;this.mutate(()=>{for(const key of this.state.keys)if(!key.createdBy)key.createdBy=userId;});}
  create(input,createdBy=null){const policy=this.validate(input);if(this.state.keys.filter(k=>!k.deletedAt).length>=200)throw error('最多创建 200 个 Key');
   if(createdBy!==null&&(typeof createdBy!=='string'||createdBy.length>128))throw error('Key 归属成员无效');
   const id=randomBytes(10).toString('hex'),token=`srk_${this.tenantId?this.tenantId+'_':''}${id}_${randomBytes(32).toString('hex')}`;
@@ -57,10 +60,10 @@ export class ApiKeyStore {
    requests:0,successes:0,failures:0,knownTokens:0,day:'',dailyUsed:0,minute:0,minuteUsed:0,lastUsedAt:null};
   this.mutate(()=>this.state.keys.unshift(key));return {key:this.publicKey(key),token};
  }
- update(id,input){const policy=this.validate(input);return this.mutate(()=>{const key=this.state.keys.find(k=>k.id===id);if(!key||key.deletedAt)throw error('Key 不存在',404);Object.assign(key,policy);return this.publicKey(key);});}
- toggle(id,enabled){if(typeof enabled!=='boolean')throw error('启用状态无效');return this.mutate(()=>{const key=this.state.keys.find(k=>k.id===id);if(!key||key.deletedAt)throw error('Key 不存在',404);key.enabled=enabled;return this.publicKey(key);});}
+ update(id,input,scope){const key=this.find(id,scope),policy=this.validate(input);return this.mutate(()=>{Object.assign(key,policy);return this.publicKey(key);});}
+ toggle(id,enabled,scope){const key=this.find(id,scope);if(typeof enabled!=='boolean')throw error('启用状态无效');return this.mutate(()=>{key.enabled=enabled;return this.publicKey(key);});}
  legacy(enabled){if(typeof enabled!=='boolean')throw error('启用状态无效');this.mutate(()=>{this.state.legacyEnabled=enabled;});return this.list();}
- delete(id){return this.mutate(()=>{const key=this.state.keys.find(k=>k.id===id&&!k.deletedAt);if(!key)throw error('Key 不存在',404);key.enabled=false;key.deletedAt=new Date(this.now()).toISOString();return {deleted:true,id};});}
+ delete(id,scope){const key=this.find(id,scope);return this.mutate(()=>{key.enabled=false;key.deletedAt=new Date(this.now()).toISOString();return {deleted:true,id};});}
  authenticate(token){
   if(typeof token!=='string'||token.length>300)throw error('API Key 无效',401);
   const digest=Buffer.from(hash(token),'hex');

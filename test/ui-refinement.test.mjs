@@ -1,8 +1,26 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {renderDashboard} from '../public/dashboard.js';
 
 const read=name=>readFileSync(new URL('../'+name,import.meta.url),'utf8');
+
+test('普通成员控制台展示调用链，但不提供管理路由或修改策略操作',()=>{
+ const html=renderDashboard({state:{providers:[],logs:[],strategy:'fallback'},esc:value=>String(value),ready:()=>false,isManager:false});
+ assert.match(html,/id="dashboard-route-chain"/);
+ assert.match(html,/<button data-tab="routing" hidden>调整策略<\/button>/);
+ assert.doesNotMatch(html,/管理路由/);
+});
+
+test('成员可见个人 Key 入口，只读角色不可见；迟到密钥响应按账号租户隔离',()=>{
+ const app=read('public/app.js'),keys=read('public/api-keys.js');
+ assert.match(app,/managerViews=new Set\(\['members','prices','routing','audit','subscription'\]\)/);
+ assert.match(app,/profile\?\.role==='viewer'&&\(view==='keys'\|\|groups\.playground\.includes\(view\)\)/);
+ assert.match(app,/isCurrent:\(\)=>tab==='keys'&&profile\?\.user\?\.id===keyUser&&profile\?\.tenantId===keyTenant/);
+ assert.match(keys,/if\(!isCurrent\(\)\)return/);
+ assert.match(keys,/catch\(error\)\{if\(isCurrent\(\)\)container\.textContent=error\.message/);
+ assert.match(keys,/我的应用密钥/);
+});
 
 test('导航首屏不闪出旧标签，流式消息局部更新且对比页按需加载',()=>{
  const app=read('public/app.js'),css=read('public/interface.css'),lab=read('public/playground.js'),server=read('server.mjs');

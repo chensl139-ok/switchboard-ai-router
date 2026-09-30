@@ -84,7 +84,19 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   assert.equal((await request('/api/account/register',{name:'Again',email:'member@example.com',password,inviteCode:invite.code})).status,400);
   assert.equal((await request('/api/provider',provider,{cookie:memberRestored})).status,403);
   assert.equal((await request('/api/account/audit?category=provider',null,{cookie:memberRestored})).status,403);
-  assert.equal((await request('/api/keys',null,{cookie:memberRestored})).status,403);
+  const memberKeys=await request('/api/keys',null,{cookie:memberRestored});assert.equal(memberKeys.status,200);assert.deepEqual(memberKeys.body.keys,[]);
+  const auditBeforeMemberPreview=(await request('/api/account/audit',null,{cookie:owner})).body.total,callsBeforeMemberPreview=calls;
+  const preview=await request('/api/routing/preview',{model:'auto'},{cookie:memberRestored});
+  assert.equal(preview.status,200);assert.equal(preview.body.candidates[0].providerId,'alpha');assert.equal(preview.body.candidates[0].model,'model');
+  assert.equal(preview.body.candidates[0].order,1);assert.ok('health' in preview.body.candidates[0]);
+  assert.ok(!JSON.stringify(preview.body).includes('tenant-a-secret'));assert.ok(!JSON.stringify(preview.body).includes(keyA.token));
+  assert.ok(!JSON.stringify(preview.body).includes('routeSecret'));
+  assert.equal(calls,callsBeforeMemberPreview,'成员查看调用链不能发起上游请求');
+  assert.equal((await request('/api/account/audit',null,{cookie:owner})).body.total,auditBeforeMemberPreview,'只读预览不应新增操作审计');
+  assert.equal((await request('/api/routing/preview',{model:'auto'},{cookie:memberRestored,headers:{'x-tenant-id':tenantB.id}})).status,409);
+  assert.equal((await request('/api/routing/preview',{model:'auto'},{token:keyA.token})).status,401);
+  assert.equal((await request('/api/routing',{strategy:'manual',active:'alpha',rules:[]},{cookie:memberRestored})).status,403);
+  assert.equal((await request('/api/provider/active',{id:'alpha'},{cookie:memberRestored})).status,403);
   assert.equal((await request('/api/account/switch',{tenantId:tenantB.id},{cookie:memberRestored})).status,403);
   assert.equal((await request('/api/account/invite',{email:'evil@example.com',role:'owner'},{cookie:memberRestored})).status,403);
   assert.equal((await request('/api/chat',input,{cookie:memberRestored})).status,200);
@@ -93,6 +105,7 @@ test('账户、租户隔离、RBAC、API Key 删除和用量归属',async()=>{
   assert.equal(auditUsage.keys.find(row=>row.apiKeyId===keyA.key.id).name,'Owner');
   const ws=new WebSocket(base.replace('http:','ws:')+'/v1/realtime',{headers:{cookie:memberRestored}});await once(ws,'open');const ready=once(ws,'message');ws.send(JSON.stringify({type:'auth',token:''}));assert.equal(JSON.parse((await ready)[0]).type,'ready');
   await request('/api/account/member-role',{userId:register.body.user.id,role:'viewer'},{cookie:owner});
+  assert.equal((await request('/api/routing/preview',{model:'auto'},{cookie:memberRestored})).status,403);
   const denied=once(ws,'message');ws.send(JSON.stringify({type:'chat',id:'viewer',input}));assert.equal(JSON.parse((await denied)[0]).type,'error');ws.close();await once(ws,'close');
   assert.equal((await request('/api/chat',input,{cookie:memberRestored})).status,403);
   assert.equal((await request('/api/account/member-remove',{userId:setup.body.user.id},{cookie:owner})).status,403);

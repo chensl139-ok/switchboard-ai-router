@@ -17,7 +17,7 @@ let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTime
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
 const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
-const managerViews=new Set(['keys','members','prices','routing','audit','subscription']);
+const managerViews=new Set(['members','prices','routing','audit','subscription']);
 document.querySelector('.sidebar [data-tab="account"]')?.insertAdjacentHTML('beforebegin','<button type="button" class="nav-item" data-tab="subscription" title="组织订阅" aria-label="组织订阅"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span class="nav-name">组织订阅</span><span class="nav-indicator" aria-hidden="true"></span></button>');
 document.querySelector('#provider-form [name="protocol"]').closest('label').insertAdjacentHTML('afterend','<label>Anthropic 鉴权方式<select name="anthropicAuth"><option value="x-api-key">x-api-key（官方默认）</option><option value="bearer">Authorization: Bearer（部分网关）</option></select></label>');
 document.querySelector('[data-tab="providers"] .nav-name').textContent='服务商与模型';
@@ -73,7 +73,7 @@ const ready=providerReady;
 const heading=(title,desc,action='')=>`<div class="heading"><div><div class="eyebrow">YOUR MODELS. ONE GATEWAY.</div><h1>${title}</h1><p>${desc}</p></div>${action}</div>`;
 function cards(manage=false){return providerCards({state,esc,isManager:isManager(),manage})}
 const pageTabs=options=>`<div class="page-tabs" role="tablist">${options.map(([id,label])=>`<button type="button" role="tab" data-pagetab="${id}" aria-selected="${tab===id}" class="${tab===id?'selected':''}">${label}</button>`).join('')}</div>`;
-const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view))&&!(profile?.role==='viewer'&&groups.playground.includes(view));
+const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view))&&!(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
 
 function syncNavigation(){
  const parent=Object.keys(groups).find(key=>key!==tab&&groups[key].includes(tab));
@@ -81,7 +81,7 @@ function syncNavigation(){
  $('#breadcrumb').textContent=names[tab];
  for(const button of document.querySelectorAll('nav button[data-tab]')){
   const view=button.dataset.tab;
-  button.hidden=(!isManager()&&['keys','members','routing','subscription'].includes(view))||(profile?.role==='viewer'&&groups.playground.includes(view));
+  button.hidden=(!isManager()&&['members','routing','subscription'].includes(view))||(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
   const active=(groups[view]||[view]).includes(tab);
   button.classList.toggle('selected',active);
   if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
@@ -141,7 +141,7 @@ function renderPage(root){
   case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'logs':void renderLogs({api,esc,state});break;
   case 'routing':renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});break;
-  case 'keys':void renderApiKeys({api,esc,toast});break;
+  case 'keys':{const keyUser=profile.user.id,keyTenant=profile.tenantId;void renderApiKeys({api,esc,toast,isCurrent:()=>tab==='keys'&&profile?.user?.id===keyUser&&profile?.tenantId===keyTenant});break;}
   case 'subscription':void renderSubscriptions({profile,esc,toast});break;
  }
 }
@@ -236,7 +236,7 @@ async function accountReady(value){
  if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();resetMediaLab();tab='overview';}
  renderTenantChip(profile);
  document.querySelector('#current-account').textContent=profile.user.name+' · '+(profile.platformAccess?'平台主账号':({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]||profile.role));
- state=await api('/api/state');if(!isManager()&&['keys','members','prices','routing','audit','subscription'].includes(tab))tab='overview';render();document.body.classList.add('app-ready');
+ state=await api('/api/state');if(!isManager()&&['members','prices','routing','audit','subscription'].includes(tab)||profile?.role==='viewer'&&tab==='keys')tab='overview';render();document.body.classList.add('app-ready');
 }
 try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=error.message;}
 

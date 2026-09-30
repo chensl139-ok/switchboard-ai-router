@@ -38,6 +38,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  function engine(id){
   if(!accounts.state.tenants.some(t=>t.id===id))throw fail('租户不存在',404);
   if(!engines.has(id))engines.set(id,createApp({dir:id==='default'?dir:path.join(dir,'tenants',id),admin:derive('admin',id),gateway:id==='default'?gateway:derive('gateway',id),fetcher,tenantId:id,managed:true}));
+  if(id==='default')engines.get(id).claimUnassignedKeys(accounts.platformOwnerId());
   return engines.get(id);
  }
  function sessionToken(req){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('sr_session='))?.slice('sr_session='.length)||'';}
@@ -47,6 +48,11 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
   const hinted=token.startsWith('srk_')?token.split('_')[1]:'';
   const id=accounts.state.tenants.some(t=>t.id===hinted)?hinted:'default';
   const caller=engine(id).resolveToken(token);if(caller.admin)throw fail('管理员令牌不能用于外部调用',401);
+  if(caller.apiKeyId&&caller.userId){
+   const membership=accounts.state.members.find(member=>member.userId===caller.userId&&member.tenantId===id);
+   const role=membership?.role||(caller.userId===accounts.platformOwnerId()?'owner':null);
+   if(!['owner','admin','member'].includes(role))throw fail('API Key 所属成员已离开租户或不再具备模型调用权限',403);
+  }
   return {...caller,tenantId:id};
  }
  function originAllowed(origin,host){return !origin||origin===`http://${host}`||origin===`https://${host}`;}

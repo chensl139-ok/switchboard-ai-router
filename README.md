@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[v2.1.2 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.2) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+[v2.1.3 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.3) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 能做什么
 
@@ -22,7 +22,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.1.2。GHCR 提供 `2.1.2`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
+当前发布版本为 v2.1.3。GHCR 提供 `2.1.3`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
 
 ## 五分钟部署
 
@@ -46,14 +46,14 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 ```sh
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.2
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.3
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.2
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.3
 ```
 
 上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
@@ -65,7 +65,7 @@ docker run -d --name switchboard-ai-router \
 1. 在「服务商与模型」添加上游 Base URL 和 API Key；获取模型列表，勾选需要开放的模型并保存。支持自定义兼容服务商，同一服务商可添加备用密钥。
 2. 在「路由策略」选择默认服务商、候选顺序、策略和最多尝试次数。路由预览只计算候选，不向上游发送请求。
 3. 在「模型实验室」调用模型，确认实际命中、协议、输出和错误信息。媒体任务应选择对应的图片、音频、视频或视觉理解入口。
-4. 在「API Key 管理」为应用创建 Key、设置有效期和配额。明文仅在创建时显示一次。
+4. 所有者、管理员和普通成员均可在「API Key 管理」为自己的应用创建 Key、设置有效期和配额；只展示和管理本人创建的 Key。明文仅在创建时显示一次，成员移除或降为只读后，其个人 Key 不再允许新调用。
 
 最小 API 调用示例；将 `YOUR_API_KEY` 换成平台签发的**业务 Key**，不要使用服务商密钥：
 

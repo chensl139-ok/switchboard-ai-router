@@ -80,6 +80,8 @@ test('模型发现：完整分页、搜索数据、临时密钥、权限与安�
   calls.push({url,opts});const u=new URL(url);
   if(u.hostname==='unsupported.example')return new Response('secret-error',{status:404});
   if(u.hostname==='unauthorized.example')return new Response('secret-error',{status:401});
+  if(u.hostname==='api.mosi.cn'&&opts.headers.authorization!=='Bearer valid-mosi-key')return Response.json({error:{code:'102111001',type:'permission_error',message:'iam api key auth failed temporary-key'}},{status:403});
+  if(u.hostname==='api.mosi.cn')return Response.json({object:'list',data:[{id:'mosi-model'}]});
   if(u.hostname==='invalid.example')return Response.json({wrong:[]});
   if(u.hostname==='loop.example')return Response.json({data:[{id:'loop'}],has_more:true,last_id:'loop'});
   if(u.hostname==='empty.example')return Response.json({data:[]});
@@ -101,6 +103,8 @@ test('模型发现：完整分页、搜索数据、临时密钥、权限与安�
   assert.equal((await request({id:'draft',clearKey:true})).status,400);
   assert.equal((await request({...draft,baseUrl:'https://unsupported.example/v1'})).status,502);
   out=await request({...draft,baseUrl:'https://unauthorized.example/v1'});assert.equal(out.status,502);assert.ok(!JSON.stringify(out.data).includes('secret-error'));
+  out=await request({...draft,baseUrl:'https://api.mosi.cn/v1'});assert.equal(out.status,502);assert.match(out.data.error.message,/HTTP 403/);assert.match(out.data.error.message,/API Key 认证失败/);assert.ok(!JSON.stringify(out.data).includes('temporary-key'));
+  out=await request({...draft,baseUrl:'https://api.mosi.cn/v1',apiKey:'valid-mosi-key'});assert.equal(out.status,200);assert.deepEqual(out.data.data.map(model=>model.id),['mosi-model']);assert.equal(calls.at(-1).url,'https://api.mosi.cn/v1/models');assert.equal(calls.at(-1).opts.headers.authorization,'Bearer valid-mosi-key');
   assert.equal((await request({...draft,baseUrl:'https://invalid.example/v1'})).status,502);
   assert.equal((await request({...draft,baseUrl:'https://loop.example/v1'})).status,502);
   assert.deepEqual((await request({...draft,baseUrl:'https://empty.example/v1'})).data.data,[]);

@@ -111,7 +111,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    try{
     const response=await fetcher(u.toString(),{method:'GET',headers,redirect:'error',signal});
     if(!response.ok){
-     const detail=[404,405,501].includes(response.status)?'服务商不支持模型列表接口，可手动填写模型 ID':response.status===401||response.status===403?'密钥无效或没有获取模型的权限':`服务商返回 HTTP ${response.status}`;
+     const detail=[404,405,501].includes(response.status)?`服务商模型列表接口返回 HTTP ${response.status}：不支持此接口，可手动填写模型 ID`:response.status===401||response.status===403?`服务商模型列表接口返回 HTTP ${response.status}：API Key 认证失败或无模型列表权限。请在当前服务商后台确认密钥有效、权限已开通且匹配此 API 地址；不要使用其他平台或 Switchboard 的调用 Key`:`服务商返回 HTTP ${response.status}`;
+     await response.body?.cancel().catch(()=>{});
      throw fail(detail,502);
     }
     data=await response.json();
@@ -235,20 +236,24 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     const caller=req.principal||identity(token);
     const canManage=caller.admin||['owner','admin'].includes(caller.role);
     const canChat=canManage||caller.role==='member'||caller.apiKeyId||caller.legacy;
+    const keyScope=req.principal?{userId:caller.userId,manageLegacy:Boolean(canManage)}:undefined;
+    const canManageOwnKeys=Boolean(req.principal?.userId)&&['owner','admin','member'].includes(caller.role);
     if(url.pathname.startsWith('/api/')&&!canManage){
      const allowedRead=req.method==='GET'&&['/api/state','/api/analytics','/api/logs'].includes(url.pathname)&&caller.role;
-     if(!allowedRead&&!(url.pathname==='/api/chat'&&canChat))throw fail('当前角色无权执行此操作',403);
+     const routePreviewAction=req.method==='POST'&&url.pathname==='/api/routing/preview'&&caller.role==='member';
+     const ownKeyAction=canManageOwnKeys&&(req.method==='GET'&&url.pathname==='/api/keys'||req.method==='POST'&&['/api/keys','/api/keys/update','/api/keys/toggle','/api/keys/delete'].includes(url.pathname));
+     if(!allowedRead&&!routePreviewAction&&!ownKeyAction&&!(url.pathname==='/api/chat'&&canChat))throw fail('当前角色无权执行此操作',403);
     }
     if((generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')&&!canChat)throw fail('只读角色不可调用模型',403);
     if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`&&req.headers.origin!==`https://${req.headers.host}`)throw fail('跨域请求被拒绝',403);
     if(req.method==='GET'&&url.pathname==='/api/analytics')return json(res,200,usageStore.summary(url.searchParams.get('days')));
     if(req.method==='GET'&&url.pathname==='/api/logs')return json(res,200,usageStore.logs(Object.fromEntries(url.searchParams)));
-    if(req.method==='POST'&&url.pathname==='/api/keys/delete'){const b=await body(req);return json(res,200,apiKeys.delete(b.id));}
-    if(req.method==='GET'&&url.pathname==='/api/keys')return json(res,200,apiKeys.list());
+    if(req.method==='POST'&&url.pathname==='/api/keys/delete'){const b=await body(req);return json(res,200,apiKeys.delete(b.id,keyScope));}
+    if(req.method==='GET'&&url.pathname==='/api/keys')return json(res,200,apiKeys.list(keyScope));
     if(req.method==='POST'&&url.pathname==='/api/keys')return json(res,201,apiKeys.create(await body(req),req.principal?.userId||null));
-    if(req.method==='POST'&&url.pathname==='/api/keys/update'){const b=await body(req);return json(res,200,apiKeys.update(b.id,b));}
-    if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled));}
-    if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);return json(res,200,apiKeys.legacy(b.enabled));}
+    if(req.method==='POST'&&url.pathname==='/api/keys/update'){const b=await body(req);return json(res,200,apiKeys.update(b.id,b,keyScope));}
+    if(req.method==='POST'&&url.pathname==='/api/keys/toggle'){const b=await body(req);return json(res,200,apiKeys.toggle(b.id,b.enabled,keyScope));}
+    if(req.method==='POST'&&url.pathname==='/api/keys/legacy'){const b=await body(req);apiKeys.legacy(b.enabled);return json(res,200,apiKeys.list(keyScope));}
     if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,safe());
     if(req.method==='POST'&&url.pathname==='/api/routing/preview'){
      const input=await body(req),prompt=input?.prompt??'';
@@ -385,6 +390,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
  server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();apiKeys.close();};server.on('close',server.closeStore);
+ server.claimUnassignedKeys=userId=>apiKeys.claimUnassigned(userId);
  return server;
 }
 // gzip 静态 HTML/JS/CSS；带 ETag + 静态资源 immutable 缓存，命中时 304
