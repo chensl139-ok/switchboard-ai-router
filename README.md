@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/chensl139-ok/switchboard-ai-router)](https://github.com/chensl139-ok/switchboard-ai-router/releases/latest)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-[v2.1.1 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.1) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+[v2.1.2 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.2) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 能做什么
 
@@ -22,7 +22,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.1.1。GHCR 提供 `2.1.1`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
+当前发布版本为 v2.1.2。GHCR 提供 `2.1.2`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。历史镜像标签可能仍可拉取，但不要用于新部署。GitHub 仍保留 [v1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.0)、[v1.1.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v1.1.0) 和 [v2.0.0](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.0.0) 的 tag 与 Release。
 
 ## 五分钟部署
 
@@ -46,14 +46,14 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 ```sh
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.1
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.2
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.1
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.2
 ```
 
 上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
@@ -120,7 +120,9 @@ curl -i http://127.0.0.1:3100/v1/chat/completions \
 
 「请求日志」记录请求与上游尝试的元数据，不保存提示词或回复正文；「用量分析」展示成员、模型和 Key 用量及估算费用；「组织审计 → 租户操作」记录配置和成员操作，每个租户最多保留最近 2000 条。默认查看最近 7 天的管理变更、每页 10 条；例行成功飞书登录不再产生操作记录，既有的登录和旧版只读发现记录默认隐藏，勾选后仍可查。账户页不再重复铺开同一份审计。**仅平台主账号**可在租户操作页输入指定确认文字后清空**所有租户**的操作审计；此操作不可从平台恢复，不影响请求日志、用量、API Key、账号或实验室历史。租户所有者可以重置统计起点，或清除本租户请求日志与用量，操作本身会留下审计记录。
 
-「模型实验室 → 历史记录」按当前账号和租户保存最近 100 条对话摘要与媒体任务结果，支持搜索、状态筛选、按需查看详情与单条删除。列表不加载完整结果，视频历史仅在点击「刷新远程任务状态」后查询上游。历史存储在 `data/lab-history.sqlite`；首次升级会从旧 `data/lab-history.json` 自动迁移，旧文件保留作备份。切换工作区页面不会取消已发出的实验请求；视频任务保存任务 ID，可返回历史记录继续查询远端状态。浏览器刷新时尚未拿到任务 ID 的请求无法恢复；语音二进制只在当前页面保留，历史中保存任务元数据而不保存音频文件。实验历史不属于请求日志，删除历史不会删除调用日志或用量统计。
+「模型实验室 → 历史记录」按当前账号和租户保存最近 100 条对话与媒体任务记录，支持服务端搜索（标题、模型、任务 ID）、状态筛选、排序和每页 20 条的分页。详情支持 Markdown、代码复制、性能指标、媒体预览、复制全文、JSON 导出与单条删除。列表不加载完整结果；展开历史面板后才读取和定时刷新，搜索使用防抖并取消过期请求。新对话记录按总容量保存文本，单条上限 256 KiB，超过时优先保留最近消息并明确提示截断；旧版未保存的内容无法补回。实验室不展示缓存命中指标，后台仍保留上游缓存用量用于费用统计。
+
+视频历史仅在点击「刷新远程任务状态」后查询上游；结果链接失效时预览也可能不可用。历史存储在 `data/lab-history.sqlite`；首次升级会从旧 `data/lab-history.json` 自动迁移，旧文件保留作备份。切换工作区页面不会取消已发出的实验请求；视频任务保存任务 ID，可返回历史记录继续查询远端状态。浏览器刷新时尚未拿到任务 ID 的请求无法恢复；图片输入和语音二进制不保存在历史中。实验历史不属于请求日志，删除历史不会删除调用日志或用量统计。
 
 经济优先使用已配置且有效的同币种价格做**预估**，不是结算系统。可以把 OpenRouter 模型报价导入其他服务商作为参考；手动价格和服务商自身报价优先，不会被参考价覆盖。导入时间是采集时间，平台建议复核期限不代表上游报价有效期。实际采购价、缓存命中、时段和多模态收费应以服务商账单为准。
 

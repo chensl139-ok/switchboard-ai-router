@@ -7,6 +7,7 @@ const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const bounded=(value,max)=>String(value??'').slice(0,max);
 const detailColumns='id,area,kind,model,title,status,request_id AS requestId,result,error,created_at AS createdAt,updated_at AS updatedAt';
 const listColumns='id,area,kind,model,title,status,request_id AS requestId,error,created_at AS createdAt,updated_at AS updatedAt';
+export const MAX_HISTORY_RESULT_BYTES=256*1024;
 
 export class LabHistory {
  constructor(dir,{now=()=>Date.now()}={}){
@@ -34,6 +35,22 @@ export class LabHistory {
   if(area!==undefined&&!['chat','media'].includes(area))throw fail('实验区域无效');
   return area?this.db.prepare(`SELECT ${listColumns} FROM history WHERE tenant_id=? AND user_id=? AND area=? ORDER BY updated_at DESC,id DESC LIMIT 100`).all(caller.tenantId,caller.userId,area):this.db.prepare(`SELECT ${listColumns} FROM history WHERE tenant_id=? AND user_id=? ORDER BY updated_at DESC,id DESC LIMIT 100`).all(caller.tenantId,caller.userId);
  }
+ page(caller,{area,status,q='',page=1,limit=20,order='recent'}={}){
+  if(area!==undefined&&!['chat','media'].includes(area))throw fail('实验区域无效');
+  if(status&&!['running','submitted','completed','failed','stopped'].includes(status))throw fail('实验状态无效');
+  if(!['recent','oldest'].includes(order))throw fail('排序方式无效');
+  page=Number(page);limit=Number(limit);
+  if(!Number.isInteger(page)||page<1||!Number.isInteger(limit)||limit<1||limit>100)throw fail('分页参数无效');
+  const clauses=['tenant_id=?','user_id=?'],values=[caller.tenantId,caller.userId];
+  if(area){clauses.push('area=?');values.push(area);}if(status){clauses.push('status=?');values.push(status);}
+  const term=String(q).trim().slice(0,200);
+  if(term){clauses.push("(title LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\' OR kind LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\')");const pattern='%'+term.replace(/[\\%_]/g,'\\$&')+'%';values.push(pattern,pattern,pattern,pattern);}
+  const where=clauses.join(' AND '),total=this.db.prepare(`SELECT count(*) AS total FROM history WHERE ${where}`).get(...values).total;
+  const pages=Math.max(1,Math.ceil(total/limit));page=Math.min(page,pages);
+  const direction=order==='recent'?'DESC':'ASC';
+  const items=this.db.prepare(`SELECT ${listColumns} FROM history WHERE ${where} ORDER BY updated_at ${direction},id ${direction} LIMIT ? OFFSET ?`).all(...values,limit,(page-1)*limit);
+  return {items,total,page,limit,pages};
+ }
  get(caller,id){
   if(typeof id!=='string'||!/^[0-9a-f-]{36}$/.test(id))throw fail('实验记录 ID 无效');
   const row=this.db.prepare(`SELECT ${detailColumns} FROM history WHERE id=? AND tenant_id=? AND user_id=?`).get(id,caller.tenantId,caller.userId);
@@ -42,7 +59,7 @@ export class LabHistory {
  put(caller,input){
   if(!input||!['chat','media'].includes(input.area)||!['running','submitted','completed','failed','stopped'].includes(input.status))throw fail('实验记录类型或状态无效');
   if(input.id!==undefined&&(typeof input.id!=='string'||!/^[0-9a-f-]{36}$/.test(input.id)))throw fail('实验记录 ID 无效');
-  const result=String(input.result??'');if(Buffer.byteLength(result)>50000)throw fail('实验记录结果过大');
+  const result=String(input.result??'');if(Buffer.byteLength(result)>MAX_HISTORY_RESULT_BYTES)throw fail('实验记录结果过大');
   const existing=input.id?this.get(caller,input.id):null,now=new Date(this.now()).toISOString();
   const row={id:existing?.id||randomUUID(),area:input.area,kind:bounded(input.kind,30),model:bounded(input.model,200),title:bounded(input.title,180),status:input.status,requestId:bounded(input.requestId,256),result,error:bounded(input.error,1000),createdAt:existing?.createdAt||now,updatedAt:now};
   this.db.exec('BEGIN IMMEDIATE');

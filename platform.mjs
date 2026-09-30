@@ -56,7 +56,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  function oauthCookie(req,res,state){const secure=process.env.COOKIE_SECURE==='true'||req.socket.encrypted||req.headers['x-forwarded-proto']==='https';setCookie(res,`sr_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/api/account/sso/feishu/callback; Max-Age=${state?600:0}${secure?'; Secure':''}`);}
  function namedCookie(req,name){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1)||'';}
  function json(res,status,data){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data));}
- async function body(req){let text='';for await(const part of req){text+=part;if(Buffer.byteLength(text)>65536)throw fail('请求过大',413);}try{const data=JSON.parse(text);if(!data||typeof data!=='object'||Array.isArray(data))throw Error();return data;}catch{throw fail('JSON 格式无效');}}
+ async function body(req,maxBytes=65536){const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>maxBytes)throw fail('请求过大',413);chunks.push(part);}try{const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!data||typeof data!=='object'||Array.isArray(data))throw Error();return data;}catch{throw fail('JSON 格式无效');}}
  function rate(req){const key=req.socket.remoteAddress||'unknown';const now=Date.now();for(const [id,item] of limits)if(now-item.start>60000)limits.delete(id);if(limits.size>2000)throw fail('请求过多',429);const item=limits.get(key)||{start:now,count:0};item.count++;limits.set(key,item);if(item.count>20)throw fail('登录/注册尝试过多，请一分钟后重试',429);}
  const server=http.createServer(async(req,res)=>{
   const externalId=String(req.headers['x-request-id']||''),requestId=/^[A-Za-z0-9._:-]{1,128}$/.test(externalId)?externalId:randomUUID();
@@ -88,7 +88,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      rate(req);const config=oauthForTenant(current.tenantId);if(!config)throw fail('当前租户未配置飞书登录',404);const start=oauths.get(config.key).start({purpose:'link',userId:current.userId,tenantId:current.tenantId,sessionHash:current.sessionHash});oauthCookie(req,res,start.state);return json(res,200,{url:start.url});
     }
     if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
-    if(req.method==='GET'&&route==='lab-history')return json(res,200,{items:labHistory.list(current,{area:url.searchParams.get('area')||undefined})});
+    if(req.method==='GET'&&route==='lab-history')return json(res,200,labHistory.page(current,{area:url.searchParams.get('area')||undefined,status:url.searchParams.get('status')||undefined,q:url.searchParams.get('q')||'',page:url.searchParams.get('page')||1,limit:url.searchParams.get('limit')||20,order:url.searchParams.get('order')||'recent'}));
     if(req.method==='GET'&&route==='lab-history/item')return json(res,200,labHistory.get(current,url.searchParams.get('id')));
     if(req.method==='GET'&&route==='sso/feishu/bindings'){accounts.requirePlatformOwner(current);return json(res,200,{bindings:bindings.metadata()});}
     if(req.method==='GET'&&route==='members')return json(res,200,accounts.members(current));
@@ -102,7 +102,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      return json(res,200,{...report,members:report.members.map(row=>{const user=users.get(row.actorId),membership=tenantMembers.find(member=>member.userId===row.actorId);return {...row,name:user?.name||'未归属调用',email:user?.email||'',role:membership?.role||'',costs:report.costs.filter(cost=>cost.actorId===row.actorId).map(({currency,amount})=>({currency,amount}))};}),keys:report.keys.map(row=>({...row,name:users.get(row.actorId)?.name||'未归属 API Key'}))});
     }
     if(req.method!=='POST')throw fail('接口不存在',404);
-    const data=await body(req);
+    const data=await body(req,route==='lab-history'?1024*1024:65536);
     if(route==='lab-history')return json(res,200,labHistory.put(current,data));
     if(route==='lab-history/delete')return json(res,200,labHistory.delete(current,data.id));
     if(route==='subscription/plan'){
