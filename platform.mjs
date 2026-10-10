@@ -11,6 +11,7 @@ import {Accounts} from './accounts.mjs';
 import {installWebSocket} from './realtime.mjs';
 import {FeishuOAuth,feishuConfigs} from './feishu-auth.mjs';
 import {FeishuBindings} from './feishu-bindings.mjs';
+import {DesktopFeishu} from './desktop-feishu.mjs';
 import {LabHistory} from './lab-history.mjs';
 import {Subscriptions} from './subscriptions.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
@@ -20,9 +21,12 @@ const configAuditActions=new Map([
  ['/api/models/register','加入模型调用列表'],['/api/prices','修改模型价格'],['/api/prices/sync','导入参考价格'],
  ['/api/provider','保存服务商配置'],['/api/provider/switch-model','切换服务商模型'],['/api/provider/reorder','调整服务商顺序'],['/api/provider/delete','删除服务商'],['/api/routing','修改路由策略']
 ]);
-export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfigs(),removeTenantData=rmSync}={}){
+export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,bootstrapToken=admin,desktopAuth=null,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfigs(),removeTenantData=rmSync}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
- const accounts=new Accounts(dir,admin),labHistory=new LabHistory(dir),subscriptions=new Subscriptions(dir),environmentConfigs=(Array.isArray(oauthConfig)?oauthConfig:[oauthConfig]).filter(config=>config?.enabled).map(config=>({key:'primary',tenantId:'default',legacy:true,...config})),bindings=new FeishuBindings(dir,admin,environmentConfigs);
+ const accounts=new Accounts(dir,bootstrapToken),labHistory=new LabHistory(dir),subscriptions=new Subscriptions(dir),environmentConfigs=(Array.isArray(oauthConfig)?oauthConfig:[oauthConfig]).filter(config=>config?.enabled).map(config=>({key:'primary',tenantId:'default',legacy:true,...config})),bindings=new FeishuBindings(dir,admin,environmentConfigs);
+ const desktop=desktopAuth?new DesktopFeishu(desktopAuth,{revoke:token=>accounts.logout(token)}):null;
+ const desktopOrigin=()=>{const address=server.address();if(!address||typeof address==='string'||address.address!=='127.0.0.1')throw fail('桌面授权仅支持本机服务',403);return `http://127.0.0.1:${address.port}`;};
+ const desktopEntry=(provider,context)=>{const flow=desktop.create(provider,context);return {id:flow.id,url:desktopOrigin()+'/api/account/sso/feishu/desktop/authorize?id='+flow.id+'&ticket='+flow.ticket};};
  let configs=bindings.configs();const oauths=new Map(configs.map(config=>[config.key,new FeishuOAuth(config,{fetcher:identityFetcher})])),engines=new Map(),limits=new Map();
  if(oauths.size!==configs.length||new Set(configs.map(config=>config.tenantId)).size!==configs.length)throw Error('飞书应用标识和租户必须一一对应');
  for(const config of configs)if(!accounts.state.tenants.some(tenant=>tenant.id===config.tenantId))throw Error(`飞书应用 ${config.key} 对应的平台租户不存在`);
@@ -75,13 +79,30 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
    if(url.pathname.startsWith('/api/account/')){
     const route=url.pathname.slice('/api/account/'.length);
     if(req.method==='GET'&&route==='status'){let viewer=null;try{viewer=session(req);}catch{/* Anonymous login still needs enterprise entry points. */}return json(res,200,{needsSetup:accounts.state.users.length===0,sso:{feishu:oauthStatus(viewer)}});}
-    if(req.method==='GET'&&route==='sso/feishu/start'){rate(req);const requested=url.searchParams.get('provider');if(!requested&&oauths.size>1)throw fail('当前有多个独立飞书企业应用，登录前须指定企业；自动识别需先部署跨企业应用',409);const key=requested||'primary',oauth=oauths.get(key);if(!oauth)throw fail('飞书企业登录入口不存在',404);const start=oauth.start();oauthCookie(req,res,start.state);res.writeHead(302,{location:start.url,'cache-control':'no-store'});return res.end();}
+    if(route.startsWith('sso/feishu/desktop/')){
+     if(!desktop)throw fail('此服务未启用桌面登录',404);
+     if(req.method==='GET'&&route==='sso/feishu/desktop/authorize'){
+      rate(req);const flow=desktop.authorize(url.searchParams.get('ticket'));const oauth=oauths.get(flow.provider);if(!oauth){desktop.cancel(flow.id);throw fail('飞书企业登录入口不存在',404);}
+      const start=oauth.start({...flow.context,desktopId:flow.id,redirectUri:desktopOrigin()+'/api/account/sso/feishu/callback'});oauthCookie(req,res,start.state);res.writeHead(302,{location:start.url,'cache-control':'no-store'});return res.end();
+     }
+     desktop.authenticate(req);
+     if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))throw fail('需要桌面 JSON 请求',415);
+     const data=await body(req);
+     if(route==='sso/feishu/desktop/start'){
+      rate(req);if(!data.provider&&oauths.size>1)throw fail('请选择对应的飞书企业',409);const provider=data.provider||'primary';if(!oauths.has(provider))throw fail('飞书企业登录入口不存在',404);
+      return json(res,200,desktopEntry(provider));
+     }
+     if(route==='sso/feishu/desktop/complete'){const result=desktop.consume(data.id,data.code);if(result.token)cookie(req,res,result.token);return json(res,200,{path:result.path});}
+     if(route==='sso/feishu/desktop/cancel'){desktop.cancel(data.id);return json(res,200,{ok:true});}
+     throw fail('桌面登录接口不存在',404);
+    }
+    if(req.method==='GET'&&route==='sso/feishu/start'){rate(req);const requested=url.searchParams.get('provider');if(!requested&&oauths.size>1)throw fail('当前有多个独立飞书企业应用，登录前须指定企业；自动识别需先部署跨企业应用',409);const key=requested||'primary',oauth=oauths.get(key);if(!oauth)throw fail('飞书企业登录入口不存在',404);const start=oauth.start(desktop?{purpose:'login',redirectUri:desktopOrigin()+'/api/account/sso/feishu/callback'}:undefined);oauthCookie(req,res,start.state);res.writeHead(302,{location:start.url,'cache-control':'no-store'});return res.end();}
     if(req.method==='GET'&&route==='sso/feishu/callback'){
-     let purpose='login';
-     try{const state=url.searchParams.get('state')||'';if(!state||state!==namedCookie(req,'sr_oauth_state'))throw fail('飞书登录校验失败，请重新登录');const oauth=[...oauths.values()].find(client=>client.hasState(state));if(!oauth)throw fail('飞书登录请求已失效，请重新登录');const context=oauth.consumeState(state),config=oauth.config;purpose=context.purpose;const identity=await oauth.identity(url.searchParams.get('code'));oauthCookie(req,res,'');
-      if(purpose==='link'){accounts.linkFeishu(identity,{...context,appId:config.appId,providerTenantId:config.tenantId,legacy:config.legacy,allowedTenantKey:config.allowedTenantKey});res.writeHead(302,{location:'/#account','cache-control':'no-store'});return res.end();}
-      const token=accounts.loginWithFeishu(identity,config);cookie(req,res,token);res.writeHead(302,{location:'/#overview','cache-control':'no-store'});return res.end();}
-     catch(error){oauthCookie(req,res,'');res.writeHead(302,{location:'/?auth_error='+encodeURIComponent(error.message||'飞书登录失败')+(purpose==='link'?'#account':''),'cache-control':'no-store'});return res.end();}
+     let purpose='login',context;
+     try{const state=url.searchParams.get('state')||'';if(!state||state!==namedCookie(req,'sr_oauth_state'))throw fail('飞书登录校验失败，请重新登录');const oauth=[...oauths.values()].find(client=>client.hasState(state));if(!oauth)throw fail('飞书登录请求已失效，请重新登录');context=oauth.consumeState(state);const config=oauth.config;purpose=context.purpose;if(context.desktopId)desktop.assertPending(context.desktopId);const identity=await oauth.identity(url.searchParams.get('code'),{redirectUri:context.redirectUri||config.redirectUri});if(context.desktopId)desktop.assertPending(context.desktopId);oauthCookie(req,res,'');
+      if(purpose==='link'){accounts.linkFeishu(identity,{...context,appId:config.appId,providerTenantId:config.tenantId,legacy:config.legacy,allowedTenantKey:config.allowedTenantKey});res.writeHead(302,{location:context.desktopId?desktop.finish(context.desktopId,{path:'/#account'}):'/#account','cache-control':'no-store'});return res.end();}
+      const token=accounts.loginWithFeishu(identity,config);if(context.desktopId){res.writeHead(302,{location:desktop.finish(context.desktopId,{token,path:'/#overview'}),'cache-control':'no-store'});return res.end();}cookie(req,res,token);res.writeHead(302,{location:'/#overview','cache-control':'no-store'});return res.end();}
+     catch(error){oauthCookie(req,res,'');let location='/?auth_error='+encodeURIComponent(error.message||'飞书登录失败')+(purpose==='link'?'#account':'');if(context?.desktopId){try{location=desktop.finish(context.desktopId,{error:error.message||'飞书登录失败'});}catch{/* The native flow may have been cancelled while exchanging the authorization code. */}}res.writeHead(302,{location,'cache-control':'no-store'});return res.end();}
     }
     if(req.method==='POST'&&['setup','login','register'].includes(route)){
      rate(req);const data=await body(req);const token=await accounts[route](data);cookie(req,res,token);return json(res,200,accounts.me(accounts.resolve(token)));
@@ -91,7 +112,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     const current=session(req);if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已在其他页面切换，请刷新后重试',409);
     if(req.method==='POST'&&route==='sso/feishu/link/start'){
      if(!req.headers['content-type']?.startsWith('application/json'))throw fail('需要同源 JSON 请求',415);
-     rate(req);const config=oauthForTenant(current.tenantId);if(!config)throw fail('当前租户未配置飞书登录',404);const start=oauths.get(config.key).start({purpose:'link',userId:current.userId,tenantId:current.tenantId,sessionHash:current.sessionHash});oauthCookie(req,res,start.state);return json(res,200,{url:start.url});
+     rate(req);const config=oauthForTenant(current.tenantId);if(!config)throw fail('当前租户未配置飞书登录',404);const context={purpose:'link',userId:current.userId,tenantId:current.tenantId,sessionHash:current.sessionHash};if(desktop&&String(req.headers['user-agent']).includes('SwitchboardDesktop'))return json(res,200,desktopEntry(config.key,context));if(desktop)context.redirectUri=desktopOrigin()+'/api/account/sso/feishu/callback';const start=oauths.get(config.key).start(context);oauthCookie(req,res,start.state);return json(res,200,{url:start.url});
     }
     if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
     if(req.method==='GET'&&route==='lab-history')return json(res,200,labHistory.page(current,{area:url.searchParams.get('area')||undefined,status:url.searchParams.get('status')||undefined,q:url.searchParams.get('q')||'',page:url.searchParams.get('page')||1,limit:url.searchParams.get('limit')||20,order:url.searchParams.get('order')||'recent'}));
@@ -195,7 +216,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
   if(current.role==='viewer')throw fail('只读角色不可调用模型',403);
   const release=acquireGlobal();try{return await engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});}finally{release();}
  }});
- server.on('close',()=>{for(const app of engines.values())app.closeStore();labHistory.close();});
+ server.on('close',()=>{desktop?.close();for(const app of engines.values())app.closeStore();labHistory.close();});
  return server;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

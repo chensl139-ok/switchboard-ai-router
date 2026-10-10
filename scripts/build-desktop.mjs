@@ -1,0 +1,53 @@
+import {execFileSync} from 'node:child_process';
+import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,readdirSync,copyFileSync,cpSync,rmSync,chmodSync,symlinkSync,realpathSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+if(process.platform!=='darwin')throw Error('macOS 桌面包需在 macOS 上构建');
+const run=(cmd,args,options={})=>execFileSync(cmd,args,{cwd:root,stdio:'inherit',...options});
+const version=JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version;
+const binary=realpathSync(process.env.SWITCHBOARD_NODE_BINARY||process.execPath);
+const arch=process.arch;
+const runtimeCheck=execFileSync(binary,['--input-type=module','-e','import {DatabaseSync,backup} from "node:sqlite";import {parseEnv} from "node:util";const db=new DatabaseSync(":memory:");db.close();console.log(process.arch);'],{encoding:'utf8'}).trim();
+if(runtimeCheck!==arch)throw Error('Node 运行环境与目标架构不一致');
+const libraries=execFileSync('otool',['-L',binary],{encoding:'utf8'}).split('\n').slice(1).filter(line=>line.trim()).map(line=>line.trim().split(' ')[0]);
+if(libraries.some(library=>!library.startsWith('/usr/lib/')&&!library.startsWith('/System/Library/')))throw Error('请使用不依赖 Homebrew 动态库的官方 Node 二进制');
+const output=path.join(root,'dist','desktop'),temporary=mkdtempSync(path.join(tmpdir(),'switchboard-desktop-build-'));
+mkdirSync(output,{recursive:true});
+try{
+ run('npm',['run','build:web']);
+ const app=path.join(temporary,'Switchboard.app'),contents=path.join(app,'Contents'),resources=path.join(contents,'Resources'),server=path.join(resources,'server');
+ for(const dir of [path.join(contents,'MacOS'),server,path.join(resources,'runtime'),path.join(server,'desktop')])mkdirSync(dir,{recursive:true});
+ for(const name of readdirSync(root))if(/\.(mjs|ts)$/.test(name)&&name!=='vite.config.mjs')copyFileSync(path.join(root,name),path.join(server,name));
+ for(const name of ['package.json','package-lock.json'])copyFileSync(path.join(root,name),path.join(server,name));
+ cpSync(path.join(root,'public'),path.join(server,'public'),{recursive:true,verbatimSymlinks:true});
+ copyFileSync(path.join(root,'desktop','runtime.mjs'),path.join(server,'desktop','runtime.mjs'));
+ run('npm',['ci','--omit=dev','--ignore-scripts'],{cwd:server});
+ copyFileSync(binary,path.join(resources,'runtime','node'));chmodSync(path.join(resources,'runtime','node'),0o755);
+ const nodeLicense=path.resolve(path.dirname(binary),'..','LICENSE');
+ if(!existsSync(nodeLicense))throw Error('找不到 Node LICENSE；请使用官方 Node 发布包');
+ copyFileSync(nodeLicense,path.join(resources,'runtime','NODE-LICENSE'));
+ writeFileSync(path.join(contents,'Info.plist'),readFileSync(path.join(root,'desktop','Info.plist'),'utf8').replaceAll('__VERSION__',version));
+ const compilerOptions=['-swift-version','5','-module-cache-path',path.join(temporary,'swift-cache'),'-target',`${arch==='arm64'?'arm64':'x86_64'}-apple-macosx13.0`,'-framework','AppKit','-framework','WebKit','-framework','AuthenticationServices'];
+ run('swiftc',[...compilerOptions,'-O',path.join(root,'desktop','App.swift'),'-o',path.join(contents,'MacOS','Switchboard')]);
+ const iconRenderer=path.join(temporary,'render-icon'),png=path.join(temporary,'icon.png'),iconset=path.join(temporary,'AppIcon.iconset');
+ run('swiftc',[...compilerOptions,path.join(root,'desktop','Icon.swift'),'-o',iconRenderer]);
+ run(iconRenderer,[path.join(root,'public','mosi.svg'),png]);mkdirSync(iconset);
+ for(const size of [16,32,128,256,512])for(const scale of [1,2])run('sips',['-z',String(size*scale),String(size*scale),png,'--out',path.join(iconset,`icon_${size}x${size}${scale===2?'@2x':''}.png`)],{stdio:'ignore'});
+ run('iconutil',['-c','icns',iconset,'-o',path.join(resources,'AppIcon.icns')]);
+ run('codesign',['--force','--deep','--sign','-',app]);run('codesign',['--verify','--deep','--strict',app]);
+ const destination=path.join(output,'Switchboard.app');
+ // Only this generated app bundle is replaced; runtime data lives in Application Support.
+ if(existsSync(destination))rmSync(destination,{recursive:true});
+ cpSync(app,destination,{recursive:true,verbatimSymlinks:true});
+ run('codesign',['--verify','--deep','--strict',destination]);
+ const imageSource=path.join(temporary,'installer');mkdirSync(imageSource);cpSync(app,path.join(imageSource,'Switchboard.app'),{recursive:true,verbatimSymlinks:true});symlinkSync('/Applications',path.join(imageSource,'Applications'));
+ run('codesign',['--verify','--deep','--strict',path.join(imageSource,'Switchboard.app')]);
+ const dmg=path.join(output,`Switchboard-${version}-macOS-${arch}.dmg`);
+ run('hdiutil',['create','-volname','Switchboard','-srcfolder',imageSource,'-ov','-format','UDZO',dmg]);
+ writeFileSync(path.join(output,'SHA256SUMS'),createHash('sha256').update(readFileSync(dmg)).digest('hex')+'  '+path.basename(dmg)+'\n');
+ console.log(`\n桌面包已生成：${dmg}\nApp：${destination}\n用户配置和密钥未包含在安装包中。`);
+}finally{rmSync(temporary,{recursive:true,force:true});}

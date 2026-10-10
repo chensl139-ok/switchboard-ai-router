@@ -2,7 +2,7 @@ import {randomBytes} from 'node:crypto';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const jsonHeaders={'content-type':'application/json; charset=utf-8'};
-function validateRedirectUri(redirectUri){let url;try{url=new URL(redirectUri);}catch{throw Error('FEISHU_REDIRECT_URI 格式无效');}if(url.pathname!=='/api/account/sso/feishu/callback'||url.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(url.hostname))throw Error('FEISHU_REDIRECT_URI 必须是 HTTPS 回调地址且路径为 /api/account/sso/feishu/callback');}
+function validateRedirectUri(redirectUri){let url;try{url=new URL(redirectUri);}catch{throw Error('FEISHU_REDIRECT_URI 格式无效');}if(url.username||url.password||url.search||url.hash||url.pathname!=='/api/account/sso/feishu/callback'||url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw Error('FEISHU_REDIRECT_URI 必须是 HTTPS 回调地址（本机可用 HTTP），且路径为 /api/account/sso/feishu/callback');}
 
 export function feishuConfig(env=process.env){
  const appId=env.FEISHU_APP_ID?.trim()||'',appSecret=env.FEISHU_APP_SECRET?.trim()||'',redirectUri=env.FEISHU_REDIRECT_URI?.trim()||'';
@@ -35,15 +35,17 @@ export class FeishuOAuth {
   if(!this.config.enabled)throw fail('飞书登录尚未配置',503);
   const state=randomBytes(24).toString('hex');this.states.set(state,{expiresAt:this.now()+10*60_000,context});this.prune();
   const url=new URL('https://accounts.feishu.cn/open-apis/authen/v1/authorize');
-  url.searchParams.set('app_id',this.config.appId);url.searchParams.set('redirect_uri',this.config.redirectUri);url.searchParams.set('state',state);
+  const redirectUri=context.redirectUri||this.config.redirectUri;
+  if(context.redirectUri)validateRedirectUri(redirectUri);
+  url.searchParams.set('app_id',this.config.appId);url.searchParams.set('redirect_uri',redirectUri);url.searchParams.set('state',state);
   return {state,url:url.toString()};
  }
  consumeState(state){const entry=this.states.get(state);this.states.delete(state);if(!entry||entry.expiresAt<this.now())throw fail('飞书登录请求已失效，请重新登录');return entry.context;}
  hasState(state){return this.states.has(state);}
  prune(){for(const [state,entry] of this.states)if(entry.expiresAt<this.now())this.states.delete(state);while(this.states.size>1000)this.states.delete(this.states.keys().next().value);}
- async identity(code){
+ async identity(code,{redirectUri=this.config.redirectUri}={}){
   if(typeof code!=='string'||!code||code.length>2048)throw fail('飞书授权码无效');
-  const tokenResponse=await this.fetcher('https://accounts.feishu.cn/oauth/v3/token',{method:'POST',headers:jsonHeaders,body:JSON.stringify({grant_type:'authorization_code',client_id:this.config.appId,client_secret:this.config.appSecret,code,redirect_uri:this.config.redirectUri}),redirect:'error',signal:AbortSignal.timeout(15_000)});
+  const tokenResponse=await this.fetcher('https://accounts.feishu.cn/oauth/v3/token',{method:'POST',headers:jsonHeaders,body:JSON.stringify({grant_type:'authorization_code',client_id:this.config.appId,client_secret:this.config.appSecret,code,redirect_uri:redirectUri}),redirect:'error',signal:AbortSignal.timeout(15_000)});
   let token;try{token=await tokenResponse.json();}catch{throw fail('飞书登录服务响应异常',502);}
   if(!tokenResponse.ok||token.code&&token.code!==0||!token.access_token)throw fail('飞书授权失败，请重新登录',502);
   const userResponse=await this.fetcher('https://open.feishu.cn/open-apis/authen/v1/user_info',{headers:{authorization:'Bearer '+token.access_token},redirect:'error',signal:AbortSignal.timeout(15_000)});

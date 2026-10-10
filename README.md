@@ -40,6 +40,10 @@ docker compose ps
 
 Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。配置了服务商和模型后，可在「模型实验室」先试一次，再创建供业务系统使用的 API Key。初始化令牌不是业务 API Key。
 
+### macOS 桌面 App
+
+希望直接安装到电脑时，可使用内置运行环境的桌面版，无需 Docker 或 Node。打开 DMG，将 Switchboard 拖入“应用程序”后启动；可从 App 中导入已有部署的独立数据副本。桌面使用、数据目录和打包方式见 [桌面版说明](desktop/README.md)。
+
 ### 使用已发布镜像
 
 不想在本机构建镜像时，可从 [GHCR](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router) 拉取 `linux/amd64` 或 `linux/arm64` 版本。先在仓库目录运行一次 `npm run setup`，再执行：
