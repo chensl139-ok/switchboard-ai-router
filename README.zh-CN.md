@@ -11,7 +11,7 @@
 
 ![Switchboard 控制台导览](docs/demo/switchboard-tour.gif)
 
-[v2.1.3 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.1.3) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+[v2.2.0 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.2.0) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 为什么选择 Switchboard
 
@@ -34,7 +34,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.1.3。GHCR 提供 `2.1.3`、`2.1` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。
+当前发布版本为 v2.2.0。GHCR 提供 `2.2.0`、`2.2` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。
 
 ## 五分钟部署
 
@@ -62,14 +62,14 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 ```sh
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.1.3
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.2.0
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 \
   --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.1.3
+  ghcr.io/chensl139-ok/switchboard-ai-router:2.2.0
 ```
 
 上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
