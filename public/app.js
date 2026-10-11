@@ -12,10 +12,11 @@ import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from
 import {renderAudit} from './audit.js';
 import {modelCapabilities} from './model-capability.js';
 import {renderSubscriptions} from './subscriptions.js';
+import {renderConnect} from './connect.js';
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
 let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
-const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
+const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
 const managerViews=new Set(['members','prices','routing','audit','subscription']);
 document.querySelector('.sidebar [data-tab="account"]')?.insertAdjacentHTML('beforebegin','<button type="button" class="nav-item" data-tab="subscription" title="组织订阅" aria-label="组织订阅"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span class="nav-name">组织订阅</span><span class="nav-indicator" aria-hidden="true"></span></button>');
@@ -142,6 +143,7 @@ function renderPage(root){
   case 'logs':void renderLogs({api,esc,state});break;
   case 'routing':renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});break;
   case 'keys':{const keyUser=profile.user.id,keyTenant=profile.tenantId;void renderApiKeys({api,esc,toast,isCurrent:()=>tab==='keys'&&profile?.user?.id===keyUser&&profile?.tenantId===keyTenant});break;}
+  case 'connect':{const connUser=profile.user.id,connTenant=profile.tenantId;void renderConnect({api,esc,toast,isCurrent:()=>tab==='connect'&&profile?.user?.id===connUser&&profile?.tenantId===connTenant});break;}
   case 'subscription':void renderSubscriptions({profile,esc,toast});break;
  }
 }
