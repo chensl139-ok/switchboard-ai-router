@@ -20,6 +20,22 @@
 
 浏览器只取得短时、一次性授权票据；登录会话不放在 URL 中。授权结果仅可由发起登录的本机 App 兑换，并在兑换后立即失效；取消、超时和退出均清理未完成的登录结果。完整登录由本人在飞书授权页完成。
 
+## 个人订阅连接（本机预览）
+
+进入「服务商与模型」，在「个人订阅服务商」点击 **Continue with ChatGPT**，由本人在系统浏览器的 OpenAI 官方页面登录并授权。完成后点击「返回 Switchboard」或切回 App；账户会以订阅卡片显示，可选择默认实验模型、刷新模型或断开连接。点击「在实验室对话」，或在「模型实验室」选择带“个人订阅”的模型，直接使用统一对话页面。此流程不需要 API Key，也不会导入或读取 Codex / Claude 已保存的登录凭证。
+
+当前使用 [Sign in with ChatGPT 的开源客户端流程](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)。账户是否支持、可选模型和用量额度由 OpenAI 返回；只有有效身份且获得 `chatgpt.tokens.use.direct` 权限才能调用。请求使用官方 Responses API，固定 `store:false`、`stream:true`，在实验室流式显示，收到 `response.completed` 后才标记成功。支持统一 Markdown、性能指标与按用户／租户隔离的实验历史；暂不支持图片、工具、生成参数自定义或多模型对比。
+
+在「路由策略 → 个人路由（含订阅）」保存自己的策略，然后在模型实验室选择「个人自动路由」。固定、故障转移、加权、延迟和任务规则复用组织路由引擎，支持同订阅的不同模型及本人订阅与组织 API 之间切换。订阅没有按 Token 的有效参考价，经济优先不会假定其免费；该策略只选择有效价格的 API 模型。个人策略不修改组织配置，组织请求量／并发限制仍有效；已经开始返回正文后不再切换，以免拼接不同模型答案。直接选择某个订阅模型仍是固定调用，不自动消耗组织 API 额度。
+
+连接严格按平台用户和租户隔离，不出现在组织共享服务商中，业务 API Key 不能调用这些订阅。此预览不是订阅号池，也不支持 Claude 订阅共享或订阅额度转售。组织级对外共享仍需供应商许可及相应接入方案。
+
+Claude 订阅尚未接入：Anthropic 的[官方认证说明](https://support.claude.com/en/articles/13189465-log-in-to-your-claude-account)要求面向他人的产品使用 Console API 或支持的云平台；获准第三方工具也可能从额外 usage credits 扣费，而非订阅额度。当前不冒充 Claude Code、复用其登录令牌或把 API Key 接入标为订阅。只有取得适用于 Switchboard 的官方客户端授权与接入规格后，才可实现 Claude 订阅连接。
+
+连接按钮会显示授权打开状态；浏览器未打开时可重新发起授权。App 会报告系统浏览器启动错误。授权链接一次性且十分钟有效，重启或重新发起后旧链接不能复用；在官方页面取消授权不会删除原有连接。
+
+凭证在本机 `chatgpt-plan.json` 中加密存储，旋转刷新令牌串行更新；浏览器只显示账户标签和状态。断开会清除本地凭证并尝试撤销官方授权；若网络导致撤销未确认，可在 [ChatGPT 用量设置](https://chatgpt.com/settings/usage) 中检查。请随完整 App 数据目录一起备份；不要单独复制凭证文件到另一台设备。
+
 ## 开发与打包
 
 需要 macOS、Xcode Command Line Tools、符合项目要求的官方独立 Node 二进制以及 npm 开发依赖：
@@ -29,7 +45,7 @@ npm ci
 npm run build:desktop
 ```
 
-产物在 `dist/desktop/`：App、DMG、SHA256SUMS。打包脚本会校验运行时架构和动态库依赖，执行前端生产构建，只复制程序与生产依赖。`.env`、`data/`、测试及本地账号密钥不包含在安装包中。Node 与依赖的许可证随 App 保存。
+产物在 `dist/desktop/`：App、DMG、SHA256SUMS。打包脚本会校验运行时架构和动态库依赖，执行前端生产构建，只复制程序与生产依赖；仅对安装包内的 Node 副本移除调试／局部符号，保留公开符号并重新签名、验证 SQLite 和生产依赖，不修改构建机器的 Node。`.env`、`data/`、测试及本地账号密钥不包含在安装包中。Node 与依赖的许可证随 App 保存。
 
 默认使用构建时的 `process.execPath`；可通过 `SWITCHBOARD_NODE_BINARY` 指定同架构的官方 Node。原生窗口与运行时必须是同一架构。Intel 包需在对应环境构建并验收；当前交付不含 Windows 安装程序。
 

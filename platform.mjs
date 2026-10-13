@@ -14,6 +14,10 @@ import {FeishuBindings} from './feishu-bindings.mjs';
 import {DesktopFeishu} from './desktop-feishu.mjs';
 import {LabHistory} from './lab-history.mjs';
 import {Subscriptions} from './subscriptions.mjs';
+import {ChatGPTPlan,planRequest} from './chatgpt-plan.mjs';
+import {validateRouting} from './routing.mjs';
+import {hasCredential} from './provider-key.ts';
+import {writeSSE} from './realtime.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const configAuditActions=new Map([
@@ -21,10 +25,16 @@ const configAuditActions=new Map([
  ['/api/models/register','加入模型调用列表'],['/api/prices','修改模型价格'],['/api/prices/sync','导入参考价格'],
  ['/api/provider','保存服务商配置'],['/api/provider/switch-model','切换服务商模型'],['/api/provider/reorder','调整服务商顺序'],['/api/provider/delete','删除服务商'],['/api/routing','修改路由策略']
 ]);
-export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,bootstrapToken=admin,desktopAuth=null,fetcher=safeFetch,identityFetcher=globalThis.fetch,oauthConfig=feishuConfigs(),removeTenantData=rmSync}={}){
+export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,bootstrapToken=admin,desktopAuth=null,fetcher=safeFetch,identityFetcher=globalThis.fetch,planFetcher=safeFetch,oauthConfig=feishuConfigs(),removeTenantData=rmSync}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24)throw Error('请先运行 npm run setup 或配置管理令牌');
  const accounts=new Accounts(dir,bootstrapToken),labHistory=new LabHistory(dir),subscriptions=new Subscriptions(dir),environmentConfigs=(Array.isArray(oauthConfig)?oauthConfig:[oauthConfig]).filter(config=>config?.enabled).map(config=>({key:'primary',tenantId:'default',legacy:true,...config})),bindings=new FeishuBindings(dir,admin,environmentConfigs);
  const desktop=desktopAuth?new DesktopFeishu(desktopAuth,{revoke:token=>accounts.logout(token)}):null;
+ const planSessionValid=caller=>{
+  const record=accounts.state.sessions.find(item=>item.hash===caller.sessionHash&&item.userId===caller.userId&&item.tenantId===caller.tenantId&&item.expiresAt>accounts.now());
+  return Boolean(record&&accounts.state.users.some(user=>user.id===caller.userId)&&accounts.state.tenants.some(tenant=>tenant.id===caller.tenantId)&&(accounts.state.members.some(member=>member.userId===caller.userId&&member.tenantId===caller.tenantId&&member.role!=='viewer')||caller.platformAccess&&caller.userId===accounts.platformOwnerId()&&['password','feishu-primary'].includes(record.platformSource)));
+ };
+ const plan=desktop?new ChatGPTPlan(dir,admin,{fetcher:planFetcher,sessionValid:planSessionValid}):null;
+ const planResults=new Map();
  const desktopOrigin=()=>{const address=server.address();if(!address||typeof address==='string'||address.address!=='127.0.0.1')throw fail('桌面授权仅支持本机服务',403);return `http://127.0.0.1:${address.port}`;};
  const desktopEntry=(provider,context)=>{const flow=desktop.create(provider,context);return {id:flow.id,url:desktopOrigin()+'/api/account/sso/feishu/desktop/authorize?id='+flow.id+'&ticket='+flow.ticket};};
  let configs=bindings.configs();const oauths=new Map(configs.map(config=>[config.key,new FeishuOAuth(config,{fetcher:identityFetcher})])),engines=new Map(),limits=new Map();
@@ -47,6 +57,16 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  }
  function sessionToken(req){return (req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('sr_session='))?.slice('sr_session='.length)||'';}
  function session(req){return accounts.resolve(sessionToken(req));}
+ async function personalContext(current){
+  const shared=engine(current.tenantId).routingState(),own=await plan.providers(current);
+  const providers=own.map((p,index)=>({...p,priority:shared.providers.length+index,weight:1,prices:{}}));
+  const saved=plan.routing(current)||{strategy:shared.strategy,active:shared.active,rules:shared.rules,routing:shared.routing};
+  const policy={...saved,routing:{...saved.routing,requestsPerMinute:shared.routing.requestsPerMinute,concurrency:shared.routing.concurrency}};
+  return {providers,policy,
+   validate:(p,input)=>{if(!input.stream||input.tools?.length||input.thinking_mode&&input.thinking_mode!=='auto')throw fail('个人订阅候选仅支持 SSE 文本、模型默认思考，不支持工具或自定义思考');return planRequest(p.model,input.messages);},
+   response:(p,input,signal)=>plan.response(current,{id:p.subscriptionId,model:p.model,messages:input.messages},signal),
+   complete:(p,usage)=>plan.recordCall(current,p.subscriptionId,p.model,usage)};
+ }
  function tokenIdentity(token){
   if(typeof token!=='string'||!token)throw fail('需要 API Key 或账户登录',401);
   const hinted=token.startsWith('srk_')?token.split('_')[1]:'';
@@ -78,6 +98,34 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
    if(!originAllowed(req.headers.origin,req.headers.host))throw fail('拒绝跨域请求',403);
    if(url.pathname.startsWith('/api/account/')){
     const route=url.pathname.slice('/api/account/'.length);
+    if(req.method==='GET'&&route==='chatgpt/authorize'){
+     if(!plan)throw fail('订阅连接仅在本机 App 中可用',404);desktopOrigin();rate(req);
+     const start=plan.authorize(url.searchParams.get('ticket'));
+     setCookie(res,`sr_chatgpt_state=${start.state}; HttpOnly; SameSite=Lax; Path=/api/account/chatgpt/callback; Max-Age=600`);
+     res.writeHead(302,{location:start.url,'cache-control':'no-store'});return res.end();
+    }
+    if(req.method==='GET'&&route==='chatgpt/callback'){
+     if(!plan)throw fail('订阅连接仅在本机 App 中可用',404);desktopOrigin();
+     let message='ChatGPT 已连接，可返回 App 检查可用模型。';
+     try{const result=await plan.callback(url.searchParams,namedCookie(req,'sr_chatgpt_state'));if(!result.planEnabled)message='账户已连接，但未授权订阅用量。请返回 App 重新连接并允许使用套餐。';}
+     catch(error){message=error.status?error.message:'ChatGPT 连接失败，请返回 App 重试。';}
+     setCookie(res,'sr_chatgpt_state=; HttpOnly; SameSite=Lax; Path=/api/account/chatgpt/callback; Max-Age=0');
+     for(const [key,result] of planResults)if(result.expiresAt<Date.now())planResults.delete(key);
+     while(planResults.size>=40)planResults.delete(planResults.keys().next().value);
+     const resultId=randomUUID();planResults.set(resultId,{message,expiresAt:Date.now()+60000});
+     setCookie(res,`sr_chatgpt_result=${resultId}; HttpOnly; SameSite=Lax; Path=/api/account/chatgpt/result; Max-Age=60`);
+     // Do not leave the authorization code in the visible address bar.
+     res.writeHead(303,{location:'/api/account/chatgpt/result','cache-control':'no-store'});return res.end();
+    }
+    if(req.method==='GET'&&route==='chatgpt/result'){
+     if(!plan)throw fail('订阅连接仅在本机 App 中可用',404);desktopOrigin();
+     const id=namedCookie(req,'sr_chatgpt_result'),result=planResults.get(id);planResults.delete(id);
+     const message=result&&result.expiresAt>Date.now()?result.message:'授权结果页已结束，请返回 App 刷新连接状态。';
+     setCookie(res,'sr_chatgpt_result=; HttpOnly; SameSite=Lax; Path=/api/account/chatgpt/result; Max-Age=0');
+     const escaped=message.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+     res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+     return res.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT 订阅连接</title><link rel="stylesheet" href="/interface.css"><main class="plan-callback panel"><h1>订阅连接</h1><p>${escaped}</p><a href="switchboard://subscription-connected">返回 Switchboard</a><p>也可直接切回 App，点击“刷新连接”。</p></main></html>`);
+    }
     if(req.method==='GET'&&route==='status'){let viewer=null;try{viewer=session(req);}catch{/* Anonymous login still needs enterprise entry points. */}return json(res,200,{needsSetup:accounts.state.users.length===0,sso:{feishu:oauthStatus(viewer)}});}
     if(route.startsWith('sso/feishu/desktop/')){
      if(!desktop)throw fail('此服务未启用桌面登录',404);
@@ -114,7 +162,56 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      if(!req.headers['content-type']?.startsWith('application/json'))throw fail('需要同源 JSON 请求',415);
      rate(req);const config=oauthForTenant(current.tenantId);if(!config)throw fail('当前租户未配置飞书登录',404);const context={purpose:'link',userId:current.userId,tenantId:current.tenantId,sessionHash:current.sessionHash};if(desktop&&String(req.headers['user-agent']).includes('SwitchboardDesktop'))return json(res,200,desktopEntry(config.key,context));if(desktop)context.redirectUri=desktopOrigin()+'/api/account/sso/feishu/callback';const start=oauths.get(config.key).start(context);oauthCookie(req,res,start.state);return json(res,200,{url:start.url});
     }
-    if(req.method==='GET'&&route==='me')return json(res,200,accounts.me(current));
+    if(route.startsWith('chatgpt/')){
+     if(!plan)throw fail('订阅连接仅在本机 App 中可用',404);desktopOrigin();
+     if(req.method==='GET'&&route==='chatgpt/status')return json(res,200,plan.status(current));
+     if(req.method==='GET'&&route==='chatgpt/models')return json(res,200,{models:await plan.models(current,url.searchParams.get('id'))});
+     if(req.method==='GET'&&route==='chatgpt/providers')return json(res,200,{providers:await plan.providers(current)});
+     if(req.method==='GET'&&route==='chatgpt/routing'){
+      const shared=engine(current.tenantId).routingState(),context=await personalContext(current);
+      return json(res,200,{...context.policy,personalRouting:true,providers:[...shared.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:Boolean(secret),hasMeteredKey:Boolean(meteredSecret)})),...context.providers]});
+     }
+     if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))throw fail('需要同源 JSON 请求',415);
+     const data=await body(req,512000);
+     if(route==='chatgpt/routing'){
+      const shared=engine(current.tenantId).routingState(),context=await personalContext(current);
+      const policy=validateRouting(data,[...shared.providers,...context.providers],p=>p.private?p.enabled:hasCredential(p));
+      return json(res,200,plan.setRouting(current,policy));
+     }
+     if(route==='chatgpt/routing/preview'){
+      if(typeof(data.prompt??'')!=='string'||(data.prompt||'').length>2000)throw fail('预览提示词最多 2000 字');
+      const context=await personalContext(current);return json(res,200,engine(current.tenantId).preview({model:data.model||'auto',messages:[{role:'user',content:data.prompt||'路由预览'}],stream:true,thinking_mode:data.thinking_mode||'auto'},context));
+     }
+     if(route==='chatgpt/route/stream'){
+      const context=await personalContext(current),release=acquireGlobal(),controller=new AbortController();res.once('close',()=>controller.abort());
+      let started=false;
+      const emit=async(chunk,event)=>{if(!started){started=true;res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-store','X-Accel-Buffering':'no'});}await writeSSE(res,chunk,controller.signal,event);};
+      try{await engine(current.tenantId).execute({...data,stream:true},{context,actorId:current.userId,transport:'personal-sse',signal:controller.signal,onChunk:chunk=>emit(chunk),onRouteSelected:route=>emit(route,'router.route')});await emit('[DONE]');res.end();}
+      catch(error){if(!controller.signal.aborted){if(!started)throw error;await emit(clientError('chat',error),'error');res.end();}}finally{release();}return;
+     }
+     if(route==='chatgpt/start'){rate(req);return json(res,200,plan.start(current,desktopOrigin()+'/api/account/chatgpt/callback',data.id));}
+     if(route==='chatgpt/disconnect')return json(res,200,await plan.disconnect(current,data.id));
+     if(route==='chatgpt/select-model')return json(res,200,await plan.selectModel(current,data.id,data.model));
+     if(route==='chatgpt/chat/stream'){
+      if(Object.keys(data).some(key=>!['id','model','messages','stream'].includes(key)))throw fail('个人订阅仅支持文本消息，不支持自定义生成参数');
+      const release=acquireGlobal(),controller=new AbortController();res.once('close',()=>controller.abort());
+      let started=false,emitted=false;
+      const start=()=>{if(started)return;started=true;res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-store','X-Accel-Buffering':'no','x-router-provider':encodeURIComponent('chatgpt-plan:'+data.id),'x-router-provider-name':encodeURIComponent('ChatGPT 订阅'),'x-router-model':encodeURIComponent(data.model),'x-router-protocol':'responses','x-router-reason':encodeURIComponent('个人订阅 · 固定模型'),'x-router-attempt':'1','x-router-fallback':'false'});};
+      const emit=async chunk=>{if(controller.signal.aborted)throw fail('调用已取消',499);start();if(!res.write('data: '+JSON.stringify(chunk)+'\n\n'))await new Promise((resolve,reject)=>{const cleanup=()=>{res.off('drain',drain);res.off('close',close);};const drain=()=>{cleanup();resolve();};const close=()=>{cleanup();reject(fail('调用已取消',499));};res.once('drain',drain);res.once('close',close);});};
+      try{
+       const result=await plan.chat(current,data,controller.signal,{onFirstByte:()=>emit({choices:[{index:0,delta:{role:'assistant'}}]}),onDelta:async delta=>{if(delta.content)emitted=true;await emit({choices:[{index:0,delta}]});}});
+       if(!emitted&&result.text)await emit({choices:[{index:0,delta:{content:result.text}}]});
+       const usage=result.usage;await emit({model:result.model,choices:[{index:0,delta:{},finish_reason:'stop'}],...(usage?{usage:{prompt_tokens:usage.input_tokens,completion_tokens:usage.output_tokens,total_tokens:usage.total_tokens}}:{})});res.end('data: [DONE]\n\n');
+      }catch(error){if(!controller.signal.aborted){if(!started)throw error;res.end('event: error\ndata: '+JSON.stringify(clientError('chat',error))+'\n\n');}}finally{release();}
+      return;
+     }
+     if(route==='chatgpt/chat'){
+      const release=acquireGlobal(),controller=new AbortController();res.once('close',()=>controller.abort());
+      try{return json(res,200,await plan.chat(current,data,controller.signal));}finally{release();}
+     }
+     throw fail('订阅连接接口不存在',404);
+    }
+    if(req.method==='GET'&&route==='me')return json(res,200,{...accounts.me(current),chatgptPlan:Boolean(plan)});
     if(req.method==='GET'&&route==='lab-history')return json(res,200,labHistory.page(current,{area:url.searchParams.get('area')||undefined,status:url.searchParams.get('status')||undefined,q:url.searchParams.get('q')||'',page:url.searchParams.get('page')||1,limit:url.searchParams.get('limit')||20,order:url.searchParams.get('order')||'recent'}));
     if(req.method==='GET'&&route==='lab-history/item')return json(res,200,labHistory.get(current,url.searchParams.get('id')));
     if(req.method==='GET'&&route==='sso/feishu/bindings'){accounts.requirePlatformOwner(current);return json(res,200,{bindings:bindings.metadata()});}
@@ -216,7 +313,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
   if(current.role==='viewer')throw fail('只读角色不可调用模型',403);
   const release=acquireGlobal();try{return await engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});}finally{release();}
  }});
- server.on('close',()=>{desktop?.close();for(const app of engines.values())app.closeStore();labHistory.close();});
+ server.on('close',()=>{desktop?.close();plan?.close();planResults.clear();for(const app of engines.values())app.closeStore();labHistory.close();});
  return server;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -197,7 +197,7 @@ body:not(.app-ready) #breadcrumb::after { content: '正在载入工作空间…'
 .heading p, p, .muted, body.theme-dark p, body.theme-dark .muted { color: var(--ui-muted); }
 .page-tabs, body.theme-dark .page-tabs { border-color: var(--ui-border); margin-bottom: 18px; }
 .page-tabs button, body.theme-dark .page-tabs button { color: var(--ui-muted); }
-.page-tabs button.selected, body.theme-dark .page-tabs button.selected { color: var(--ui-accent-ink); border-bottom-color: var(--ui-accent); }
+.page-tabs button.selected, .page-tabs button[aria-current="page"], body.theme-dark .page-tabs button.selected { color: var(--ui-accent-ink); border-bottom-color: var(--ui-accent); }
 
 /* Shared surfaces and controls */
 .panel, .card, .metric, .lab-main, .lab-settings,
@@ -842,6 +842,7 @@ body.theme-dark .media-task, body.theme-dark .media-transcript { background: var
 @media(max-width:720px){.subscription-status,.subscription-plan{flex-direction:column;align-items:flex-start}.subscription-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.subscription-facts>div:last-child{grid-column:1/-1}.subscription-prices{white-space:normal;flex-wrap:wrap}}
 /* 接入向导（#connect） */
 .connect-new-key{display:flex;gap:10px;margin:12px 0 8px;align-items:center}
+.personal-providers .section-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.personal-providers h2,.shared-provider-title{font-size:16px;margin:0 0 6px}.personal-providers p{margin:0}.personal-providers .provider-grid{margin-top:0}.plan-provider-actions{display:flex;gap:8px;flex-shrink:0}.personal-provider-card .provider-title small{overflow:hidden;text-overflow:ellipsis;max-width:220px}.personal-provider-card .provider-order a{margin-right:auto;color:var(--ui-accent);font-size:12px}.personal-call-note{font-size:11px;overflow-wrap:anywhere}.shared-provider-title{margin-top:20px}.plan-callback{max-width:600px;margin:48px auto;padding:24px;color:var(--ui-text);background:var(--ui-surface);font-family:system-ui,sans-serif;border:1px solid var(--ui-border);border-radius:12px}@media(max-width:720px){.personal-providers .section-title{align-items:flex-start;flex-direction:column}.plan-provider-actions{flex-wrap:wrap}.plan-callback{margin:24px 16px}}
 .connect-new-key input{flex:1;min-width:0}
 .connect-new-key button{flex:none}
 .connect-key-banner{border-left-color:var(--ui-warning,#d97706)}

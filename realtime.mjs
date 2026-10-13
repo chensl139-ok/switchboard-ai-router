@@ -2,7 +2,7 @@ import {WebSocketServer, WebSocket} from 'ws';
 import {normalizeUsage} from './pricing.mjs';
 import {once} from 'node:events';
 
-export async function consumeSSE(response, protocol, model, emit, signal, onUsage=()=>{}, onNative=null) {
+export async function consumeSSE(response, protocol, model, emit, signal, onUsage=()=>{}, onNative=null,strictResponses=false) {
   if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw Error('上游未返回 SSE');
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let buffer='',done=false,tokens=0,inputTokens=0,outputTokens=0,cacheRead=0,cacheCreation=0,cacheReported=false,cacheCreationReported=false;const toolBlocks=new Map();
@@ -12,10 +12,11 @@ export async function consumeSSE(response, protocol, model, emit, signal, onUsag
   async function event(block) {
     const data=block.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');
     if(!data)return;
-    if(data==='[DONE]'){done=true;return;}
+    if(data==='[DONE]'){if(strictResponses&&!done)throw Error('订阅响应未确认完成');done=true;return;}
     const parsed=JSON.parse(data);
     if(parsed.error||parsed.type==='error')throw Error('上游流式请求失败');
     if(protocol==='responses'){
+      if(strictResponses&&(parsed.type==='response.incomplete'||parsed.type==='response.completed'&&parsed.response?.status!=='completed'))throw Error('订阅调用未完成');
       if(parsed.type==='response.failed'||parsed.type==='error')throw Error('Responses 上游失败');
       if(parsed.type==='response.created')await emit(chunk({role:'assistant',content:''}));
       if(parsed.type==='response.output_text.delta')await emit(chunk({content:parsed.delta}));

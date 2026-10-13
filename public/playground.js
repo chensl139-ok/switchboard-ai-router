@@ -1,6 +1,6 @@
 import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
-import {modelCapabilities} from './model-capability.js';
+import {labChoices,isPersonalTarget,planLabRequest} from './lab-targets.js';
 import {setLabBusy} from './lab-composer.js';
 import {createLabTiming} from './lab-performance.js';
 import {renderAssistantMarkdown} from './markdown.js';
@@ -16,18 +16,20 @@ const headerValue=(response,name)=>{const value=response.headers.get(name);if(!v
 const responseRoute=response=>{const model=headerValue(response,'x-router-model');if(!model)return null;return {providerId:headerValue(response,'x-router-provider'),provider:headerValue(response,'x-router-provider-name'),model,protocol:headerValue(response,'x-router-protocol'),reason:headerValue(response,'x-router-reason'),attempt:Number(headerValue(response,'x-router-attempt'))||1,fallback:headerValue(response,'x-router-fallback')==='true'}};
 export function stopPlayground(){stopCompare();}
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];conversationId=null;pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
-export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView,navigate}){
+export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView,navigate,initialTarget}){
  const root=document.querySelector('#content');
  stopCompare();
- const choices=state.providers.filter(p=>p.enabled&&(p.hasKey||p.hasMeteredKey)).flatMap(p=>p.models.map(model=>({id:JSON.stringify([p.id,model]),providerId:p.id,label:p.name+' / '+model,model}))).filter(item=>modelCapabilities(item.model).chat);
+ if(initialTarget){settings.target=initialTarget;view='chat';}
+ const choices=labChoices(state),selectedChoice=()=>choices.find(choice=>choice.id===settings.target);
+ if(state.personalProviders?.some(p=>p.enabled))choices.unshift({id:'personal-auto',label:'个人自动路由 · 组织 API + 本人订阅',personalRouting:true});
  if(view==='compare'){
   const epoch=compareEpoch;
   root.innerHTML='<div class="view-loading" role="status"><span class="loading-dot"></span>正在打开多模型对比…</div>';
   compareLoad??=import('./model-compare.js').then(module=>{compareModule=module;return module;}).catch(error=>{compareLoad=null;throw error;});
-  void compareLoad.then(module=>{if(epoch!==compareEpoch||!root.isConnected)return;module.renderModelCompare({root,choices,token,tenantId,esc,embedded,onSwitch:()=>{view='chat';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh,embedded});},onMedia:()=>{view='chat';navigate?.('media');}});}).catch(()=>{if(epoch===compareEpoch&&root.isConnected)root.innerHTML='<div class="view-loading" role="alert">多模型对比暂时无法加载，请稍后重试。</div>';});
+  void compareLoad.then(module=>{if(epoch!==compareEpoch||!root.isConnected)return;module.renderModelCompare({root,choices:choices.filter(choice=>!choice.subscriptionId&&!choice.personalRouting),token,tenantId,esc,embedded,onSwitch:()=>{view='chat';if(renderView)renderView();else renderPlayground({state,token,tenantId,esc,refresh,embedded});},onMedia:()=>{view='chat';navigate?.('media');}});}).catch(()=>{if(epoch===compareEpoch&&root.isConnected)root.innerHTML='<div class="view-loading" role="alert">多模型对比暂时无法加载，请稍后重试。</div>';});
   return;
  }
- if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target))settings.target='auto';
+ if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target)&&!isPersonalTarget(settings.target))settings.target='auto';
  root.classList.add('chat-workspace');
  if(!embedded)root.insertAdjacentHTML('beforeend',`<div class="heading lab-heading"><div><div class="eyebrow">MODEL LAB</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>选一个模型直接对话；需要横向评估时，再进入多模型对比。</p></div><div class="compare-heading-actions"><button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="primary">多模型对比 →</button></div></div>`);
  if(embedded){
@@ -48,6 +50,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
  <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><p class="lab-metric-note">TPS 使用上游输出 Token 数和请求总耗时；估算 TPOT 使用首末输出增量的时间跨度及上游输出 Token 数。浏览器网络分块不能精确还原单 Token 解码时间。</p></aside></div>`);
  const $=selector=>root.querySelector(selector);
+ if(isPersonalTarget(settings.target)&&!selectedChoice())$('#lab-model').add(new Option('个人订阅暂不可用 · 请重新连接',settings.target));
  const historyPanel=mountLabHistory(root,{area:'chat',tenantId,onOpen:(row,content)=>{
   let snapshot;try{snapshot=JSON.parse(row.result||'{}');}catch{snapshot={messages:[]};}
   if(snapshot.truncated||snapshot.version!==2){const note=document.createElement('p');note.className='lab-history-truncated';note.textContent=snapshot.version===2?`已达到记录容量上限${snapshot.omittedMessages?'，未保存较早的 '+snapshot.omittedMessages+' 条消息':''}${snapshot.clipped?'，最后一条内容仅保存部分':''}。`:'旧版记录可能只保存了部分对话内容，无法恢复当时未保存的文本';content.append(note);}
@@ -72,14 +75,16 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-prompt').oninput=()=>{draft=$('#lab-prompt').value;resizePrompt();};resizePrompt();
   $('#lab-model').value=settings.target;$('#lab-transport').value=settings.transport;$('#lab-thinking').value=settings.thinking;$('#lab-show-thinking').checked=settings.showThinking;$('#lab-tools').value=settings.tools;
  function selectedCapability(){
+  if(isPersonalTarget(settings.target))return {reason:'个人订阅参数由上游管理；仅支持文本和 SSE，不设置输出上限、思考开关或工具。'};
   if(settings.target==='auto'){
    if(!['manual','fallback'].includes(state.strategy))return null;
    return thinkingCapability(state.providers.find(p=>p.id===state.active));
   }
   const [id,model]=JSON.parse(settings.target);return thinkingCapability({...state.providers.find(p=>p.id===id),model});
  }
- function updateSummary(){const turns=history.filter(m=>m.role==='user').length;$('#lab-turn-count').textContent=`${turns} 轮`;const names={sse:'SSE 流式',ws:'WebSocket',http:'HTTP 完整'};$('#lab-transport-label').textContent=names[settings.transport]||settings.transport;}
- function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';const capability=selectedCapability();$('#lab-thinking').querySelector('option[value=disabled]').disabled=capability?.canDisable===false;$('#lab-thinking-help').textContent=capability?.reason||'按实际选中的模型校验关闭能力；不支持的默认目标会拒绝请求。';updateSummary();}
+ function updateSummary(){const turns=history.filter(m=>m.role==='user').length;$('#lab-turn-count').textContent=`${turns} 轮`;const names={sse:'SSE 流式',ws:'WebSocket',http:'HTTP 完整'};$('#lab-transport-label').textContent=isPersonalTarget(settings.target)?'SSE · 个人订阅':names[settings.transport]||settings.transport;}
+ function subscriptionControls(){const personal=isPersonalTarget(settings.target),routed=settings.target==='personal-auto';for(const id of ['#lab-transport','#lab-max-tokens','#lab-thinking','#lab-tools','#lab-image-button'])$(id).disabled=personal||!!controller;$('#lab-transport').value=personal?'sse':settings.transport;$('.lab-tool-config').hidden=personal;$('.lab-settings-note').textContent=routed?'个人自动路由 · 仅本人当前租户':personal?'个人订阅 · 固定模型 · 仅本人可用':'仅影响本次对话 · 协议自动适配';$('#lab-prompt').placeholder=routed?'发送文本消息 · 使用个人路由策略…':personal?'发送文本消息 · 使用个人订阅…':'发送消息，或粘贴图片…';}
+ function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';const capability=selectedCapability();$('#lab-thinking').querySelector('option[value=disabled]').disabled=capability?.canDisable===false;$('#lab-thinking-help').textContent=capability?.reason||'按实际选中的模型校验关闭能力；不支持的默认目标会拒绝请求。';subscriptionControls();updateSummary();}
  function statLine(m){
   if(m.status==='失败'||m.status==='已停止')return '';
   const parts=[];
@@ -138,7 +143,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   (updateLast?list.lastElementChild:list).querySelectorAll('[data-route]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.route)];if(m)m.routeOpen=el.open;}));}
   if(!incremental)updateSummary();if(nearBottom)list.scrollTop=list.scrollHeight;$('#lab-jump').hidden=list.scrollHeight-list.scrollTop-list.clientHeight<100;
  }
- const busy=value=>setLabBusy(root,value);
+ const busy=value=>{setLabBusy(root,value);subscriptionControls();};
  currentViewDraw=()=>{if(root.isConnected){busy(!!controller);draw();}};
  function drawImages(){const el=$('#lab-images');if(el)el.innerHTML=pendingImages.map((image,index)=>`<span><img src="${image.url}" alt="待发送图片"><button type="button" data-remove-image="${index}" aria-label="移除图片">×</button></span>`).join('');}
  targetLabel();draw();drawImages();busy(!!controller);
@@ -147,6 +152,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-images').onclick=e=>{const b=e.target.closest('[data-remove-image]');if(b&&!controller){pendingImages.splice(Number(b.dataset.removeImage),1);drawImages();}};
  let addingImages=false;
  async function addImages(files){
+  if(isPersonalTarget(settings.target)){$('#lab-error').textContent='当前订阅连接仅支持文本；图片可选择组织 API 视觉模型';return;}
   if(controller||addingImages)return;const version=contextVersion;addingImages=true;const button=$('#lab-image-button');button.disabled=true;button.textContent='读取中…';
   try{
    for(const file of files){
@@ -196,15 +202,16 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229&&!controller){e.preventDefault();if(!e.repeat)$('#lab-form').requestSubmit();}});
  $('#lab-form').onsubmit=async e=>{
   e.preventDefault();e.stopPropagation();if(controller)return;if(addingImages){$('#lab-error').textContent='图片正在读取，请稍后发送';return;}
-  const prompt=$('#lab-prompt').value.trim();if(!prompt&&!pendingImages.length)return;if(!choices.length){$('#lab-error').textContent='请先在服务商管理中配置密钥、添加模型并启用服务商';return;}if(!Number.isInteger(settings.maxTokens)||settings.maxTokens<1||settings.maxTokens>131072){$('#lab-error').textContent='最大输出 Tokens 需为 1 至 131072 的整数';return;}
+  const personal=isPersonalTarget(settings.target),choice=selectedChoice(),requestTransport=personal?'sse':settings.transport;
+  const prompt=$('#lab-prompt').value.trim();if(!prompt&&!pendingImages.length)return;if(!choices.length&&!personal){$('#lab-error').textContent='请先在服务商管理中配置密钥、添加模型并启用服务商';return;}if(!personal&&(!Number.isInteger(settings.maxTokens)||settings.maxTokens<1||settings.maxTokens>131072)){$('#lab-error').textContent='最大输出 Tokens 需为 1 至 131072 的整数';return;}
   const capability=selectedCapability();if(settings.thinking==='disabled'&&capability?.canDisable===false){$('#lab-error').textContent=capability.reason;return;}
   if(history.at(-1)?.tool_calls?.length){$('#lab-error').textContent='上一次返回了工具调用，请通过 API 回传工具结果，或清空对话后重新测试。';return;}
   const context=history.filter(m=>m.status!=='已停止'&&m.status!=='失败').map(({role,content,reasoning_content,tool_calls})=>({role,content,...(reasoning_content?{reasoning_content}:{}),...(tool_calls?{tool_calls}:{})}));
   if(context.length>=99){$('#lab-error').textContent='对话达到上限，请清空对话后继续。';return;}
-  const [model,upstream_model]=settings.target==='auto'?['auto']:JSON.parse(settings.target);
-  let tools;try{tools=JSON.parse(settings.tools||'[]');if(!Array.isArray(tools))throw Error();}catch{$('#lab-error').textContent='tools 必须为有效 JSON 数组';return;}
+  const [model,upstream_model]=['auto','personal-auto'].includes(settings.target)?['auto']:JSON.parse(settings.target);
+  let tools;try{tools=personal?[]:JSON.parse(settings.tools||'[]');if(!Array.isArray(tools))throw Error();}catch{$('#lab-error').textContent='tools 必须为有效 JSON 数组';return;}
   const userContent=pendingImages.length?[{type:'text',text:prompt},...pendingImages.map(image=>({type:'image_url',image_url:{url:image.url}}))]:prompt;
-  const input={...(tools.length?{tools}:{}),model,...(upstream_model?{upstream_model,allow_fallback:true}:{}),messages:[...context,{role:'user',content:userContent}],max_tokens:settings.maxTokens,thinking_mode:settings.thinking};
+  let input;try{input=settings.target==='personal-auto'?{model:'auto',messages:planLabRequest({subscriptionId:'validation',model:'auto'},[...context,{role:'user',content:userContent}]).messages}:personal?planLabRequest(choice,[...context,{role:'user',content:userContent}]):{...(tools.length?{tools}:{}),model,...(upstream_model?{upstream_model,allow_fallback:true}:{}),messages:[...context,{role:'user',content:userContent}],max_tokens:settings.maxTokens,thinking_mode:settings.thinking};}catch(error){$('#lab-error').textContent=error.message;return;}
   const response={role:'assistant',content:'',reasoning_content:'',status:'生成中',label:upstream_model||'自动路由',thinkingOpen:true};
   if(new Blob([JSON.stringify(input)]).size>10*1024*1024){$('#lab-error').textContent='含历史的请求超过 10 MB，请移除图片或清空对话';return;}
   history.push({role:'user',content:userContent},response);pendingImages=[];drawImages();$('#lab-prompt').value='';draft='';resizePrompt();$('#lab-error').textContent='';
@@ -216,11 +223,11 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   response.stats={};
   try{
    let result;
-   if(settings.transport==='http'){
+   if(requestTransport==='http'){
     const res=await fetch('/api/chat',{method:'POST',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},body:JSON.stringify(input),signal:request.signal});
     timing.markFirstByte();const data=await res.json();if(!res.ok)throw Error(data.error?.message||'调用失败');result={...data.choices[0].message,route:responseRoute(res),cacheMetrics:cacheHitMetrics(data.usage)};response.label=data.model||response.label;response.totalTokens=data.usage?.total_tokens;response.outputTokens=data.usage?.completion_tokens;
-  }else result=await streamChat(settings.transport,token,input,(update,meta)=>{Object.assign(response,update);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const live=timing.observe(meta?.hasOutput);response.stats={ttft:live.ttft};scheduleDraw();},request.signal,tenantId,()=>timing.markFirstByte());
-   Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const measured=timing.finish(response.outputTokens,{streamed:settings.transport!=='http'});response.durationMs=measured.durationMs;response.stats={ttfb:measured.ttfb,ttft:measured.ttft,tpot:measured.tpot,tps:measured.tps};response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
+  }else result=await streamChat(requestTransport,personal?'':token,input,(update,meta)=>{Object.assign(response,update);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const live=timing.observe(meta?.hasOutput);response.stats={ttft:live.ttft};scheduleDraw();},request.signal,tenantId,()=>timing.markFirstByte(),settings.target==='personal-auto'?'/api/account/chatgpt/route/stream':personal?'/api/account/chatgpt/chat/stream':'/v1/chat/completions');
+   Object.assign(response,result);if(response.route)response.label=`${response.route.provider||response.route.providerId} / ${response.route.model}`;const measured=timing.finish(response.outputTokens,{streamed:requestTransport!=='http'});response.durationMs=measured.durationMs;response.stats={ttfb:measured.ttfb,ttft:measured.ttft,tpot:measured.tpot,tps:measured.tps};response.status=response.tool_calls?.length?'等待工具结果':'完成';response.thinkingOpen=false;
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
   finally{if(controller===request)controller=null;if(drawTimer){clearTimeout(drawTimer);drawTimer=null;}currentViewDraw?.();if(root.isConnected)$('#lab-prompt').focus();void refresh();if(conversationId&&version===contextVersion)try{await labHistoryRequest(tenantId,'',{id:conversationId,area:'chat',kind:'conversation',model:response.route?.model||upstream_model||'自动路由',title:titleText,status:response.status==='失败'?'failed':response.status==='已停止'?'stopped':'completed',error:response.status==='失败'?($('#lab-error')?.textContent||'调用失败'):'',result:snapshot()});if(historyPanel.section.open)void historyPanel.refresh();}catch{/* Keep the live result even if history storage is unavailable. */}}
  };

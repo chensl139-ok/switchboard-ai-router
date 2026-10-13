@@ -9,7 +9,7 @@ import {validatePrice,openRouterPrice,matchOpenRouterModel,canImportOpenRouterPr
 import {assertThinkingDisabled} from './thinking.mjs';
 import {createUpstreamAdapter} from './upstream-adapter.mjs';
 import {createRouter,validateRouting} from './routing.mjs';
-import {credentialFor,hasCredential,channelFor} from './provider-key.ts';
+import {credentialFor,hasCredential,channelFor,credentialChannels} from './provider-key.ts';
 import {modelProtocolMap,protocolForModel} from './model-protocol.mjs';
 import {modelCapabilities} from './public/model-capability.js';
 import {ApiKeyStore} from './key-store.mjs';
@@ -134,16 +134,19 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  }
  const discovery=createDiscovery({state,listModels,save});
  const {payloadFor,requestFor}=createUpstreamAdapter({unseal});
- function planRoutes(input,{sequenceValue=sequence,now=Date.now()}={}){
-  const planned=selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:protocolForModel(p,p.model),routeSecret:credentialFor(p,p.model,p.channelOverride),prices:p.prices}));
+ function planRoutes(input,{sequenceValue=sequence,now=Date.now(),context=null}={}){
+  const scoped=context?{...state,...context.policy,providers:[...state.providers,...context.providers]}:state;
+  const router=context?createRouter(scoped,usageStore,{ready:p=>p.private?p.enabled:hasCredential(p),channels:(p,model)=>p.private?(p.enabled&&p.models.includes(model)?['subscription']:[]):credentialChannels(p,model)}):{selectRoutes};
+  const validate=(p,input)=>p.private?context.validate(p,input):payloadFor(p,input);
+  const planned=router.selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:p.private?'responses':protocolForModel(p,p.model),routeSecret:p.private?undefined:credentialFor(p,p.model,p.channelOverride),prices:p.prices}));
   if(input.model&&input.model!=='auto'&&planned[0]&&!modelCapabilities(planned[0].model).chat)throw fail('所选模型不是对话模型，请在媒体实验室使用',400);
-  if(input.model&&input.model!=='auto')payloadFor(planned[0],input);
+  if(input.model&&input.model!=='auto')validate(planned[0],input);
   const compatible=[],excluded=[];
   for(const candidate of planned){
    if(!modelCapabilities(candidate.model).chat){excluded.push({providerId:candidate.id,model:candidate.model,reason:'对话路由跳过媒体或非对话模型',status:400});continue;}
-   try{payloadFor(candidate,input);compatible.push(candidate);}catch(error){excluded.push({providerId:candidate.id,model:candidate.model,reason:error.message,status:error.status||400});}
+   try{validate(candidate,input);compatible.push(candidate);}catch(error){excluded.push({providerId:candidate.id,model:candidate.model,reason:error.message,status:error.status||400});}
   }
-  if((!input.model||input.model==='auto')&&['fallback','latency','weighted','rules'].includes(state.strategy)&&compatible.length>1){
+  if((!input.model||input.model==='auto')&&['fallback','latency','weighted','rules'].includes(scoped.strategy)&&compatible.length>1){
    const primary=compatible[0],alternate=compatible.find(route=>route.id===primary.id&&route.model!==primary.model),other=compatible.find(route=>route.id!==primary.id);
    const head=[primary,alternate,other].filter(Boolean);
    compatible.splice(0,compatible.length,...head,...compatible.filter(route=>!head.includes(route)));
@@ -151,7 +154,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   return {compatible,excluded};
  }
  let inFlight=0;let windowStart=Date.now(),windowUsed=0;
- async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http'}={}){
+ async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http',context=null}={}){
   if(!input||typeof input!=='object'||Array.isArray(input))throw fail('请求格式错误');
   input=normalizeRequest('chat',input);
   input={...input,max_tokens:input.max_tokens===undefined?8192:input.max_tokens};
@@ -164,7 +167,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(input.max_tokens!==undefined&&(!Number.isInteger(input.max_tokens)||input.max_tokens<1||input.max_tokens>131072))throw fail('max_tokens 无效');
   if(input.upstream_model!==undefined&&(typeof input.upstream_model!=='string'||!input.model||input.model==='auto'))throw fail('指定模型需要同时指定服务商路由 ID');
   const explicit=input.model&&input.model!=='auto';
-  const {compatible,excluded}=planRoutes(input,{sequenceValue:sequence++});
+  const policy=context?.policy?.routing||state.routing;
+  const {compatible,excluded}=planRoutes(input,{sequenceValue:sequence++,context});
   if(!compatible.length)throw fail(excluded[0]?.reason||'没有与请求能力匹配的可用模型',excluded[0]?.status||503);
   // 401 makes all models using the same saved key ineligible for this request.
   // Keep later providers available so skipped duplicates do not consume the attempt budget.
@@ -173,19 +177,19 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   if(apiKeyId)apiKeys.admit(apiKeyId);
   let succeeded=false,usedTokens=0;const requestId=requestIdentifier||crypto.randomUUID();
   const canFallback=candidates.length>1;
-  inFlight++;const routeStarted=Date.now(),timeout=AbortSignal.timeout(state.routing.timeoutMs),requestSignal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false,attempted=0,authFailedName='';const rejectedCredentials=new Set();
+  inFlight++;const routeStarted=Date.now(),timeout=AbortSignal.timeout(policy.timeoutMs),requestSignal=clientSignal?AbortSignal.any([clientSignal,timeout]):timeout;let committed=false,attempted=0,authFailedName='';const rejectedCredentials=new Set();
   try{
   for(let candidateIndex=0;candidateIndex<candidates.length;candidateIndex++){
-   if(attempted>=state.routing.maxAttempts)break;
+   if(attempted>=policy.maxAttempts)break;
    const candidate=candidates[candidateIndex];
    if(rejectedCredentials.has(candidate.id+':'+candidate.routeSecret))continue;
-   const p={...candidate,prices:structuredClone(candidate.prices||{})},remaining=Math.max(1,state.routing.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=state.routing.maxAttempts-attempted;
+   const p={...candidate,prices:structuredClone(candidate.prices||{})},remaining=Math.max(1,policy.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=policy.maxAttempts-attempted;
    const attempt=++attempted;
    const attemptTimeout=AbortSignal.timeout(Math.max(1,Math.floor(remaining/attemptsLeft))),signal=AbortSignal.any([requestSignal,attemptTimeout]);
    const started=Date.now();let status=502,pendingBytes=0;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};const pendingChunks=[];
    try{
-    const upstream=requestFor(p,input,signal);
-    const resp=await fetcher(upstream.url,upstream.options);
+    const upstream=p.private?null:requestFor(p,input,signal);
+    const resp=p.private?await context.response(p,input,signal):await fetcher(upstream.url,upstream.options);
     status=resp.status;
     if(!resp.ok)throw fail(`上游返回 HTTP ${status}`,status);
     const routeInfo={providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt,fallback:attempt>1};
@@ -197,7 +201,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
       if(!committed&&!visible){pendingChunks.push(chunk);pendingBytes+=JSON.stringify(chunk).length;if(pendingBytes<1024*1024)return;committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;pendingBytes=0;return;}
       if(!committed){committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;pendingBytes=0;}
       await onChunk(chunk);
-     },signal,value=>{usage=value;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null);
+     },signal,value=>{usage=value;},onNativeEvent&&p.protocol==='anthropic'?async event=>{if(input.thinking_mode==='disabled')assertThinkingDisabled(input,{reasoning_content:event.delta?.thinking||event.content_block?.thinking});committed=true;await onNativeEvent(event);}:null,Boolean(p.private));
+     if(p.private)context.complete(p,usage);
      if(pendingChunks.length){committed=true;for(const held of pendingChunks)await onChunk(held);pendingChunks.length=0;}
      const cacheDetails=!usage.cacheUsageInvalid&&(usage.cacheReported||usage.cacheCreationReported)?{prompt_tokens_details:{...(usage.cacheReported?{cached_tokens:usage.cachedInputTokens}:{}),...(usage.cacheCreationReported?{cache_creation_tokens:usage.cacheCreationTokens}:{})}}:{};
      const publicUsage={prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens,...cacheDetails};
@@ -389,7 +394,10 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
  });
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
- server.resolveToken=identity;server.execute=(input,options)=>route(input,options);server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();apiKeys.close();};server.on('close',server.closeStore);
+ server.resolveToken=identity;server.execute=(input,options)=>route(input,options);
+ server.routingState=()=>({strategy:state.strategy,active:state.active,rules:structuredClone(state.rules),routing:structuredClone(state.routing),providers:state.providers.map(provider=>({...provider,models:[...provider.models]}))});
+ server.preview=(input,context)=>{const now=Date.now(),plan=planRoutes(input,{now,context});const policy=context?.policy||state;return {strategy:policy.strategy,maxAttempts:policy.routing.maxAttempts,total:plan.compatible.length,candidates:plan.compatible.slice(0,30).map((p,index)=>({order:index+1,providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason,withinAttemptBudget:index<policy.routing.maxAttempts,health:healthOf(p,p.model,now)})),excluded:plan.excluded.slice(0,20)};};
+ server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();apiKeys.close();};server.on('close',server.closeStore);
  server.claimUnassignedKeys=userId=>apiKeys.claimUnassigned(userId);
  return server;
 }

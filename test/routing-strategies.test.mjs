@@ -1,12 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {selectRoutes,validateRouting} from '../routing.mjs';
+import {selectRoutes,validateRouting,createRouter} from '../routing.mjs';
+import {hasCredential,credentialChannels} from '../provider-key.ts';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createApp} from '../server.mjs';
 
 const message=text=>({model:'auto',messages:[{role:'user',content:text}],max_tokens:8192});
+test('OAuth candidates use all six real strategies without fake keys or assumed zero prices',()=>{
+ const privateProvider={id:'own',name:'Own',private:true,enabled:true,model:'own-main',models:['own-main','own-next'],priority:0,weight:1,prices:{}};
+ const api={id:'api',name:'API',enabled:true,secret:'real',model:'api-main',models:['api-main'],priority:1,weight:3,prices:{'api-main':{currency:'USD',inputPerMillion:1,outputPerMillion:2,expiresAt:null}}};
+ const state={providers:[privateProvider,api],active:'own',strategy:'manual',rules:[],routing:{maxAttempts:3,currency:'USD'},logs:[]};
+ const router=createRouter(state,null,{ready:p=>p.private?p.enabled:hasCredential(p),channels:(p,model)=>p.private&&p.models.includes(model)?['subscription']:credentialChannels(p,model)});
+ assert.equal(router.selectRoutes(message('hi'))[0].id,'own');
+ state.strategy='fallback';assert.deepEqual(router.selectRoutes(message('hi')).map(p=>p.model),['own-main','own-next','api-main']);
+ state.strategy='weighted';assert.equal(router.selectRoutes(message('hi'),{sequence:1})[0].id,'api');
+ state.strategy='rules';state.rules=[{name:'task',keywords:['sql'],providerId:'own',model:'own-next'}];assert.equal(router.selectRoutes(message('SQL'))[0].model,'own-next');
+ const now=Date.now();state.logs=Array.from({length:3},()=>({providerId:'api',model:'api-main',status:200,latency:10,time:new Date(now).toISOString()}));state.strategy='latency';assert.equal(router.selectRoutes(message('hi'),{now})[0].id,'api');
+ state.strategy='economy';assert.deepEqual(router.selectRoutes(message('hi')).map(p=>p.id),['api']);
+ assert(!Object.hasOwn(privateProvider,'secret'));assert.equal(validateRouting({...state,strategy:'manual'},state.providers,p=>p.private?p.enabled:hasCredential(p)).active,'own');
+});
 const base=()=>({
  providers:[
   {id:'first',name:'First',enabled:true,secret:'key-a',meteredSecret:'backup-a',model:'primary',models:['primary','alternate'],priority:1,weight:1,prices:{primary:{currency:'USD',inputPerMillion:3,outputPerMillion:6,expiresAt:null},alternate:{currency:'USD',inputPerMillion:1,outputPerMillion:2,expiresAt:null}}},

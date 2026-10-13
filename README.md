@@ -55,6 +55,10 @@ Responses carry `x-router-provider`, `x-router-model`, `x-router-protocol`, `x-r
 
 No Docker? `npm ci && npm run setup && npm start`. Prefer not to build? Pull the multi-arch image from [GHCR](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router). On Apple Silicon Macs there is also a zero-dependency [desktop app](desktop/README.md).
 
+The local development build includes a personal ChatGPT plan connection preview using official OAuth, without an API key. Authorization, account-specific model discovery and text inference have been verified locally. Connections are private to the authorizing platform user and tenant, and are not exposed through shared providers or business API keys. This is not a subscription account pool; see the [desktop guide](desktop/README.md).
+
+Personal routing can combine the caller's authorized subscription models with organization API providers in the lab, using the existing policy and failover engine. It does not change shared routing, stops failover after answer output begins, and never treats unknown subscription pricing as free. Claude subscription OAuth is not implemented without official third-party authorization; Anthropic API support is a separate feature.
+
 ## How it works
 
 ```

@@ -40,6 +40,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // This link only opens a view. No credentials or platform sessions are
+        // accepted from deep links; OAuth completes on the loopback server.
+        guard urls.contains(where: { $0.scheme == "switchboard" && $0.host == "subscription-connected" }),
+              let origin = baseURL, webView != nil else { return }
+        guard let destination = URL(string: origin.absoluteString + "/#providers") else { return }
+        webView.load(URLRequest(url: destination))
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func makeMenu() {
         let main = NSMenu(); NSApp.mainMenu = main
         let appItem = NSMenuItem(); main.addItem(appItem)
@@ -329,6 +339,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if navigationAction.shouldPerformDownload { decisionHandler(.download); return }
         if url.scheme == "blob" || url.scheme == "about" { decisionHandler(.allow); return }
         if url.scheme == baseURL?.scheme && url.host == baseURL?.host && url.port == baseURL?.port {
+            if navigationAction.targetFrame?.isMainFrame != false && url.path == "/api/account/chatgpt/authorize" {
+                decisionHandler(.cancel)
+                NSWorkspace.shared.open(url, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
+                    guard error != nil else { return }
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        let alert = NSAlert(); alert.messageText = "无法打开系统浏览器"
+                        alert.informativeText = "请设置默认浏览器，再点击“重新打开授权”。原有订阅连接不受影响。"
+                        alert.beginSheetModal(for: self.window)
+                    }
+                }; return
+            }
             if navigationAction.targetFrame?.isMainFrame != false && url.path == "/api/account/sso/feishu/start" {
                 decisionHandler(.cancel)
                 let provider = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "provider" })?.value

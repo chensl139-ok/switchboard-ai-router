@@ -29,7 +29,7 @@ export function publicAddress(address){
 }
 export function proxyAddressAllowed(host,address,protocol='https:'){
  if(process.env.UPSTREAM_PROXY_FAKE_IP!=='true'||protocol!=='https:'||!/^198\.(18|19)\./.test(address))return false;
- const officialHosts=['s3.siliconflow.cn','api.siliconflow.cn','api.siliconflow.com','api.deepseek.com','api.openai.com','api.anthropic.com','generativelanguage.googleapis.com','dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','openrouter.ai'];
+ const officialHosts=['s3.siliconflow.cn','api.siliconflow.cn','api.siliconflow.com','api.deepseek.com','api.openai.com','auth.openai.com','api.anthropic.com','generativelanguage.googleapis.com','dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com','openrouter.ai'];
  const customHosts=(process.env.UPSTREAM_PROXY_FAKE_IP_HOSTS||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
  return officialHosts.includes(host)||customHosts.includes(host);
 }

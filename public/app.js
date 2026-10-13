@@ -1,20 +1,22 @@
-import {renderMediaLab,stopMediaLab,resetMediaLab} from './media-lab.js';
-import {renderModelCatalog} from './model-catalog.js';
-import {renderApiGuide} from './api-docs.js';
+import {createPageLoader} from './page-loader.js';
 import {startAccountUI,showLogin,refreshAccountStatus,accountRequest,renderMembers,renderAccount,confirmAction} from './accounts.js';
-import {renderAnalytics,renderLogs} from './analytics.js';
-import {renderPrices} from './prices.js';
-import {renderPlayground,stopPlayground,resetPlayground} from './playground.js';
-import {renderRouting} from './routing.js';
-import {renderApiKeys} from './api-keys.js';
 import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.js';
 import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from './dashboard.js';
-import {renderAudit} from './audit.js';
 import {modelCapabilities} from './model-capability.js';
-import {renderSubscriptions} from './subscriptions.js';
-import {renderConnect} from './connect.js';
+const pageLoader=createPageLoader({
+ models:()=>import('./model-catalog.js'),api:()=>import('./api-docs.js'),
+ analytics:()=>import('./analytics.js'),prices:()=>import('./prices.js'),
+ playground:()=>import('./playground.js'),media:()=>import('./media-lab.js'),
+ routing:()=>import('./routing.js'),keys:()=>import('./api-keys.js'),
+ audit:()=>import('./audit.js'),subscription:()=>import('./subscriptions.js'),
+ connect:()=>import('./connect.js'),planProviders:()=>import('./plan-connections.js')
+});
+const stopPlayground=()=>pageLoader.peek('playground')?.stopPlayground();
+const resetPlayground=()=>pageLoader.peek('playground')?.resetPlayground();
+const stopMediaLab=()=>pageLoader.peek('media')?.stopMediaLab();
+const resetMediaLab=()=>pageLoader.peek('media')?.resetMediaLab();
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
-let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll;
+let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll,labTarget=null;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
 const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
@@ -74,7 +76,7 @@ const ready=providerReady;
 const heading=(title,desc,action='')=>`<div class="heading"><div><div class="eyebrow">YOUR MODELS. ONE GATEWAY.</div><h1>${title}</h1><p>${desc}</p></div>${action}</div>`;
 function cards(manage=false){return providerCards({state,esc,isManager:isManager(),manage})}
 const pageTabs=options=>`<div class="page-tabs" role="tablist">${options.map(([id,label])=>`<button type="button" role="tab" data-pagetab="${id}" aria-selected="${tab===id}" class="${tab===id?'selected':''}">${label}</button>`).join('')}</div>`;
-const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view))&&!(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
+const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view)||view==='routing'&&profile?.chatgptPlan&&profile.role==='member')&&!(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
 
 function syncNavigation(){
  const parent=Object.keys(groups).find(key=>key!==tab&&groups[key].includes(tab));
@@ -82,7 +84,7 @@ function syncNavigation(){
  $('#breadcrumb').textContent=names[tab];
  for(const button of document.querySelectorAll('nav button[data-tab]')){
   const view=button.dataset.tab;
-  button.hidden=(!isManager()&&['members','routing','subscription'].includes(view))||(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
+  button.hidden=!canOpen(view);
   const active=(groups[view]||[view]).includes(tab);
   button.classList.toggle('selected',active);
   if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
@@ -125,14 +127,25 @@ function initialPageHtml(){
  return '<div class="view-loading" role="status"><span class="loading-dot"></span>正在加载…</div>';
 }
 
-function renderPage(root){
+async function renderPage(root){
+ const requestedTab=tab,requestedProfile=profile;
+ const isCurrent=()=>root.isConnected&&tab===requestedTab&&profile===requestedProfile;
+ try{
+  const lazyTab=tab==='logs'?'analytics':tab;
+  const lazyViews=new Set(['models','api','analytics','prices','playground','media','routing','keys','audit','subscription','connect']);
+  const module=lazyViews.has(lazyTab)?await pageLoader.load(lazyTab):{};
+  // Navigation, logout or tenant changes can finish while a chunk downloads.
+  if(!isCurrent())return;
+  const {renderModelCatalog,renderApiGuide,renderAnalytics,renderLogs,renderPrices,renderPlayground,renderMediaLab,renderRouting,renderApiKeys,renderAudit,renderSubscriptions,renderConnect}=module;
+  const loadPersonal=async()=>{state.personalProviders=[];if(!profile?.chatgptPlan||profile.role==='viewer')return;try{const result=await api('/api/account/chatgpt/providers');if(isCurrent())state.personalProviders=result.providers;}catch{if(isCurrent())toast('个人订阅模型暂不可用，不影响组织 API 模型');}};
+  if(['models','playground'].includes(tab))await loadPersonal();if(!isCurrent())return;
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);
  switch(tab){
   case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(root.isConnected)renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(root.isConnected){root.querySelector('#dashboard-route-chain').textContent='路由预览暂不可用';root.querySelector('#dashboard-route-note').textContent=error.message;}});void api('/api/analytics?days=7').then(summary=>{if(root.isConnected)renderDashboardSummary(root,summary);}).catch(()=>{if(root.isConnected)root.querySelector('#dashboard-final-detail').textContent='用量数据暂不可用';});break;
-  case 'providers':renderProviderFilter(root);break;
+  case 'providers':renderProviderFilter(root);if(profile?.chatgptPlan&&profile.role!=='viewer')void Promise.all([loadPersonal(),pageLoader.load('planProviders')]).then(([,personal])=>{if(isCurrent())personal.mountPlanProviders({root,state,api,esc,toast,isCurrent,onRun:(id,model)=>{labTarget=JSON.stringify([id,model]);navigate('playground');},onChange:()=>root.querySelector('#provider-search')?.dispatchEvent(new Event('input'))});}).catch(()=>{if(isCurrent())toast('订阅卡片暂时无法加载，请刷新重试');});break;
   case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;},embedded:true});break;
-  case 'playground':renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});break;
+  case 'playground':renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;break;
   case 'media':renderMediaLab({state,tenantId:profile?.tenantId,esc,embedded:true});break;
   case 'api':renderApiGuide({esc,toast});break;
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;
@@ -141,14 +154,20 @@ function renderPage(root){
   case 'analytics':void renderAnalytics({api,esc,isOwner:profile?.role==='owner',toast});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'logs':void renderLogs({api,esc,state});break;
-  case 'routing':renderRouting({state,api,esc,toast,updated:s=>{state=s;render();}});break;
+  case 'routing':{const options={state,api,esc,toast,personalAvailable:profile?.chatgptPlan&&profile.role!=='viewer',canManageShared:isManager(),updated:s=>{state=s;render();}};if(isManager())renderRouting(options);else{const own=await api('/api/account/chatgpt/routing');if(isCurrent())renderRouting({...options,state:own});}break;}
   case 'keys':{const keyUser=profile.user.id,keyTenant=profile.tenantId;void renderApiKeys({api,esc,toast,isCurrent:()=>tab==='keys'&&profile?.user?.id===keyUser&&profile?.tenantId===keyTenant});break;}
   case 'connect':{const connUser=profile.user.id,connTenant=profile.tenantId;void renderConnect({api,esc,toast,isCurrent:()=>tab==='connect'&&profile?.user?.id===connUser&&profile?.tenantId===connTenant});break;}
   case 'subscription':void renderSubscriptions({profile,esc,toast});break;
  }
+ }catch{
+  if(!isCurrent())return;
+  root.innerHTML='<div class="view-loading" role="alert">页面暂时无法加载，请检查网络后重试。<button type="button" id="retry-page-load">重新加载</button></div>';
+  root.querySelector('#retry-page-load').onclick=()=>{if(isCurrent())render();};
+ }
 }
 
 function render(){
+ if(tab==='connections')tab='providers'; // Old personal-connection bookmarks.
  if(providerPoll){clearInterval(providerPoll.timer);providerPoll=undefined;}
  stopPlayground();stopMediaLab();
  if(!canOpen(tab))tab='overview';
@@ -159,7 +178,7 @@ function render(){
  syncNavigation();
  root.innerHTML=initialPageHtml();
  if(tab==='overview')$('#breadcrumb').textContent=root.querySelector('.dashboard-heading h1')?.textContent||names.overview;
- renderPage(root);
+ void renderPage(root);
 }
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void providerPoll?.refresh();});
 function edit(id){const p=state.providers.find(p=>p.id===id)||{id:'',name:'',baseUrl:'',model:'',protocol:'openai',weight:1,enabled:false};const f=$('#provider-form');f.reset();editingProviderId=id||'';const template=$('#provider-template');template.replaceChildren(new Option('自定义服务商',''),...(state.presets||[]).filter(preset=>!state.providers.some(item=>item.id===preset.id)).map(preset=>new Option(preset.name,preset.id)));$('#provider-template-field').hidden=!!id;$('#edit .modal-title h2').textContent=id?'配置服务商':'添加服务商';for(const key of ['enabled','apiKey','meteredApiKey'])f.elements[key].disabled=false;resetModels();modelChannelAssignments={...(p.modelChannels||{})};for(const k of ['id','name','baseUrl','model','protocol'])f.elements[k].value=p[k];f.elements.anthropicAuth.value=p.anthropicAuth||'x-api-key';f.elements.models.value=(p.models||[]).join('\n');updateConfiguredModelCount();f.elements.id.readOnly=!!id;f.elements.enabled.checked=p.enabled;if(p.hasMeteredKey||Object.values(modelChannelAssignments).includes('metered')){const adv=f.querySelector('.key-advanced');if(adv)adv.open=true;}$('#edit-error').textContent='';$('#edit').showModal()}
@@ -232,6 +251,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
 document.addEventListener('change',async e=>{const id=e.target.dataset.providerModel;if(!id)return;const select=e.target;select.disabled=true;try{state=await api('/api/provider/switch-model',{id,model:select.value});render();toast('服务商模型已切换，下一次调用生效')}catch(err){select.value=state.providers.find(p=>p.id===id).model;toast(err.message)}finally{select.disabled=false}});
 
 async function accountReady(value){
+ if(value.chatgptPlan===undefined)value=await accountRequest('me');
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
  document.body.classList.remove('app-ready');
  $('#content').innerHTML='<div class="view-loading" role="status"><span class="loading-dot"></span>正在切换工作空间…</div>';

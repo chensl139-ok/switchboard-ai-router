@@ -27,6 +27,12 @@ try{
  copyFileSync(path.join(root,'desktop','runtime.mjs'),path.join(server,'desktop','runtime.mjs'));
  run('npm',['ci','--omit=dev','--ignore-scripts'],{cwd:server});
  copyFileSync(binary,path.join(resources,'runtime','node'));chmodSync(path.join(resources,'runtime','node'),0o755);
+ // Keep the official runtime intact; strip only the packaged copy's debug/local
+ // symbols, then re-sign it before signing the whole bundle. Public exports stay.
+ const bundledNode=path.join(resources,'runtime','node');
+ run('strip',['-S','-x',bundledNode]);
+ run('codesign',['--force','--sign','-',bundledNode]);
+ run(bundledNode,['--input-type=module','-e','import {DatabaseSync} from "node:sqlite";import {parseEnv} from "node:util";import {randomBytes} from "node:crypto";import {WebSocket} from "ws";import {marked} from "marked";const db=new DatabaseSync(":memory:");db.exec("CREATE TABLE check_runtime (id)");db.close();if(!parseEnv("CHECK=ok").CHECK||!randomBytes(8).length||!WebSocket||!marked.parse("ok"))process.exit(1);'],{cwd:server});
  const nodeLicense=path.resolve(path.dirname(binary),'..','LICENSE');
  if(!existsSync(nodeLicense))throw Error('找不到 Node LICENSE；请使用官方 Node 发布包');
  copyFileSync(nodeLicense,path.join(resources,'runtime','NODE-LICENSE'));
