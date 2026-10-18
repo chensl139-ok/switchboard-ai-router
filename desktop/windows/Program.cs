@@ -221,6 +221,7 @@ namespace Switchboard.Desktop
         private bool authCompleting;
         private bool stopping;
         private bool restarting;
+        private bool smokeChecking;
         private bool quitting;
         private bool exited;
         private int generation;
@@ -316,16 +317,42 @@ namespace Switchboard.Desktop
                 web.CoreWebView2.ProcessFailed += (s, e) => SetStatus("页面进程已停止，可点击刷新恢复");
                 web.CoreWebView2.NavigationCompleted += async (s, e) =>
                 {
-                    if (!Program.Smoke || origin == null || !IsLocal(web.Source)) return;
-                    if (!e.IsSuccess) { await SmokeFinishAsync(false, false, "page-navigation-failed"); return; }
-                    var rendered = false;
-                    for (var attempt = 0; attempt < 50 && !quitting; attempt++)
+                    if (!Program.Smoke || smokeChecking || origin == null || !IsLocal(web.Source)) return;
+                    smokeChecking = true;
+                    try
                     {
-                        var result = await web.CoreWebView2.ExecuteScriptAsync("Boolean(document.querySelector('#account-login') || document.querySelector('#main'))");
-                        if (result == "true") { rendered = true; break; }
-                        await Task.Delay(200);
+                        if (!e.IsSuccess) { await SmokeFinishAsync(false, false, "page-navigation-failed"); return; }
+                        var rendered = false;
+                        for (var attempt = 0; attempt < 50 && !quitting; attempt++)
+                        {
+                            // A static HTML container is insufficient: require the
+                            // initialized setup form and native bootstrap. Only a
+                            // boolean crosses this check, never the token value.
+                            var result = await web.CoreWebView2.ExecuteScriptAsync(@"(() => {
+                              const form=document.querySelector('#account-login');
+                              const token=form?.querySelector('input[name=bootstrapToken]');
+                              const box=form?.getBoundingClientRect();
+                              return Boolean(form?.closest('dialog')?.open && box?.width>0 && box?.height>0 &&
+                                getComputedStyle(form).visibility!=='hidden' &&
+                                form.querySelector('input[name=email][type=email]') && form.querySelector('input[name=password][type=password]') &&
+                                token && /^[a-f0-9]{64}$/.test(token.value) && token.closest('label')?.hidden);
+                            })()");
+                            if (result == "true") { rendered = true; break; }
+                            await Task.Delay(200);
+                        }
+                        if (rendered)
+                        {
+                            await web.CoreWebView2.ExecuteScriptAsync("window.__switchboardSmokePainted=false; document.fonts.ready.then(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{window.__switchboardSmokePainted=true;})));");
+                            rendered = false;
+                            for (var attempt = 0; attempt < 30 && !quitting; attempt++)
+                            {
+                                await Task.Delay(100);
+                                if (await web.CoreWebView2.ExecuteScriptAsync("window.__switchboardSmokePainted===true") == "true") { rendered = true; break; }
+                            }
+                        }
+                        await SmokeFinishAsync(rendered, rendered, rendered ? "ok" : "setup-not-rendered");
                     }
-                    await SmokeFinishAsync(rendered, rendered, rendered ? "ok" : "page-not-rendered");
+                    catch { if (!quitting) await SmokeFinishAsync(false, false, "renderer-check-failed"); }
                 };
                 await StartServiceAsync();
             }
