@@ -1,0 +1,142 @@
+name: Main container image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-container-image
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main' && github.repository == 'chensl139-ok/switchboard-ai-router'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22.23.2'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  image:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.repository == 'chensl139-ok/switchboard-ai-router'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build the amd64 image for isolated validation
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: switchboard-smoke:${{ github.sha }}
+          build-args: |
+            VERSION=main
+            REVISION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/chensl139-ok/switchboard-ai-router
+          cache-from: type=gha,scope=main-container
+          cache-to: type=gha,scope=main-container,mode=max
+          provenance: false
+      - name: Check readiness and production assets without external network or persistent data
+        env:
+          IMAGE: switchboard-smoke:${{ github.sha }}
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          sb_admin_token="$(openssl rand -hex 32)"
+          sb_gateway_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$sb_admin_token"
+          echo "::add-mask::$sb_gateway_token"
+          docker run --detach --name switchboard-main-smoke \
+            --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /app/data:rw,noexec,nosuid,size=64m,uid=1000,gid=1000 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --env "ADMIN_TOKEN=$sb_admin_token" --env "GATEWAY_TOKEN=$sb_gateway_token" \
+            "$IMAGE"
+          trap 'docker rm --force switchboard-main-smoke >/dev/null 2>&1 || true' EXIT
+          sb_ready=false
+          for attempt in {1..30}; do
+            if docker exec switchboard-main-smoke node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              sb_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$sb_ready" != true ]]; then
+            docker logs --tail 30 switchboard-main-smoke
+            exit 1
+          fi
+          docker exec switchboard-main-smoke node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import {readdirSync,existsSync} from "node:fs";
+            const base="http://127.0.0.1:3000";
+            const status=await (await fetch(base+"/api/account/status")).json();
+            assert.equal(status.needsSetup,true);
+            for(const file of ["/app/.env","/app/master.key","/app/desktop","/app/test","/app/.git"])assert.equal(existsSync(file),false,`Unexpected packaged file: ${file}`);
+            const chunks=readdirSync("/app/public/build/assets").filter(name=>/\.(js|css)$/.test(name));
+            const routes=["/readyz","/","/app.js","/interface.css","/workspaces.css","/providers.css",...chunks.map(name=>"/build/assets/"+name)];
+            for(const route of routes){const response=await fetch(base+route);assert.equal(response.status,200,route);assert.ok((await response.arrayBuffer()).byteLength>0,route);}
+            console.log(JSON.stringify({ok:true,staticRoutes:routes.length,pristineAccount:true,network:"none",persistentData:false}));
+          '
+          test "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")" = "$EXPECTED_REVISION"
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish main and commit tags only
+        id: publish
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/chensl139-ok/switchboard-ai-router:main
+            ghcr.io/chensl139-ok/switchboard-ai-router:sha-${{ github.sha }}
+          build-args: |
+            VERSION=main
+            REVISION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/chensl139-ok/switchboard-ai-router
+          cache-from: type=gha,scope=main-container
+          cache-to: type=gha,scope=main-container,mode=max
+          provenance: mode=max
+          sbom: true
+      - name: Record the published digest
+        env:
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE_REVISION: ${{ github.sha }}
+        run: |
+          {
+            echo '### Main container image'
+            echo "Revision: \`$IMAGE_REVISION\`"
+            echo "Digest: \`$IMAGE_DIGEST\`"
+            echo 'Platforms: linux/amd64, linux/arm64'
+            echo 'Published tags: main and sha-<full commit>. Stable/latest/semver tags were not changed.'
+          } >> "$GITHUB_STEP_SUMMARY"

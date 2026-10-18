@@ -16,9 +16,9 @@
 - **Your keys stay on your machine.** Self-hosted BYOK gateway: provider keys are AES-256-GCM encrypted at rest, business API keys are stored hashed, and prompts/responses are never written to logs.
 - **Model-level routing.** Pick a preferred model and automatic or ordered backups, with price/latency/weight objectives, keyword exceptions, circuit breaking and a total request timeout.
 - **A shared workspace.** Providers, models, experiment history, keys, members and usage in one interface. `⌘K` / `Ctrl+K` searches pages and available models within your current permissions.
-- **Local deployment.** One Node.js process with two runtime dependencies (`ws`, `marked`). The macOS app uses system WebKit and bundles its runtime; no separate Docker or Node installation is needed.
+- **Local deployment.** One Node.js process with two runtime dependencies (`ws`, `marked`). Native desktop shells use system WebKit on macOS and WebView2 on Windows; no separate Docker or Node installation is needed.
 
-The main branch includes [unreleased interface and workflow improvements](CHANGELOG.md#unreleased). Published v2.2.0 images do not automatically include main-branch commits; build from source to try the latest changes.
+The main branch includes [unreleased interface and workflow improvements](CHANGELOG.md#unreleased). Published v2.2.0 images do not automatically include main-branch commits. Build from source, or use a verified [main-branch image](#container-build-channels) to try the latest changes; back up data before upgrading.
 
 ## Quick start (5 minutes)
 
@@ -113,7 +113,7 @@ Snapshot October 2026 — check each project's latest docs, and please PR correc
 | Model playground & compare | ✅ with latency metrics | 🔶 dashboard test | 🔶 | 🔶 | ❌ |
 | Media tasks (img/audio/video/embed/rerank) | ✅ | ✅ | 🔶 | ✅ | ❌ |
 | Credit/billing & redemption codes | paywall off (BYOK plan drafts) | 🔶 budgets | ✅ | ✅ | ❌ |
-| Desktop app | ✅ macOS | ❌ | ❌ | ❌ | CLI |
+| Desktop app | ✅ macOS / Windows x64 | ❌ | ❌ | ❌ | CLI |
 
 **When Switchboard is *not* the right pick:** you need 100+ exotic providers out of the box (LiteLLM), you run a public key-reselling storefront with redemption codes (one-api / new-api), or you want a personal CLI shim for one coding agent (claude-code-router). Switchboard is built for **individuals and teams who self-host one governed gateway** for many providers.
 
@@ -122,16 +122,26 @@ Snapshot October 2026 — check each project's latest docs, and please PR correc
 - **Single-instance by design**: config in files, usage in SQLite, rate limiting in-process. Never share one `data/` directory between processes; put it behind an HTTPS reverse proxy and back it up regularly (including `master.key`).
 - SSRF guard: non-HTTPS upstreams and private/reserved hosts are refused by default; allow-list explicitly if you must.
 - Hardened Compose profile: read-only rootfs, `no-new-privileges`, tmpfs `/tmp`, health checks, graceful shutdown.
-- Pre-built `linux/amd64` + `linux/arm64` images on GHCR, tagged `2.1.x` / `2.1` / `latest`; releases ship offline OCI tarballs with `SHA256SUMS`.
+- Pre-built `linux/amd64` + `linux/arm64` images on GHCR: stable `2.2.0` / `2.2` / `latest`, separately from main-branch builds; releases ship offline OCI tarballs with `SHA256SUMS`.
 
 Full details: [TENANCY.md](TENANCY.md) (roles & Feishu/Lark SSO), [API.md](API.md) (endpoints, media APIs, SDK notes), [ARCHITECTURE.md](ARCHITECTURE.md) (module boundaries), [CHANGELOG.md](CHANGELOG.md). Some deep-dive docs are currently in Chinese — translations are very welcome.
+
+### Container build channels
+
+| Tag | Content | Updated by |
+| --- | --- | --- |
+| `2.2.0`, `2.2`, `latest` | Published stable release | Version-tag release workflow |
+| `main` | Most recent tested main-branch image, not a release | Manual [Main branch image workflow](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/image-main.yml) |
+| `sha-<full commit SHA>` | Traceable main-branch build | Same workflow; prefer its image digest for exact pinning |
+
+All images use `ghcr.io/chensl139-ok/switchboard-ai-router`. The main workflow tests the application and starts an isolated Linux container before publishing both architectures. It does not change stable tags or create a Release. A git push alone runs CI, not image publication. Desktop Windows installers are separate [workflow artifacts](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/windows-desktop.yml), retained for 14 days; download them promptly if you need a lasting copy.
 
 ## Development
 
 ```sh
 npm ci
 npm run check    # syntax, TypeScript/Vue types, web build
-npm test         # 170+ automated tests
+npm test         # automated unit/integration tests
 npm start        # build web assets and serve locally
 ```
 

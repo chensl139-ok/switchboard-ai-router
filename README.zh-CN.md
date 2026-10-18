@@ -18,7 +18,7 @@
 - **密钥不出你的机器**：自托管 BYOK，服务商密钥 AES-256-GCM 加密落盘，业务 Key 哈希保存，请求日志不记录提示词与回复正文。
 - **模型级路由**：设置首选模型和失败后的备用方式，可按价格、延迟或权重选路，带关键词例外、熔断和总超时。
 - **工作空间**：管理服务商、模型、实验历史、密钥、成员与用量；`⌘K` / `Ctrl+K` 可搜索页面和可用模型。
-- **部署**：单 Node.js 进程，运行时仅 `ws`、`marked` 两个第三方依赖；macOS App 使用系统 WebKit，内置独立 Node，无需另外安装 Docker 或 Node。
+- **部署**：单 Node.js 进程，运行时仅 `ws`、`marked` 两个第三方依赖；macOS 使用系统 WebKit，Windows 使用系统 WebView2，桌面 App 内置 Node，无需另外安装 Docker 或 Node。
 
 ## 能做什么
 
@@ -34,7 +34,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.2.0。主分支包含 [尚未发布的界面与工作流改进](CHANGELOG.md#unreleased)，已发布的 GHCR `2.2.0`、`2.2` 和 `latest` 不自动包含主分支提交。体验主分支请从源码构建；升级前备份数据。
+当前发布版本为 v2.2.0。主分支包含 [尚未发布的界面与工作流改进](CHANGELOG.md#unreleased)，已发布的 GHCR `2.2.0`、`2.2` 和 `latest` 不自动包含主分支提交。体验主分支可从源码构建，或使用下方说明的 `main` 镜像；升级前备份数据。
 
 ## 五分钟部署
 
@@ -85,6 +85,16 @@ docker run -d --name switchboard-ai-router \
 ```
 
 上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
+
+镜像分为正式版与主分支构建，不混用版本标签：
+
+| 标签 | 内容 | 更新方式 |
+| --- | --- | --- |
+| `2.2.0`、`2.2`、`latest` | 已发布正式版 | 版本标签触发 Release 流程 |
+| `main` | 最近一次验证通过的主分支构建，非正式版 | 手动运行 [Main branch image](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/image-main.yml) |
+| `sha-<完整提交 SHA>` | 对应提交的主分支构建 | 同一流程生成；精确固定版本建议使用镜像 digest |
+
+主分支镜像先执行测试和隔离容器启动验证，再发布 `linux/amd64`、`linux/arm64`，不覆盖正式版标签、不新建 Release。仅推送 Git 会运行 CI，不会自动发布镜像。Windows 安装包则由独立 [Windows desktop](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/windows-desktop.yml) 工作流生成；构建附件保留 14 天，需要长期保存请及时下载。
 
 不用 Docker 时运行 `npm ci && npm run setup && npm start`；默认端口为 3000，可在 `.env` 设置 `HOST=127.0.0.1`、`PORT=3100`。
 
