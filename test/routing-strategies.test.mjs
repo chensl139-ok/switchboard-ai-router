@@ -28,6 +28,15 @@ const base=()=>({
  ],active:'first',strategy:'fallback',rules:[],logs:[],routing:{maxAttempts:3,currency:'USD'}
 });
 
+test('任务规则独立叠加选路目标，关闭后恢复排序；固定模式不受规则影响',()=>{
+ const state=base();state.rules=[{name:'SQL',keywords:['sql'],providerId:'first',model:'primary'}];state.routing.rulesEnabled=true;
+ for(const strategy of ['fallback','weighted','latency','economy']){state.strategy=strategy;assert.equal(selectRoutes(state,message('SQL'),{sequence:2})[0].model,'primary');}
+ state.routing.rulesEnabled=false;state.strategy='economy';assert.equal(selectRoutes(state,message('SQL'))[0].model,'alternate');
+ state.strategy='manual';state.active='second';state.routing.rulesEnabled=true;assert.equal(selectRoutes(state,message('SQL'))[0].model,'other');
+ state.strategy='economy';state.providers[0].prices.primary=null;assert.equal(selectRoutes(state,message('SQL'))[0].model,'alternate','规则不能把未知价格当免费');
+ assert.throws(()=>validateRouting({...state,routing:{rulesEnabled:'true'}},state.providers),/rulesEnabled/);
+});
+
 test('六种策略均产生不同且可解释的路由；前三次尝试包含跨服务商容灾',()=>{
  const state=base(),input=message('write SQL');
  assert.deepEqual(selectRoutes(state,input).map(r=>[r.id,r.model]),[['first','primary'],['first','alternate'],['second','other']]);

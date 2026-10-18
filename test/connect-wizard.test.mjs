@@ -21,12 +21,15 @@ test('协议推断：显式配置优先，其次按名称，最后回退服务�
  assert.equal(inferAgentProtocol({protocol:'openai',modelProtocols:{'deepseek-chat':'responses'}},'deepseek-chat'),'responses');
 });
 
-test('Claude Code 只列出 Anthropic 协议模型，Codex 只列出 Responses 模型',()=>{
+test('客户端协议与上游协议解耦，三种客户端共用全部对话模型目录',()=>{
  const s=state([deepseek,anthropic,openai,mixed]);
  const claude=eligibleModels(s,'claude');
- assert.deepEqual(claude.map(o=>o.value),['anthropic::claude-sonnet-4-5','anthropic::claude-haiku-4-5']);
+ assert.ok(claude.some(o=>o.value==='deepseek::deepseek-chat'));
+ assert.ok(claude.some(o=>o.value==='anthropic::claude-sonnet-4-5'));
  const codex=eligibleModels(s,'codex');
- assert.deepEqual(codex.map(o=>o.value),['openai::gpt-5.1','openai::gpt-5-mini']);
+ assert.deepEqual(codex,claude);
+ assert.deepEqual(eligibleModels(s,'generic'),claude);
+ assert.ok(!codex.some(o=>o.value==='sf::FunAudioLLM/CosyVoice2-0.5B'));
  const generic=eligibleModels(state([deepseek,mixed]),'generic');
  assert.ok(generic.some(o=>o.value==='deepseek::deepseek-chat'));
  assert.ok(!generic.some(o=>o.value==='sf::FunAudioLLM/CosyVoice2-0.5B'),'媒体模型不进通用客户端列表');
@@ -59,6 +62,8 @@ test('Codex 片段：base_url 带 /v1，wire_api 为 responses',()=>{
  assert.match(s.config,/wire_api = "responses"/);
  assert.match(s.config,/model = "openai::gpt-5\.1"/);
  assert.match(s.config,/env_key = "SWITCHBOARD_API_KEY"/);
+ assert.match(s.config,/requires_openai_auth = false/);
+ assert.match(s.config,/supports_websockets = false/);
  assert.match(s.env,/export SWITCHBOARD_API_KEY="srk_test_abc"/);
  assert.match(s.verify,/\/v1\/responses/);
 });

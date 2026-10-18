@@ -3,6 +3,7 @@ import {startAccountUI,showLogin,refreshAccountStatus,accountRequest,renderMembe
 import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.js';
 import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from './dashboard.js';
 import {modelCapabilities} from './model-capability.js';
+import {mountCommandMenu} from './command-menu.js';
 const pageLoader=createPageLoader({
  models:()=>import('./model-catalog.js'),api:()=>import('./api-docs.js'),
  analytics:()=>import('./analytics.js'),prices:()=>import('./prices.js'),
@@ -16,9 +17,9 @@ const resetPlayground=()=>pageLoader.peek('playground')?.resetPlayground();
 const stopMediaLab=()=>pageLoader.peek('media')?.stopMediaLab();
 const resetMediaLab=()=>pageLoader.peek('media')?.resetMediaLab();
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
-let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll,labTarget=null;
+let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll,labTarget=null,commandMenu;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
-const names={overview:'路由控制台',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
+const names={overview:'概览',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
 const managerViews=new Set(['members','prices','routing','audit','subscription']);
 document.querySelector('.sidebar [data-tab="account"]')?.insertAdjacentHTML('beforebegin','<button type="button" class="nav-item" data-tab="subscription" title="组织订阅" aria-label="组织订阅"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span class="nav-name">组织订阅</span><span class="nav-indicator" aria-hidden="true"></span></button>');
@@ -32,7 +33,9 @@ for(const [id,detail] of Object.entries(navDetails)){
  const copy=document.createElement('span'),sub=document.createElement('small');copy.className='nav-copy';sub.className='nav-children';sub.textContent=detail;name.before(copy);copy.append(name,sub);
  button.title=`${name.textContent}：${detail}`;button.setAttribute('aria-label',button.title);
 }
-for(const [node,label] of [...document.querySelectorAll('.sidebar .nav-label')].map((node,index)=>[node,['核心工作流','开发接入','团队与用量'][index]]))node.textContent=label;
+for(const [node,label] of [...document.querySelectorAll('.sidebar .nav-label')].map((node,index)=>[node,['工作空间','开发接入','组织管理'][index]]))node.textContent=label;
+document.querySelector('[data-tab="overview"] .nav-name').textContent='概览';
+document.querySelector('[data-tab="overview"]').setAttribute('aria-label','概览');
 document.querySelector('#provider-form [name="apiKey"]').closest('label').insertAdjacentHTML('afterend','<details class="key-advanced"><summary>备用密钥（可选）<small>同服务商配置第二把 Key 用于故障转移；只配一把时无需关心</small></summary><label>Metered API Key<input name="meteredApiKey" type="password" autocomplete="new-password" placeholder="留空保留已有备用密钥"></label></details>');
 const providerForm=document.querySelector('#provider-form'),providerTitle=providerForm.querySelector('.modal-title'),providerActions=providerForm.querySelector('.dialog-actions'),providerBody=document.createElement('div');
 providerBody.className='provider-form-body';
@@ -68,12 +71,12 @@ function bindNavigationHint(element,label,enabled=()=>true){
  element.addEventListener('pointerenter',show);element.addEventListener('focus',show);element.addEventListener('pointerleave',hide);element.addEventListener('blur',hide);
  return {show,hide};
 }
-async function api(url,data){const tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile?.tenantId!==tenantAtCall)throw Error('租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();const id=r.headers.get('x-request-id');throw Error((b.error?.message||'请求失败')+(id?` · 请求 ID ${id}`:''))}return b}
+async function api(url,data){const accountAtCall=profile,tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile!==accountAtCall||profile?.tenantId!==tenantAtCall)throw Error('账户或租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();const id=r.headers.get('x-request-id');throw Error((b.error?.message||'请求失败')+(id?` · 请求 ID ${id}`:''))}return b}
 function toast(s){clearTimeout(toastTimer);$('#toast').textContent=s;$('#toast').style.display='block';toastTimer=setTimeout(()=>$('#toast').style.display='none',4500)}
-function navigate(next){if(!names[next]||next===tab)return;tab=next;history.pushState(null,'','#'+tab);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
+function navigate(next){if(!profile||!state||!names[next]||next===tab)return;tab=next;history.pushState(null,'','#'+tab);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
 window.addEventListener('popstate',()=>{if(!state)return;tab=names[location.hash.slice(1)]?location.hash.slice(1):'overview';render();});
 const ready=providerReady;
-const heading=(title,desc,action='')=>`<div class="heading"><div><div class="eyebrow">YOUR MODELS. ONE GATEWAY.</div><h1>${title}</h1><p>${desc}</p></div>${action}</div>`;
+const heading=(title,desc,action='')=>`<div class="heading"><div><h1>${title}</h1><p>${desc}</p></div>${action}</div>`;
 function cards(manage=false){return providerCards({state,esc,isManager:isManager(),manage})}
 const pageTabs=options=>`<div class="page-tabs" role="tablist">${options.map(([id,label])=>`<button type="button" role="tab" data-pagetab="${id}" aria-selected="${tab===id}" class="${tab===id?'selected':''}">${label}</button>`).join('')}</div>`;
 const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view)||view==='routing'&&profile?.chatgptPlan&&profile.role==='member')&&!(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
@@ -111,17 +114,18 @@ function renderProviderFilter(root){
   busy=true;try{const result=await api('/api/logs?limit=100');if(!root.isConnected||profile?.tenantId!==tenantId)return;state.logs=result.items;refreshProviderHealth(root,state.providers,state.logs);if(indicator)indicator.textContent=`已更新 ${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`;}
   catch{if(indicator)indicator.textContent='更新暂停 · 稍后重试';}finally{busy=false;}
  };
- providerPoll={timer:setInterval(refresh,10000),refresh};
+ const schedule=()=>{clearTimeout(providerPoll?.timer);if(document.visibilityState==='hidden'||!root.isConnected||tab!=='providers')return;providerPoll.timer=setTimeout(async()=>{await refresh();if(providerPoll?.refresh===refresh)schedule();},15000);};
+ providerPoll={refresh,schedule};schedule();
  void refresh();
 }
 
 function initialPageHtml(){
  if(tab==='overview')return renderDashboard({state,esc,ready,isManager:isManager()});
  if(groups.providers.includes(tab)){
-  const header=heading('服务商与模型','一处配置服务商与模型；按优先级排序，失败自动切换到下一个。',isManager()?'<button id="add-provider" class="primary">＋ 添加服务商</button>':'');
+  const header=heading('服务商与模型','管理模型来源；调用顺序在路由策略中设置。',isManager()?'<button id="add-provider" class="primary">＋ 添加服务商</button>':'');
   const tabs=pageTabs([['providers','服务商'],['models','模型目录']]);
   if(tab==='models')return header+tabs;
-  return header+tabs+`<div class="workflow-strip"><div><b>1</b><span>连接服务商<small>填写地址与密钥</small></span></div><div><b>2</b><span>选择模型<small>协议自动匹配</small></span></div><div><b>3</b><span>调整顺序<small>失败自动向下切换</small></span></div></div><div class="filter-bar"><label class="search-field"><span class="sr-only">搜索服务商或模型</span><input type="search" id="provider-search" placeholder="搜索服务商、模型名称或 ID…"></label><select id="provider-filter" aria-label="服务商状态"><option value="">全部状态</option><option value="true">可用</option><option value="false">待配置 / 未启用</option></select><span id="provider-count" class="muted"></span><span id="provider-live" class="provider-live" role="status">正在更新调用状态…</span></div>`+cards(true)+`<div id="provider-empty" class="empty" hidden>未找到匹配服务商。试试其他关键词或调整状态筛选。</div><div class="info">只需调整顺序：越靠前优先级越高，默认服务商始终置顶。模型协议和密钥选择由系统自动处理；删除服务商不会删除历史用量日志。</div>`;
+  return header+tabs+`<div class="filter-bar"><label class="search-field"><span class="sr-only">搜索服务商或模型</span><input type="search" id="provider-search" placeholder="搜索服务商或模型…"></label><select id="provider-filter" aria-label="服务商状态"><option value="">全部状态</option><option value="true">已配置并启用</option><option value="false">待配置 / 未启用</option></select><span id="provider-count" class="muted"></span><span id="provider-live" class="provider-live" role="status">正在更新调用状态…</span></div>`+cards(true)+`<div id="provider-empty" class="empty" hidden>未找到匹配服务商。试试其他关键词或调整状态筛选。</div>`;
  }
  if(groups.playground.includes(tab))return heading('模型实验室','在同一工作区测试对话与媒体模型；调用设置仅影响本次实验。')+`<div class="lab-nav-row">${pageTabs([['playground','对话'],['media','媒体']])}<div id="lab-page-actions" class="lab-embedded-toolbar"></div></div>`;
  return '<div class="view-loading" role="status"><span class="loading-dot"></span>正在加载…</div>';
@@ -142,7 +146,7 @@ async function renderPage(root){
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);
  switch(tab){
-  case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(root.isConnected)renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(root.isConnected){root.querySelector('#dashboard-route-chain').textContent='路由预览暂不可用';root.querySelector('#dashboard-route-note').textContent=error.message;}});void api('/api/analytics?days=7').then(summary=>{if(root.isConnected)renderDashboardSummary(root,summary);}).catch(()=>{if(root.isConnected)root.querySelector('#dashboard-final-detail').textContent='用量数据暂不可用';});break;
+  case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(isCurrent())renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(isCurrent()){const chain=root.querySelector('#dashboard-route-chain'),note=root.querySelector('#dashboard-route-note');if(chain)chain.textContent='路由预览暂不可用';if(note)note.textContent=error.message;}});void api('/api/analytics?days=7').then(summary=>{if(isCurrent())renderDashboardSummary(root,summary);}).catch(()=>{const detail=isCurrent()&&root.querySelector('#dashboard-final-detail');if(detail)detail.textContent='用量数据暂不可用';});break;
   case 'providers':renderProviderFilter(root);if(profile?.chatgptPlan&&profile.role!=='viewer')void Promise.all([loadPersonal(),pageLoader.load('planProviders')]).then(([,personal])=>{if(isCurrent())personal.mountPlanProviders({root,state,api,esc,toast,isCurrent,onRun:(id,model)=>{labTarget=JSON.stringify([id,model]);navigate('playground');},onChange:()=>root.querySelector('#provider-search')?.dispatchEvent(new Event('input'))});}).catch(()=>{if(isCurrent())toast('订阅卡片暂时无法加载，请刷新重试');});break;
   case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;},embedded:true});break;
   case 'playground':renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;break;
@@ -167,6 +171,7 @@ async function renderPage(root){
 }
 
 function render(){
+ if(!profile||!state)return;
  if(tab==='connections')tab='providers'; // Old personal-connection bookmarks.
  if(providerPoll){clearInterval(providerPoll.timer);providerPoll=undefined;}
  stopPlayground();stopMediaLab();
@@ -177,10 +182,11 @@ function render(){
  $('#content').replaceWith(root);
  syncNavigation();
  root.innerHTML=initialPageHtml();
- if(tab==='overview')$('#breadcrumb').textContent=root.querySelector('.dashboard-heading h1')?.textContent||names.overview;
+ root.querySelectorAll('button[data-tab]').forEach(button=>{if(!canOpen(button.dataset.tab))button.hidden=true;});
+ if(tab==='overview')$('#breadcrumb').textContent=names.overview;
  void renderPage(root);
 }
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void providerPoll?.refresh();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void providerPoll?.refresh();providerPoll?.schedule();});
 function edit(id){const p=state.providers.find(p=>p.id===id)||{id:'',name:'',baseUrl:'',model:'',protocol:'openai',weight:1,enabled:false};const f=$('#provider-form');f.reset();editingProviderId=id||'';const template=$('#provider-template');template.replaceChildren(new Option('自定义服务商',''),...(state.presets||[]).filter(preset=>!state.providers.some(item=>item.id===preset.id)).map(preset=>new Option(preset.name,preset.id)));$('#provider-template-field').hidden=!!id;$('#edit .modal-title h2').textContent=id?'配置服务商':'添加服务商';for(const key of ['enabled','apiKey','meteredApiKey'])f.elements[key].disabled=false;resetModels();modelChannelAssignments={...(p.modelChannels||{})};for(const k of ['id','name','baseUrl','model','protocol'])f.elements[k].value=p[k];f.elements.anthropicAuth.value=p.anthropicAuth||'x-api-key';f.elements.models.value=(p.models||[]).join('\n');updateConfiguredModelCount();f.elements.id.readOnly=!!id;f.elements.enabled.checked=p.enabled;if(p.hasMeteredKey||Object.values(modelChannelAssignments).includes('metered')){const adv=f.querySelector('.key-advanced');if(adv)adv.open=true;}$('#edit-error').textContent='';$('#edit').showModal()}
 $('#provider-template').addEventListener('change',event=>{const preset=(state.presets||[]).find(item=>item.id===event.target.value);if(!preset)return;const f=$('#provider-form');for(const key of ['id','name','baseUrl','protocol'])f.elements[key].value=preset[key];f.elements.model.value='';f.elements.models.value='';f.elements.anthropicAuth.value='x-api-key';f.elements.enabled.checked=false;modelChannelAssignments={};updateConfiguredModelCount();resetModels();formDirty=true;});
 let formDirty=false;
@@ -232,7 +238,7 @@ $('#fetch-models').onclick=async()=>{
  }catch(e){if(epoch===modelEpoch)$('#model-status').textContent=e.message}
  finally{if(epoch===modelEpoch){b.disabled=false;b.textContent='↻ 重新获取所有模型'}}
 };
- $('#logout').onclick=async()=>{try{await accountRequest('logout',{});profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
+ $('#logout').onclick=async()=>{try{await accountRequest('logout',{});commandMenu?.close();clearTimeout(providerPoll?.timer);providerPoll=undefined;profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
 $('#close-edit').onclick=closeEdit;
 $('#cancel-edit').onclick=closeEdit;
 $('#edit').addEventListener('close',()=>{formDirty=false;resetModels();editingProviderId='';modelChannelAssignments={};});
@@ -242,23 +248,27 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
  if(b.dataset.tab){navigate(b.dataset.tab)}
  if(b.dataset.edit&&isManager())edit(b.dataset.edit);
  if(b.id==='add-provider'&&isManager())edit();
- if(b.dataset.providerMove&&isManager()){const index=state.providers.findIndex(provider=>provider.id===b.dataset.providerId),next=b.dataset.providerMove==='up'?index-1:index+1,ids=state.providers.map(provider=>provider.id);if(index>=0&&next>=0&&next<ids.length){[ids[index],ids[next]]=[ids[next],ids[index]];state=await api('/api/provider/reorder',{ids});render();toast('故障转移顺序已更新')}}
+ if(b.dataset.providerMove&&isManager()){const index=state.providers.findIndex(provider=>provider.id===b.dataset.providerId),next=b.dataset.providerMove==='up'?index-1:index+1,ids=state.providers.map(provider=>provider.id);if(index>=0&&next>=0&&next<ids.length){[ids[index],ids[next]]=[ids[next],ids[index]];state=await api('/api/provider/reorder',{ids});render();toast('服务商顺序已更新')}}
  if(b.dataset.providerDelete&&isManager()){const provider=state.providers.find(item=>item.id===b.dataset.providerDelete);if(provider)confirmAction(document.body,`删除服务商“${provider.name}”？`,'模型配置和已保存密钥将被移除，历史调用日志会继续保留。',async()=>{state=await api('/api/provider/delete',{id:provider.id});render();toast('服务商已删除');},toast)}
  if(b.dataset.switch){b.disabled=true;state=await api('/api/routing',{active:b.dataset.switch,strategy:state.strategy});render();toast('默认模型已切换，下一次调用生效')}
  if(b.dataset.strategy&&isManager()){b.disabled=true;state=await api('/api/routing',{active:state.active,strategy:b.dataset.strategy});render();toast('路由策略已更新')}
  if(b.id==='refresh'){await accountReady(await accountRequest('me'));}
+ if(b.id==='refresh-dashboard'){const root=$('#content');b.disabled=true;const latest=await api('/api/state');if(root.isConnected&&tab==='overview'){state=latest;render();}}
  }catch(e){toast(e.message);b.disabled=false}});
 document.addEventListener('change',async e=>{const id=e.target.dataset.providerModel;if(!id)return;const select=e.target;select.disabled=true;try{state=await api('/api/provider/switch-model',{id,model:select.value});render();toast('服务商模型已切换，下一次调用生效')}catch(err){select.value=state.providers.find(p=>p.id===id).model;toast(err.message)}finally{select.disabled=false}});
 
 async function accountReady(value){
+ commandMenu?.close();
+ clearTimeout(providerPoll?.timer);providerPoll=undefined;
  if(value.chatgptPlan===undefined)value=await accountRequest('me');
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
+ state=undefined;
  document.body.classList.remove('app-ready');
  $('#content').innerHTML='<div class="view-loading" role="status"><span class="loading-dot"></span>正在切换工作空间…</div>';
  if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();resetMediaLab();tab='overview';}
  renderTenantChip(profile);
  document.querySelector('#current-account').textContent=profile.user.name+' · '+(profile.platformAccess?'平台主账号':({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]||profile.role));
- state=await api('/api/state');if(!isManager()&&['members','prices','routing','audit','subscription'].includes(tab)||profile?.role==='viewer'&&tab==='keys')tab='overview';render();document.body.classList.add('app-ready');
+ state=await api('/api/state');if(!canOpen(tab))tab='overview';render();document.body.classList.add('app-ready');
 }
 try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=error.message;}
 
@@ -290,11 +300,11 @@ document.addEventListener('click',e=>{const chip=document.querySelector('.worksp
 document.addEventListener('keydown',e=>{const popover=document.querySelector('#tenant-popover'),button=document.querySelector('#tenant-button');if(e.key==='Escape'&&popover&&!popover.hidden){popover.hidden=true;button?.setAttribute('aria-expanded','false');button?.focus();}});
 addEventListener('resize',()=>{const popover=document.querySelector('#tenant-popover'),button=document.querySelector('#tenant-button');if(popover&&!popover.hidden){popover.hidden=true;button?.setAttribute('aria-expanded','false');}});
 
-// 主题与全局搜索（一次性挂在 header 上）
+// Theme and keyboard-first page/model search; results follow current permissions.
 (()=>{
  const header=document.querySelector('header');if(!header||header.querySelector('.top-actions'))return;
  const actions=document.createElement('div');actions.className='top-actions';
- const search=document.createElement('input');search.id='global-search';search.type='search';search.placeholder='搜索页面 / 功能…';search.setAttribute('aria-label','全局搜索');
+ const search=document.createElement('button');search.id='global-search';search.type='button';search.innerHTML='<span>搜索页面与模型</span><kbd>⌘ K</kbd>';search.setAttribute('aria-label','搜索页面与模型（⌘ K）');
  const themeBtn=document.createElement('button');themeBtn.id='theme-toggle';themeBtn.className='subtle';themeBtn.type='button';themeBtn.title='切换明暗主题';
  const systemTheme=matchMedia('(prefers-color-scheme: dark)');
  const themeIcon={dark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>',light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>'};
@@ -305,16 +315,10 @@ addEventListener('resize',()=>{const popover=document.querySelector('#tenant-pop
  systemTheme.addEventListener('change',e=>{if(savedTheme===null)applyTheme(e.matches);});
  actions.append(search,themeBtn);
  document.getElementById('logout')?.before(actions);
- const sections=[['overview','控制台 · 路由与健康'],['providers','服务商与模型 · 配置入口'],['playground','实验室 · 对话与媒体'],['logs','调用日志 · 追踪请求'],['api','开发者 · API Key 与文档'],['analytics','用量分析 · 成本与趋势'],['members','组织 · 成员与角色'],['account','账户 · 租户与安全']];
- search.addEventListener('input',()=>{
-  const q=search.value.trim().toLowerCase();let box=document.getElementById('search-results');
-  if(!q){box?.remove();return;}
-  if(!box){box=document.createElement('div');box.id='search-results';box.className='search-results';actions.append(box);}
-  const hits=sections.filter(([id,label])=>label.toLowerCase().includes(q)).slice(0,8);
-  box.innerHTML=hits.map(([id,label])=>`<button type="button" data-jump="${id}">${label}</button>`).join('')||'<p class="muted">没有匹配的页面</p>';
-  box.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>{navigate(b.dataset.jump);search.value='';box.remove();});
- });
- document.addEventListener('keydown',e=>{if(e.key==='/'&&!e.target.matches('input,textarea,select')){e.preventDefault();search.focus();}if(e.key==='Escape'&&document.activeElement===search){search.value='';document.getElementById('search-results')?.remove();}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='b'){e.preventDefault();const btn=document.querySelector('#sidebar-toggle');btn?.click();}});
+ const searchableModels=()=>[...(state?.providers||[]),...(state?.personalProviders||[])].filter(provider=>provider.enabled&&(provider.hasKey||provider.hasMeteredKey||provider.private&&provider.connected&&provider.planEnabled)).flatMap(provider=>[...new Set([provider.model,...(provider.models||[])].filter(Boolean))].filter(model=>modelCapabilities(model).chat).map(model=>({id:JSON.stringify([provider.id,model]),label:`${provider.name}${provider.private&&provider.accountLabel?' · '+provider.accountLabel:''} / ${model}`})));
+ const loadSearchModels=async()=>{const owner=profile,currentState=state;if(!owner?.chatgptPlan||owner.role==='viewer'||!currentState)return;const result=await api('/api/account/chatgpt/providers');if(profile===owner&&state===currentState)state.personalProviders=result.providers;};
+ commandMenu=mountCommandMenu({trigger:search,canOpen:id=>Boolean(profile&&state)&&canOpen(id),models:searchableModels,loadModels:loadSearchModels,navigate,runModel:item=>{labTarget=item.id;if(tab==='playground')render();else navigate('playground');}});
+ document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='b'&&!document.querySelector('dialog[open]')){e.preventDefault();document.querySelector('#sidebar-toggle')?.click();}});
 })();
 
 

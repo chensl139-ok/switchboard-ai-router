@@ -96,6 +96,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   console.log(JSON.stringify({event:'desktop-ready',url:runtime.url,profileDir:runtime.profileDir,needsSetup:runtime.needsSetup}));
   for(const signal of ['SIGTERM','SIGINT'])process.once(signal,stop);
   const parent=process.ppid;
-  setInterval(()=>{try{process.kill(parent,0);}catch(error){if(error.code==='ESRCH')void stop();}},2000).unref();
+  // Normal exits use SIGTERM immediately. This slower orphan check is only a
+  // crash fallback; avoid waking a mostly idle desktop service every 2 seconds.
+  setInterval(()=>{try{process.kill(parent,0);}catch(error){if(error.code==='ESRCH')void stop();}},10_000).unref();
  }catch{console.error(JSON.stringify({event:'desktop-error',message:'无法启动桌面服务。请检查数据目录权限、.env 配置及完整的数据备份。'}));process.exit(1);}
 }

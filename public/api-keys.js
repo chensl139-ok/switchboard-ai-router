@@ -1,4 +1,5 @@
 import {confirmAction} from './accounts.js';
+import {claudeCodeSnippets,codexSnippets} from './connect.js';
 export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.querySelector('#breadcrumb')?.textContent==='API Key 管理'}){
  if(!isCurrent())return;
  const container=document.querySelector('#content');
@@ -19,6 +20,9 @@ export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.queryS
  <dialog id="key-editor"><form id="key-form"><div class="modal-title"><h2 id="key-title">创建 API Key</h2><button type="button" id="close-key" class="subtle" aria-label="关闭 Key 配置">✕</button></div><div class="key-editor-body"><label>名称<input name="name" required maxlength="80" placeholder="例如：业务系统 / 测试环境"></label><div class="form-grid"><label>开始生效（本地时间）<input name="startsAt" type="datetime-local"></label><label>过期时间（本地时间）<input name="expiresAt" type="datetime-local"></label></div><label>总调用次数上限<input name="totalLimit" type="number" min="1" max="1000000000" placeholder="留空不限"></label><label>每日调用次数上限<input name="dailyLimit" type="number" min="1" max="1000000000" placeholder="留空不限"></label><label>每分钟调用次数上限<input name="rpmLimit" type="number" min="1" max="1000000000" placeholder="留空不限"></label><label class="check"><input name="enabled" type="checkbox" checked> 启用</label><p class="muted">留空生效时间表示立即生效；留空过期时间表示不过期。修改配额不会重置已用次数。停用/到期阻止新请求，已开始的请求允许完成。</p></div><div class="key-editor-actions"><p id="key-error" role="alert"></p><button class="primary" id="save-key">创建</button></div></form></dialog>
  <dialog id="key-created"><h2>请立即保存 API Key</h2><p>完整密钥仅在创建时展示这一次，关闭后无法再次查看。</p><label>API Key<input id="created-token" readonly></label><button id="copy-key" class="primary">复制密钥</button><button id="finish-key">我已保存</button><p class="muted">HTTP/SSE 使用 Authorization: Bearer &lt;API Key&gt;；WebSocket 在 auth 消息中传 token。</p></dialog>`;
  container.querySelector('.key-curl-panel').insertAdjacentHTML('beforeend','<p class="muted">Claude Code 配置中的 <code>ANTHROPIC_AUTH_TOKEN</code> 只填完整原始 Key；不要在值中加 <code>Bearer </code>。Claude Code 会自动添加此前缀。服务商的上游密钥不能用于这里的对外调用。</p>');
+ container.querySelector('.key-curl-title').insertAdjacentHTML('afterend','<label>验证客户端<select id="key-client"><option value="generic">通用客户端 · Chat Completions</option><option value="claude">Claude Code · Messages</option><option value="codex">Codex · Responses</option></select></label><p class="muted">同一把平台 Key、同一模型选择，网关自动适配上游协议。auto 使用组织路由；客户端高级功能有兼容边界，详见 <a href="#connect">接入向导</a>。</p>');
+ let keyExample=exampleCurl;
+ container.querySelector('#key-client').onchange=event=>{const client=event.target.value,options={origin:location.origin,token:'$ROUTER_API_KEY',model:'auto'};keyExample=client==='claude'?claudeCodeSnippets(options).verify:client==='codex'?codexSnippets(options).verify:exampleCurl;container.querySelector('#key-curl-example').textContent=keyExample;};
  container.querySelector('#key-created').insertAdjacentHTML('beforeend','<p class="muted">用于 Claude Code 时，只复制上方 Key 本身到 <code>ANTHROPIC_AUTH_TOKEN</code>；不要连同 <code>Bearer </code> 一起复制。</p>');
  const editor=container.querySelector('#key-editor'),form=container.querySelector('#key-form');let editing=null;
  const localDate=iso=>{if(!iso)return '';const d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};
@@ -27,7 +31,7 @@ export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.queryS
  container.querySelector('#new-key').onclick=()=>open(null);
  container.querySelector('#close-key').onclick=()=>editor.close();
  container.querySelector('#refresh-keys').onclick=reload;
- container.querySelector('#copy-key-curl').onclick=async()=>{try{await navigator.clipboard.writeText(exampleCurl);toast('curl 已复制；请先在终端设置 ROUTER_API_KEY');}catch{toast('剪贴板不可用，请手动复制命令');}};
+ container.querySelector('#copy-key-curl').onclick=async()=>{try{await navigator.clipboard.writeText(keyExample);toast('curl 已复制；请先在终端设置 ROUTER_API_KEY');}catch{toast('剪贴板不可用，请手动复制命令');}};
  container.querySelector('#key-search').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();let n=0;container.querySelectorAll('[data-search]').forEach(card=>{const show=!q||card.dataset.search.includes(q);card.hidden=!show;if(show)n++;});container.querySelector('#key-count').textContent=String(n);});
  if(container.querySelector('#legacy-key'))container.querySelector('#legacy-key').onclick=async e=>{e.target.disabled=true;try{await api('/api/keys/legacy',{enabled:!data.legacyEnabled});await reload()}catch(error){toast(error.message);e.target.disabled=false}};
  container.querySelectorAll('[data-delete-key]').forEach(button=>button.onclick=()=>{const key=data.keys.find(k=>k.id===button.dataset.deleteKey);confirmAction(container,'删除 '+key.name+'？','删除后不能恢复或重新启用。已有调用日志和计数保留，已开始的请求允许完成。',async()=>{await api('/api/keys/delete',{id:key.id});await reload();},toast);});

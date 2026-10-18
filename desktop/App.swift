@@ -3,10 +3,12 @@ import WebKit
 import Security
 import AuthenticationServices
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, ASWebAuthenticationPresentationContextProviding {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, ASWebAuthenticationPresentationContextProviding {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var serviceLabel: NSTextField!
+    private var statusItem: NSStatusItem!
+    private var statusLine: NSMenuItem!
     private var loading: NSProgressIndicator!
     private var process: Process?
     private var baseURL: URL?
@@ -36,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             other.activate(options: [.activateAllWindows]); NSApp.terminate(nil); return
         }
         NSApp.setActivationPolicy(.regular)
-        makeMenu(); makeWindow(); startService()
+        makeMenu(); makeStatusMenu(); makeWindow(); startService()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -71,6 +73,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
         let viewItem = NSMenuItem(); main.addItem(viewItem)
         let view = NSMenu(title: "显示"); viewItem.submenu = view
+        add(view, "打开工作空间", #selector(showWorkspace), "1")
+        add(view, "模型实验室", #selector(showPlayground), "2")
+        add(view, "路由策略", #selector(showRouting), "3")
+        add(view, "服务商与模型", #selector(showProviders), "4")
+        view.addItem(.separator())
+        add(view, "复制本机 API 地址", #selector(copyAPIAddress), "")
         add(view, "刷新页面", #selector(reload), "r")
         add(view, "在浏览器中打开", #selector(openBrowser), "")
         add(view, "放大", #selector(zoomIn), "+")
@@ -83,6 +91,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector, _ key: String, target: AnyObject? = nil) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = target ?? (action == #selector(NSWindow.performMiniaturize(_:)) ? nil : self); menu.addItem(item)
+    }
+    private func makeStatusMenu() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem.button?.image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted", accessibilityDescription: "Switchboard") ?? NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "Switchboard")
+        statusItem.button?.image?.isTemplate = true
+        statusItem.button?.setAccessibilityLabel("Switchboard")
+        statusItem.button?.toolTip = "Switchboard · 本机服务正在启动"
+        let menu = NSMenu()
+        statusLine = NSMenuItem(title: "本机服务正在启动…", action: nil, keyEquivalent: "")
+        menu.addItem(statusLine); menu.addItem(.separator())
+        add(menu, "打开 Switchboard", #selector(showWorkspace), "")
+        add(menu, "模型实验室", #selector(showPlayground), "")
+        add(menu, "路由策略", #selector(showRouting), "")
+        menu.addItem(.separator())
+        add(menu, "复制本机 API 地址", #selector(copyAPIAddress), "")
+        add(menu, "在浏览器中打开", #selector(openBrowser), "")
+        add(menu, "重启本机服务", #selector(restart), "")
+        menu.addItem(.separator())
+        add(menu, "退出 Switchboard", #selector(NSApplication.terminate(_:)), "q", target: NSApp)
+        statusItem.menu = menu
+    }
+    private func updateServiceStatus(_ text: String) {
+        serviceLabel.stringValue = text
+        statusLine.title = text
+        statusItem.button?.toolTip = "Switchboard · " + text
+    }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if [#selector(copyAPIAddress), #selector(openBrowser), #selector(reload), #selector(showPlayground), #selector(showRouting), #selector(showProviders)].contains(menuItem.action) {
+            return baseURL != nil && process?.isRunning == true
+        }
+        return true
     }
     private func makeWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 840), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -97,18 +136,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView.allowsBackForwardNavigationGestures = true
         let toolbar = NSVisualEffectView(); toolbar.material = .headerView; toolbar.blendingMode = .withinWindow
         serviceLabel = NSTextField(labelWithString: "正在启动本机工作空间…")
-        serviceLabel.font = .systemFont(ofSize: 12); serviceLabel.textColor = .secondaryLabelColor
+        serviceLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular); serviceLabel.textColor = .secondaryLabelColor
         serviceLabel.lineBreakMode = .byTruncatingMiddle
         let actions = NSStackView(); actions.orientation = .horizontal; actions.spacing = 8
-        for (title, action) in [("导入已有部署…", #selector(importData)), ("浏览器打开", #selector(openBrowser)), ("刷新", #selector(reload))] {
-            let button = NSButton(title: title, target: self, action: action); button.bezelStyle = .rounded; actions.addArrangedSubview(button)
+        for (symbol, title, action) in [("doc.on.doc", "复制本机 API 地址", #selector(copyAPIAddress)), ("arrow.up.right.square", "在浏览器中打开", #selector(openBrowser)), ("arrow.clockwise", "刷新页面", #selector(reload))] {
+            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: title) ?? NSImage(), target: self, action: action)
+            button.toolTip = title; button.setAccessibilityLabel(title); button.bezelStyle = .inline; button.isBordered = false
+            button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            actions.addArrangedSubview(button)
         }
         loading = NSProgressIndicator(); loading.style = .spinning; loading.controlSize = .large; loading.isDisplayedWhenStopped = false
         for view in [webView!, toolbar, loading!] { view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view) }
         for view in [serviceLabel!, actions] { view.translatesAutoresizingMaskIntoConstraints = false; toolbar.addSubview(view) }
         serviceLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: root.topAnchor), toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor), toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor), toolbar.heightAnchor.constraint(equalToConstant: 46),
+            toolbar.topAnchor.constraint(equalTo: root.topAnchor), toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor), toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor), toolbar.heightAnchor.constraint(equalToConstant: 32),
             serviceLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 16), serviceLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor), serviceLabel.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -12),
             actions.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -12), actions.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor), webView.leadingAnchor.constraint(equalTo: root.leadingAnchor), webView.trailingAnchor.constraint(equalTo: root.trailingAnchor), webView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -119,9 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     private func startService(importFrom: URL? = nil) {
         generation += 1; let current = generation
-        intentionalStop = false; baseURL = nil; ioQueue.sync { output = Data() }
+        intentionalStop = false; baseURL = nil
+        ioQueue.sync { output = Data(); try? logHandle?.close(); logHandle = nil }
         webView.configuration.userContentController.removeAllUserScripts()
-        serviceLabel.stringValue = importFrom == nil ? "正在启动本机工作空间…" : "正在复制并校验原部署数据…"
+        updateServiceStatus(importFrom == nil ? "正在启动本机工作空间…" : "正在复制并校验原部署数据…")
         loading.startAnimation(nil)
         do {
             try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -176,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 if let profile = event["profileDir"] as? String { self.profileDir = URL(fileURLWithPath: profile, isDirectory: true) }
                 if event["needsSetup"] as? Bool == true { self.installBootstrap(for: url) }
                 self.bootstrap = ""
-                self.serviceLabel.stringValue = "本机 API · \(text)/v1"
+                self.updateServiceStatus("本机 API · \(text)/v1")
                 self.webView.load(URLRequest(url: url))
             }
         }
@@ -201,19 +245,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func serviceExited(generation current: Int) {
         guard generation == current else { return }
         process = nil
+        ioQueue.sync { try? logHandle?.close(); logHandle = nil }
         if quitting { NSApp.reply(toApplicationShouldTerminate: true); return }
         if let completion = pendingStop { pendingStop = nil; completion(); return }
         if !intentionalStop { startupFailed("本机服务已停止。请点击“重试”；若刚导入数据，原桌面工作空间仍保留，可重新启动恢复。") }
     }
     private func stopService(_ completion: @escaping () -> Void) {
         cancelAuthentication()
-        intentionalStop = true; baseURL = nil
+        intentionalStop = true; baseURL = nil; updateServiceStatus("本机服务正在停止…")
         guard let child = process, child.isRunning else { completion(); return }
         pendingStop = completion; child.terminate()
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { if child.isRunning { kill(child.processIdentifier, SIGKILL) } }
     }
     private func startupFailed(_ message: String) {
-        loading.stopAnimation(nil); serviceLabel.stringValue = "本机服务未运行"
+        loading.stopAnimation(nil); updateServiceStatus("本机服务未运行")
         let alert = NSAlert(); alert.messageText = "无法打开工作空间"; alert.informativeText = message
         alert.addButton(withTitle: "重试"); alert.addButton(withTitle: "打开数据目录"); alert.addButton(withTitle: "关闭")
         alert.beginSheetModal(for: window) { [weak self] result in
@@ -235,6 +280,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
     @objc private func openData() { NSWorkspace.shared.open(profileDir ?? supportDir) }
+    @objc private func showWorkspace() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    private func showPage(_ page: String) {
+        guard baseURL != nil else { return }
+        showWorkspace()
+        // Only fixed, local page identifiers enter JavaScript. Hash navigation
+        // preserves the current session and uses the web app's normal guards.
+        guard ["playground", "routing", "providers"].contains(page) else { return }
+        webView.evaluateJavaScript("location.hash = '#\(page)'", completionHandler: nil)
+    }
+    @objc private func showPlayground() { showPage("playground") }
+    @objc private func showRouting() { showPage("routing") }
+    @objc private func showProviders() { showPage("providers") }
+    @objc private func copyAPIAddress() {
+        guard let base = baseURL else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(base.absoluteString + "/v1", forType: .string)
+    }
     @objc private func openBrowser() { if let url = baseURL { NSWorkspace.shared.open(url) } }
     @objc private func reload() { if baseURL != nil { webView.reload() } }
     @objc private func restart() { stopService { self.startService() } }

@@ -36,6 +36,12 @@ Anthropic SDK 自动携带 `anthropic-version`，模型列表将返回 Anthropic
 
 ## 模型 ID 与路由
 
+客户端协议与上游协议相互独立。同一平台 Key 可调用 Chat Completions、Responses、Messages；网关先将请求规范化，再按实际服务商模型适配上游，最后转换回客户端协议。接入向导不再按上游协议限制模型列表；只有对话模型可用于这些客户端。
+
+路由页以“首选模型 → 失败后怎么办”为主线。失败时可自动挑选备用、手动指定模型顺序，或不换模型；进阶选路、关键词例外和调用限制默认收起。右侧按当前草稿检查真实顺序，不请求上游、不保存设置，只有「保存并生效」会影响后续调用。个人实验室默认继承团队设置，只保存覆盖项；订阅凭证仍仅限本人，不进入业务 API Key 调用链。
+
+管理接口 `/api/routing` 的 `routing.primaryModel` 可指定 `active` 服务商内的首选模型，不改变服务商自身的当前模型。`routing.backupMode="selected"` 与 `routing.backups=[{"providerId":"backup-provider","model":"model-id"}]` 表示严格手动备用顺序，需使用 `fallback` 策略；不会隐式加入列表外的其他模型（已启用的关键词例外除外）。备用密钥同样占用尝试次数。`POST /api/routing/preview` 可携带完整 `policy` 检查草稿；不携带时检查已保存策略。外部调用的 `provider::model` 固定语义不变。
+
 - `auto`：使用当前租户路由策略。
 - `siliconflow` 等服务商 ID：固定服务商的当前模型。
 - `siliconflow::zai-org/GLM-5.3`：固定服务商及已注册模型。
@@ -78,27 +84,29 @@ print(message.content)
 
 ```toml
 model_provider = "switchboard"
-model = "provider::responses-model"
+model = "auto"
 
 [model_providers.switchboard]
 name = "Switchboard"
 base_url = "http://127.0.0.1:3100/v1"
 env_key = "SWITCHBOARD_API_KEY"
 wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
 ```
 
-运行前在本地设置 `SWITCHBOARD_API_KEY`。网关目前只实现无状态 Responses 子集，不支持服务端会话续接、内置工具等；因此这属于基础请求接入说明，**不保证 Codex CLI 完整功能可用**。配置字段以 [Codex 官方文档](https://developers.openai.com/codex/config-reference)为准。
+运行前在本地设置 `SWITCHBOARD_API_KEY`。`auto` 按组织策略选路，`provider::model` 固定模型；上游不必使用 Responses 协议。网关目前只实现无状态 Responses 子集；思考参数、推理历史、服务端会话续接、内置／自定义工具等尚未完整适配，**不保证 Codex CLI 完整功能可用**。先验证简单对话与函数工具，不支持的请求会明确报错。配置字段以 [Codex 官方文档](https://developers.openai.com/codex/config-reference)为准。
 
-### Claude Code CLI（原生 Claude 模型）
+### Claude Code CLI（Messages 入口）
 
 ```sh
 export ANTHROPIC_BASE_URL="http://127.0.0.1:3100"
 export ANTHROPIC_AUTH_TOKEN="$ROUTER_API_KEY"
-export ANTHROPIC_MODEL="provider::claude-model"
+export ANTHROPIC_MODEL="auto"
 claude
 ```
 
-模型 ID 需替换为已配置的原生 Anthropic Messages 协议 Claude 模型。`ANTHROPIC_BASE_URL` 是网关根地址，**不加 `/v1`**。不要把 Claude Code 通过网关路由到非 Claude 模型；复杂工具调用等功能需按真实上游验证，不能假定完整兼容。此环境变量方案针对 CLI，而非 Claude 桌面端。参阅 [Claude Code 网关接入说明](https://code.claude.com/docs/en/llm-gateway-connect)。
+`auto` 使用组织路由，可改为 `provider::model` 固定模型；网关根据目标上游自动转换协议。`ANTHROPIC_BASE_URL` 是网关根地址，**不加 `/v1`**。Anthropic 官方不支持把 Claude Code 路由到非 Claude 模型，基础请求可转换不代表官方或完整兼容。复杂工具调用、原生 Token 计数等需单独验证；计数接口仍要求 Anthropic 上游，不把估算值伪装成原生计数。此方案针对 CLI，而非 Claude 桌面端。参阅 [Claude Code 网关接入说明](https://code.claude.com/docs/en/llm-gateway-connect)。
 
 需要长期使用时，可将相同变量放入用户级 `~/.claude/settings.json` 的 `env` 中（以下为示范，请替换 Key 和模型 ID）：
 
@@ -107,7 +115,7 @@ claude
   "env": {
     "ANTHROPIC_BASE_URL": "https://switchboard.tail7fa45b.ts.net",
     "ANTHROPIC_AUTH_TOKEN": "替换为本组织的 Switchboard API Key",
-    "ANTHROPIC_MODEL": "provider::claude-model"
+    "ANTHROPIC_MODEL": "auto"
   }
 }
 ```
@@ -125,7 +133,7 @@ curl -sS 'https://switchboard.tail7fa45b.ts.net/v1/models' \
 
 通过后运行 `claude doctor`，进入 Claude Code 用 `/status` 检查 Base URL 和凭据来源，再执行 `claude -p 'Reply exactly OK.'` 进行最小调用。`401 Authorization 重复包含 Bearer` 说明配置值多写了前缀；`401 API Key 无效` 说明格式已通过，但 Key 与当前租户已保存的有效 Key 不匹配，可在「API Key 管理」创建新 Key。错误响应不会回显密钥；如需排查，请记录 `x-request-id`。
 
-**关于自动路由：** `model=auto` 可能命中 Kimi 等非 Claude 模型。平台的 Anthropic 兼容入口已处理 Claude Code 的附加 `system` 消息和 `adaptive` 思考参数，简单对话及部分工具调用可工作，但不能因此推断完整 Claude Code 功能、上下文长度或未来版本兼容。生产接入请固定已注册的原生 Anthropic Messages 协议 Claude 模型；当前租户若没有此类模型，应先配置，而不是把 `auto` 当作稳定的 Claude Code 模型。[Claude Code 网关兼容说明](https://code.claude.com/docs/en/llm-gateway)
+**关于自动路由：** `model=auto` 可能命中 Kimi 等非 Claude 模型。平台支持附加 `system` 消息和 `adaptive` 思考参数，但简单对话／函数工具的协议互转测试不等同于完整 Claude Code 端到端验收。严格按官方支持范围部署时，应固定已注册的 Claude 模型，或将组织候选配置为 Claude 模型；不要把任意模型的自动路由当作完整 Claude Code 兼容保证。[Claude Code 网关兼容说明](https://code.claude.com/docs/en/llm-gateway)
 
 ## 图片
 

@@ -147,6 +147,9 @@ test('Personal routing executes private models and cross-provider failover witho
  assert.equal((await post('/api/account/chatgpt/routing',policy)).status,200);
  const configuration=await(await nativeFetch(base+'/api/account/chatgpt/routing',{headers})).json();assert.equal(configuration.personalRouting,true);assert(!JSON.stringify(configuration).includes('private-access'));assert(!JSON.stringify(configuration).includes('shared-key'));assert(!Object.hasOwn(configuration.providers.find(p=>p.id==='shared'),'secret'));
  const preview=await(await post('/api/account/chatgpt/routing/preview',{model:'auto'})).json();assert.deepEqual(preview.candidates.slice(0,3).map(p=>p.model),['fixture-model','alternate','shared-model']);
+ const customDraft={...policy,routing:{...policy.routing,primaryModel:'alternate',backupMode:'selected',backups:[{providerId:'shared',model:'shared-model'}]}};
+ const ownPreview=await(await post('/api/account/chatgpt/routing/preview',{model:'auto',policy:customDraft})).json();assert.equal(ownPreview.draft,true);assert.deepEqual(ownPreview.candidates.map(p=>p.model),['alternate','shared-model']);
+ const unchanged=await(await nativeFetch(base+'/api/account/chatgpt/routing',{headers})).json();assert.notEqual(unchanged.routing.primaryModel,'alternate','预览不得保存个人草稿');
  globalThis.fetch=(url,options)=>nativeFetch(new URL(url,base),{...options,headers:{...options.headers,cookie:'sr_session='+ownerToken}});t.after(()=>globalThis.fetch=nativeFetch);
  const chat=()=>streamChat('sse','',{model:'auto',messages:[{role:'user',content:'hi'}]},()=>{},new AbortController().signal,'default',()=>{},'/api/account/chatgpt/route/stream');
  let result=await chat();assert.equal(result.content,'private-ok');assert.equal(result.route.providerId,providerId);assert.equal(result.outputTokens,3);
@@ -156,6 +159,13 @@ test('Personal routing executes private models and cross-provider failover witho
  const memberHeaders={...headers,cookie:'sr_session='+memberToken};assert.equal((await post('/api/account/chatgpt/routing',policy,memberHeaders)).status,400);
  const memberConfig=await(await nativeFetch(base+'/api/account/chatgpt/routing',{headers:memberHeaders})).json();assert(!memberConfig.providers.some(p=>p.private));
  const sharedConfig=await(await nativeFetch(base+'/api/state',{headers})).json();assert.notEqual(sharedConfig.active,providerId);assert(!sharedConfig.providers.some(p=>p.private));
+ assert.equal(configuration.inherited,false);
+ // Save only active: later organization changes must flow through untouched fields.
+ assert.equal((await post('/api/account/chatgpt/routing',{strategy:sharedConfig.strategy,active:providerId,rules:sharedConfig.rules,routing:sharedConfig.routing})).status,200);
+ assert.equal((await post('/api/routing',{strategy:'weighted',active:'shared',routing:{...sharedConfig.routing,maxAttempts:4}})).status,200);
+ const inheritedChange=await(await nativeFetch(base+'/api/account/chatgpt/routing',{headers})).json();assert.equal(inheritedChange.strategy,'weighted');assert.equal(inheritedChange.routing.maxAttempts,4);assert.equal(inheritedChange.active,providerId);
+ assert.equal((await post('/api/account/chatgpt/routing/inherit',{})).status,200);
+ const restored=await(await nativeFetch(base+'/api/account/chatgpt/routing',{headers})).json();assert.equal(restored.inherited,true);assert.equal(restored.active,'shared');
  calls.length=0;const external=await post('/v1/chat/completions',{model:'auto',stream:true,messages:[{role:'user',content:'hi'}]},{'content-type':'application/json',authorization:'Bearer '+'g'.repeat(64)});await external.text();assert.deepEqual(calls,['shared']);
 });
 

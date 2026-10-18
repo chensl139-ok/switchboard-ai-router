@@ -23,9 +23,15 @@ try{
  for(const dir of [path.join(contents,'MacOS'),server,path.join(resources,'runtime'),path.join(server,'desktop')])mkdirSync(dir,{recursive:true});
  for(const name of readdirSync(root))if(/\.(mjs|ts)$/.test(name)&&name!=='vite.config.mjs')copyFileSync(path.join(root,name),path.join(server,name));
  for(const name of ['package.json','package-lock.json'])copyFileSync(path.join(root,name),path.join(server,name));
- cpSync(path.join(root,'public'),path.join(server,'public'),{recursive:true,verbatimSymlinks:true});
+ // Vue and TypeScript source are already in the production web build. Runtime
+ // shared .js helpers remain because the backend imports model/audit metadata.
+ cpSync(path.join(root,'public'),path.join(server,'public'),{recursive:true,verbatimSymlinks:true,filter:file=>!/(?:\.vue|\.d\.ts|\.map)$/.test(file)&&!file.endsWith('/public/lab-request.ts')&&!file.endsWith('/public/app.js')});
  copyFileSync(path.join(root,'desktop','runtime.mjs'),path.join(server,'desktop','runtime.mjs'));
  run('npm',['ci','--omit=dev','--ignore-scripts'],{cwd:server});
+ // Debugging artifacts are not loaded by either runtime. Keep package entry
+ // points and all third-party licences; do not alter installed source modules.
+ const pruneMaps=dir=>{for(const entry of readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())pruneMaps(file);else if(entry.isFile()&&entry.name.endsWith('.map'))rmSync(file);}};
+ pruneMaps(path.join(server,'node_modules'));
  copyFileSync(binary,path.join(resources,'runtime','node'));chmodSync(path.join(resources,'runtime','node'),0o755);
  // Keep the official runtime intact; strip only the packaged copy's debug/local
  // symbols, then re-sign it before signing the whole bundle. Public exports stay.

@@ -15,7 +15,8 @@ export function inferAgentProtocol(provider,model){
  return provider?.protocol||'openai';
 }
 
-// 每个工具允许选择的模型集合：Claude Code 只接 Anthropic 原生协议模型；Codex 只接 Responses 模型；通用客户端用 chat 能力模型并额外提供 auto。
+// 客户端入口协议不等于上游协议。基础请求由网关转换，共用对话模型目录。
+// 模型可选不代表第三方客户端的所有高级能力均已适配。
 export function eligibleModels(state,tool){
  const providers=(state?.providers||[]).filter(p=>p.enabled&&(p.hasKey||p.hasMeteredKey));
  const rows=[];
@@ -23,9 +24,7 @@ export function eligibleModels(state,tool){
   const value=`${p.id}::${model}`;
   if(rows.some(r=>r.value===value))continue;
   const protocol=inferAgentProtocol(p,model),caps=modelCapabilities(model);
-  if(tool==='claude'&&protocol!=='anthropic')continue;
-  if(tool==='codex'&&protocol!=='responses')continue;
-  if(tool==='generic'&&!caps.chat)continue;
+  if(!caps.chat)continue;
   rows.push({value,label:`${p.name} · ${model}`,protocol});
  }
  return rows;
@@ -42,7 +41,7 @@ export ANTHROPIC_MODEL="${model}"
 claude`;
  const settings=JSON.stringify({env:{ANTHROPIC_BASE_URL:origin,ANTHROPIC_AUTH_TOKEN:key,ANTHROPIC_MODEL:model}},null,2);
  const verify=`curl -N '${origin}/v1/messages' \\
-  -H 'x-api-key: ${key}' \\
+  -H "x-api-key: ${key}" \\
   -H 'anthropic-version: 2023-06-01' \\
   -H 'Content-Type: application/json' \\
   -d '{"model":"${model}","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"stream":true}'`;
@@ -59,11 +58,13 @@ model = "${model}"
 name = "Switchboard"
 base_url = "${origin}/v1"
 env_key = "SWITCHBOARD_API_KEY"
-wire_api = "responses"`;
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false`;
  const env=`# 设置后运行 codex
 export SWITCHBOARD_API_KEY="${key}"`;
  const verify=`curl -N '${origin}/v1/responses' \\
-  -H 'Authorization: Bearer ${key}' \\
+  -H "Authorization: Bearer ${key}" \\
   -H 'Content-Type: application/json' \\
   -d '{"model":"${model}","input":"hi","max_output_tokens":64,"stream":true,"store":false}'`;
  return {config,env,verify};
@@ -84,13 +85,13 @@ API Key：  ${key}
 
 const TOOL_LABELS={claude:'Claude Code',codex:'Codex CLI',generic:'通用客户端'};
 const TOOL_NOTES={
- claude:'Claude Code 只应路由到原生 Anthropic Messages 协议的 Claude 模型，列表已按此过滤；工程内复杂工具调用与扩展能力以实际验证为准。完整 Key 写入用户级 ~/.claude/settings.json 后是明文保存，切勿提交到 Git；建议不要写入项目级 .claude/settings.json。启动后用 /status 核对网关地址与认证来源。',
- codex:'Codex 通过本平台的无状态 Responses 子集接入，列表只保留 Responses 能力模型，不要使用 auto。会话续接、内置工具等高级能力可能不兼容，先用简单对话验证。更多字段见 Codex 官方配置说明。',
+ claude:'Claude Code 向网关发送 Messages，网关按目标模型适配上游协议；auto 跟随组织策略。Anthropic 官方不支持将 Claude Code 路由至非 Claude 模型，选择其他模型仅代表基础请求可转换，不代表官方支持或完整兼容。原生 Token 计数仍要求 Anthropic 上游。配置请合并到用户级 ~/.claude/settings.json，勿提交到 Git；启动后用 /status 核对。',
+ codex:'Codex 向网关发送 Responses，网关适配上游协议；auto 跟随组织策略，无需限定上游为 Responses。当前仅支持无状态 Responses 子集；思考参数、推理历史、内置与自定义工具、服务端会话续接等高级能力未完整适配，不支持的参数会明确报错。请先验证简单对话和函数工具，不代表完整 Codex 兼容。',
  generic:'任何 OpenAI 兼容客户端都可接入。auto 跟随当前租户路由策略（可能跨服务商回退）；provider::model 表示固定。模型列表查询不占用生成配额。',
 };
 const NO_MODEL_HINT={
- claude:'当前租户没有 Anthropic 原生协议的已启用模型。请在「服务商与模型」配置支持 Messages 协议的上游并启用 Claude 模型后重试。',
- codex:'当前租户没有 Responses 能力的已启用模型（如 GPT-5 / o 系列 / codex 模型）。请在「服务商与模型」配置并启用后重试。',
+ claude:'当前租户没有已启用且已配密钥的对话模型。请先在「服务商与模型」完成配置，无需按客户端手动选择上游协议。',
+ codex:'当前租户没有已启用且已配密钥的对话模型。请先在「服务商与模型」完成配置，无需按客户端手动选择上游协议。',
  generic:'当前租户没有已启用且已配密钥的服务商。请先在「服务商与模型」完成配置。',
 };
 
@@ -109,8 +110,8 @@ export async function renderConnect({api,esc,toast,isCurrent=()=>true}){
 
  const options=()=>eligibleModels(state,tool);
  const currentModel=()=>{
-  const pool=[...options().map(o=>o.value),...(tool==='generic'?['auto']:[])];
-  if(!picked[tool]||!pool.includes(picked[tool]))picked[tool]=tool==='generic'&&pool.includes('auto')?'auto':options()[0]?.value||'';
+  const pool=[...(options().length?['auto']:[]),...options().map(o=>o.value)];
+  if(!picked[tool]||!pool.includes(picked[tool]))picked[tool]=pool[0]||'';
   return picked[tool];
  };
  const snippet=(title,id,code)=>`<div class="api-snippet-head"><span>${esc(title)}</span><button type="button" data-connect-copy="${id}">复制</button></div><pre id="${id}" class="connect-snippet">${esc(code)}</pre>`;
@@ -120,7 +121,7 @@ export async function renderConnect({api,esc,toast,isCurrent=()=>true}){
   const model=currentModel(),token=keyToken;
   const s=tool==='claude'?claudeCodeSnippets({origin,token,model:model||MODEL_PLACEHOLDER}):tool==='codex'?codexSnippets({origin,token,model:model||MODEL_PLACEHOLDER}):genericSnippets({origin,token,model:model||'auto'});
   const opts=options();
-  const modelField=opts.length?`<label class="connect-model-field">模型 <select id="connect-model">${[...(tool==='generic'?[{value:'auto',label:'自动路由 · auto'}]:[]),...opts].map(o=>`<option value="${esc(o.value)}" ${o.value===model?'selected':''}>${esc(o.label)}</option>`).join('')}</select></label><p class="muted">${tool==='claude'?'将写入 ANTHROPIC_MODEL，格式为 provider::model。':tool==='codex'?'将写入 config.toml 的 model 字段。':'auto 跟随路由策略，provider::model 精确固定。'}</p>`:`<div class="info">${NO_MODEL_HINT[tool]}</div>`;
+  const modelField=opts.length?`<label class="connect-model-field">模型 <select id="connect-model">${[{value:'auto',label:'自动路由 · auto（推荐）'},...opts].map(o=>`<option value="${esc(o.value)}" ${o.value===model?'selected':''}>${esc(o.label)}</option>`).join('')}</select></label><p class="muted">所有客户端共用模型目录：auto 跟随组织策略；provider::model 固定模型。网关自动转换协议，客户端无需选择上游协议。个人订阅不通过业务 API Key 对外调用。</p>`:`<div class="info">${NO_MODEL_HINT[tool]}</div>`;
   const keyBanner=keyToken?`<div class="info connect-key-banner" role="status">已把新 Key「${esc(keyName)}」的完整明文填入下方配置。<strong>仅在本页展示这一次</strong>，刷新或离开后将无法找回，请确认配置已保存。</div>`:'';
   root.innerHTML=`<div class="heading"><div><div class="eyebrow">CONNECT YOUR TOOLS</div><h1>接入向导</h1><p>把 Claude Code、Codex 或其他客户端接到本网关：选 Key → 选模型 → 复制配置。</p></div></div>
   <div class="panel"><h2>① 选择业务 API Key</h2>

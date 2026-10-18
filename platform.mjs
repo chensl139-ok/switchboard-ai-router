@@ -14,6 +14,7 @@ import {FeishuBindings} from './feishu-bindings.mjs';
 import {DesktopFeishu} from './desktop-feishu.mjs';
 import {LabHistory} from './lab-history.mjs';
 import {Subscriptions} from './subscriptions.mjs';
+import {routingOverrides} from './public/routing-policy.js';
 import {ChatGPTPlan,planRequest} from './chatgpt-plan.mjs';
 import {validateRouting} from './routing.mjs';
 import {hasCredential} from './provider-key.ts';
@@ -60,8 +61,8 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  async function personalContext(current){
   const shared=engine(current.tenantId).routingState(),own=await plan.providers(current);
   const providers=own.map((p,index)=>({...p,priority:shared.providers.length+index,weight:1,prices:{}}));
-  const saved=plan.routing(current)||{strategy:shared.strategy,active:shared.active,rules:shared.rules,routing:shared.routing};
-  const policy={...saved,routing:{...saved.routing,requestsPerMinute:shared.routing.requestsPerMinute,concurrency:shared.routing.concurrency}};
+  const saved=plan.routing(current)||{};
+  const policy={strategy:shared.strategy,active:shared.active,rules:shared.rules,...saved,routing:{...shared.routing,...saved.routing,requestsPerMinute:shared.routing.requestsPerMinute,concurrency:shared.routing.concurrency}};
   return {providers,policy,
    validate:(p,input)=>{if(!input.stream||input.tools?.length||input.thinking_mode&&input.thinking_mode!=='auto')throw fail('个人订阅候选仅支持 SSE 文本、模型默认思考，不支持工具或自定义思考');return planRequest(p.model,input.messages);},
    response:(p,input,signal)=>plan.response(current,{id:p.subscriptionId,model:p.model,messages:input.messages},signal),
@@ -169,18 +170,22 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      if(req.method==='GET'&&route==='chatgpt/providers')return json(res,200,{providers:await plan.providers(current)});
      if(req.method==='GET'&&route==='chatgpt/routing'){
       const shared=engine(current.tenantId).routingState(),context=await personalContext(current);
-      return json(res,200,{...context.policy,personalRouting:true,providers:[...shared.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:Boolean(secret),hasMeteredKey:Boolean(meteredSecret)})),...context.providers]});
+      return json(res,200,{...context.policy,personalRouting:true,inherited:!plan.routing(current),providers:[...shared.providers.map(({secret,meteredSecret,...p})=>({...p,hasKey:Boolean(secret),hasMeteredKey:Boolean(meteredSecret)})),...context.providers]});
      }
      if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))throw fail('需要同源 JSON 请求',415);
      const data=await body(req,512000);
      if(route==='chatgpt/routing'){
       const shared=engine(current.tenantId).routingState(),context=await personalContext(current);
       const policy=validateRouting(data,[...shared.providers,...context.providers],p=>p.private?p.enabled:hasCredential(p));
-      return json(res,200,plan.setRouting(current,policy));
+      const overrides=routingOverrides(shared,policy);
+      return json(res,200,Object.keys(overrides).length?plan.setRouting(current,overrides):plan.clearRouting(current));
      }
+     if(route==='chatgpt/routing/inherit')return json(res,200,plan.clearRouting(current));
      if(route==='chatgpt/routing/preview'){
       if(typeof(data.prompt??'')!=='string'||(data.prompt||'').length>2000)throw fail('预览提示词最多 2000 字');
-      const context=await personalContext(current);return json(res,200,engine(current.tenantId).preview({model:data.model||'auto',messages:[{role:'user',content:data.prompt||'路由预览'}],stream:true,thinking_mode:data.thinking_mode||'auto'},context));
+      const context=await personalContext(current);
+      if(data.policy){const shared=engine(current.tenantId).routingState();context.policy=validateRouting(data.policy,[...shared.providers,...context.providers],p=>p.private?p.enabled:hasCredential(p));}
+      return json(res,200,{...engine(current.tenantId).preview({model:data.model||'auto',messages:[{role:'user',content:data.prompt||'路由预览'}],stream:true,thinking_mode:data.thinking_mode||'auto'},context),draft:Boolean(data.policy)});
      }
      if(route==='chatgpt/route/stream'){
       const context=await personalContext(current),release=acquireGlobal(),controller=new AbortController();res.once('close',()=>controller.abort());

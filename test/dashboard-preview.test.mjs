@@ -8,7 +8,8 @@ test('首页首次调用只认成功，候选链交由实际路由预览填充',
  const provider={id:'p',name:'服务商',model:'moss-transcribe-1.0',enabled:true,hasKey:true};
  const html=renderDashboard({state:{providers:[provider],active:'p',strategy:'fallback',logs:[{status:502,latency:15,time:new Date().toISOString(),provider:'服务商',model:provider.model}]},esc,ready:item=>item.enabled,isManager:true});
  assert.match(html,/完成首次成功调用/);
- assert.match(html,/67%/);
+ assert.match(html,/setup-checklist/);
+ assert.doesNotMatch(html,/progress-ring/);
  assert.match(html,/正在计算实际可用候选/);
  assert.doesNotMatch(html,/route-node[^]*moss-transcribe-1\.0/);
 });

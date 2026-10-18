@@ -9,14 +9,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-![Switchboard console tour](docs/demo/switchboard-tour.gif)
+![Switchboard workspace — demo data](docs/demo/workspace.png)
 
-## Why Switchboard
+## Features
 
 - **Your keys stay on your machine.** Self-hosted BYOK gateway: provider keys are AES-256-GCM encrypted at rest, business API keys are stored hashed, and prompts/responses are never written to logs.
-- **Routing, not just proxying.** Six strategies — fixed, failover, weighted, latency-first, keyword rules and cost-first — with circuit breaking, timeouts and model-level fallback across providers.
-- **A real console, not a CLI puzzle.** Providers, models, policies, playground, people, audit and pricing in one web UI; also ships as a macOS desktop app with zero Docker/Node requirements.
-- **Small and auditable.** A single Node.js process with **only two runtime dependencies** (`ws`, `marked`). No message queue, no heavyweight framework, no telemetry. Full source is reviewable in an afternoon.
+- **Model-level routing.** Pick a preferred model and automatic or ordered backups, with price/latency/weight objectives, keyword exceptions, circuit breaking and a total request timeout.
+- **A shared workspace.** Providers, models, experiment history, keys, members and usage in one interface. `⌘K` / `Ctrl+K` searches pages and available models within your current permissions.
+- **Local deployment.** One Node.js process with two runtime dependencies (`ws`, `marked`). The macOS app uses system WebKit and bundles its runtime; no separate Docker or Node installation is needed.
+
+The main branch includes [unreleased interface and workflow improvements](CHANGELOG.md#unreleased). Published v2.2.0 images do not automatically include main-branch commits; build from source to try the latest changes.
 
 ## Quick start (5 minutes)
 
@@ -32,8 +34,8 @@ docker compose up -d --build
 Open [http://127.0.0.1:3100](http://127.0.0.1:3100), enter the `ADMIN_TOKEN` from `.env` and create the owner account. Then:
 
 1. **Providers & Models** — add an upstream base URL + API key, fetch its model list, enable the models you want to expose.
-2. **Routing** — pick the default provider, candidate order, strategy and attempt budget. Route preview is computed locally and never calls upstreams.
-3. **Model Lab** — test a call, compare 2–4 models side by side, run image/audio/video tasks.
+2. **Routing** — pick a preferred model and choose automatic backups, an ordered list or no model switching. Preview your draft before saving; it never calls upstreams.
+3. **Model Lab** — test a call, compare models, run media tasks and resume fully saved text conversations from History.
 4. **API Keys** — issue a business key with expiry and quota for your applications.
 
 Call it like any OpenAI-compatible endpoint:
@@ -101,7 +103,7 @@ Snapshot October 2026 — check each project's latest docs, and please PR correc
 | License | **MIT** | MIT core + enterprise dir | MIT | AGPL-3.0 + extra terms | MIT |
 | Runtime | Node.js · **2 runtime deps** | Python SDK + proxy | Go single binary | Go single binary | Node CLI |
 | Web console | ✅ (CN-first, EN i18n planned) | ✅ | ✅ | ✅ | CLI-first |
-| Routing strategies | 6 (incl. keyword, cost) | broad | channel fallback | channel + convert | per-agent rules |
+| Routing strategies | Fixed / auto; 4 objectives + rules + failover | broad | channel fallback | channel + convert | per-agent rules |
 | Protocol conversion | OpenAI Chat / Responses / Completions + Anthropic Messages | broadest (100+ providers) | OpenAI-compatible | OpenAI / Claude / Gemini | agent-focused |
 | Multi-tenant RBAC + audit | ✅ built-in | enterprise tier | 🔶 basic users/groups | 🔶 basic users/groups | ❌ |
 | Model playground & compare | ✅ with latency metrics | 🔶 dashboard test | 🔶 | 🔶 | ❌ |

@@ -179,6 +179,7 @@ export class ChatGPTPlan {
  }
  routing(caller){this.guard(caller);return this.state.routing?.find(item=>item.userId===caller.userId&&item.tenantId===caller.tenantId)?.policy||null;}
  setRouting(caller,policy){this.guard(caller);this.save({...this.state,routing:[...(this.state.routing||[]).filter(item=>item.userId!==caller.userId||item.tenantId!==caller.tenantId),{userId:caller.userId,tenantId:caller.tenantId,policy}]});return {ok:true};}
+ clearRouting(caller){this.guard(caller);this.save({...this.state,routing:(this.state.routing||[]).filter(item=>item.userId!==caller.userId||item.tenantId!==caller.tenantId)});return {ok:true};}
  async response(caller,{id,model,messages},signal){
   const request=planRequest(model,messages);if(!(await this.models(caller,id)).some(item=>item.id===model))throw fail('当前订阅不支持此模型');
   const token=await this.access(caller,id);

@@ -146,7 +146,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    if(!modelCapabilities(candidate.model).chat){excluded.push({providerId:candidate.id,model:candidate.model,reason:'对话路由跳过媒体或非对话模型',status:400});continue;}
    try{validate(candidate,input);compatible.push(candidate);}catch(error){excluded.push({providerId:candidate.id,model:candidate.model,reason:error.message,status:error.status||400});}
   }
-  if((!input.model||input.model==='auto')&&['fallback','latency','weighted','rules'].includes(scoped.strategy)&&compatible.length>1){
+  if((!input.model||input.model==='auto')&&scoped.routing.backupMode!=='selected'&&['fallback','latency','weighted','rules'].includes(scoped.strategy)&&compatible.length>1){
    const primary=compatible[0],alternate=compatible.find(route=>route.id===primary.id&&route.model!==primary.model),other=compatible.find(route=>route.id!==primary.id);
    const head=[primary,alternate,other].filter(Boolean);
    compatible.splice(0,compatible.length,...head,...compatible.filter(route=>!head.includes(route)));
@@ -264,9 +264,10 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      const input=await body(req),prompt=input?.prompt??'';
      if(typeof prompt!=='string'||prompt.length>2000)throw fail('预览提示词最多 2000 字');
      const normalized=normalizeRequest('chat',{model:input?.model||'auto',messages:[{role:'user',content:prompt||'路由预览'}],thinking_mode:input?.thinking_mode||'auto'});
-     const now=Date.now(),plan=planRoutes(normalized,{sequenceValue:sequence,now});
-     const candidates=plan.compatible.map((route,index)=>({order:index+1,providerId:route.id,provider:route.name,model:route.model,protocol:route.protocol,channel:route.channelOverride||channelFor(route,route.model),reason:route.routeReason,withinAttemptBudget:index<state.routing.maxAttempts,health:healthOf(route,route.model,now)}));
-     return json(res,200,{strategy:state.strategy,maxAttempts:state.routing.maxAttempts,candidates:candidates.slice(0,Math.max(10,state.routing.maxAttempts+2)),total:candidates.length,excluded:plan.excluded.slice(0,20)});
+     const policy=input.policy?validateRouting(input.policy,state.providers):state;
+     const now=Date.now(),context=input.policy?{policy,providers:[]}:null,plan=planRoutes(normalized,{sequenceValue:sequence,now,context});
+     const candidates=plan.compatible.map((route,index)=>({order:index+1,providerId:route.id,provider:route.name,model:route.model,protocol:route.protocol,channel:route.channelOverride||channelFor(route,route.model),reason:route.routeReason,withinAttemptBudget:index<policy.routing.maxAttempts,health:healthOf(route,route.model,now)}));
+     return json(res,200,{strategy:policy.strategy,maxAttempts:policy.routing.maxAttempts,draft:Boolean(input.policy),candidates:candidates.slice(0,Math.max(10,policy.routing.maxAttempts+2)),total:candidates.length,excluded:plan.excluded.slice(0,20)});
     }
     if(req.method==='GET'&&url.pathname==='/v1/openapi.json')return json(res,200,platformOpenAPI);
     if(req.method==='GET'&&url.pathname==='/v1/models/all')return json(res,200,flattenDiscovery(await discovery.refresh(false)));
@@ -348,10 +349,17 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      const [removed]=state.providers.splice(index,1);state.rules=state.rules.filter(rule=>rule.providerId!==removed.id);if(state.catalog)delete state.catalog[removed.id];
      if(state.providerAliases)for(const [alias,target] of Object.entries(state.providerAliases))if(target.id===removed.id)delete state.providerAliases[alias];
      if(state.active===removed.id)state.active=state.providers.find(p=>p.enabled&&hasCredential(p))?.id||'';
+     if(state.routing.primaryModel&&!state.providers.find(p=>p.id===state.active)?.models.includes(state.routing.primaryModel))delete state.routing.primaryModel;
+     const primary=state.routing.primaryModel||state.providers.find(p=>p.id===state.active)?.model;
+     if(state.routing.backups)state.routing.backups=state.routing.backups.filter(p=>p.providerId!==removed.id&&(p.providerId!==state.active||p.model!==primary));
+     if(state.routing.backupMode==='selected'&&!state.routing.backups?.length)state.routing.backupMode='auto';
      state.providers.forEach((p,position)=>p.priority=position);save();return json(res,200,safe());
     }
     if(req.method==='POST'&&url.pathname==='/api/routing'){
-     const b=await body(req),previousActive=state.active;Object.assign(state,validateRouting({...b,rules:b.rules??state.rules,routing:b.routing??state.routing},state.providers));
+     const b=await body(req),previousActive=state.active,nextRouting=b.routing??structuredClone(state.routing);
+     if(!b.routing&&b.active!==undefined&&b.active!==state.active){nextRouting.primaryModel='';const model=state.providers.find(p=>p.id===b.active)?.model;nextRouting.backups=(nextRouting.backups||[]).filter(p=>p.providerId!==b.active||p.model!==model);if(!nextRouting.backups.length)nextRouting.backupMode='auto';}
+     if(!b.routing&&b.strategy&&!['fallback','rules'].includes(b.strategy))nextRouting.backupMode='auto';
+     Object.assign(state,validateRouting({...b,rules:b.rules??state.rules,routing:nextRouting},state.providers));
      if(state.active&&state.active!==previousActive){const index=state.providers.findIndex(p=>p.id===state.active);state.providers.unshift(...state.providers.splice(index,1));state.providers.forEach((p,position)=>p.priority=position);}
      save();return json(res,200,safe());
     }
@@ -389,6 +397,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    }
    const files={'/':'index.html','/mosi.svg':'mosi.svg','/routing.js':'routing.js','/playground.js':'playground.js','/thinking-capability.js':'thinking-capability.js','/model-capability.js':'model-capability.js','/api-keys.js':'api-keys.js','/stream-client.js':'stream-client.js','/style.css':'style.css','/interface.css':'interface.css','/workspaces.css':'workspaces.css','/model-catalog.js':'model-catalog.js','/accounts.js':'accounts.js','/analytics.js':'analytics.js','/audit.js':'audit.js','/audit-events.js':'audit-events.js','/audit-format.js':'audit-format.js','/request-logs.js':'request-logs.js','/prices.js':'prices.js','/api-docs.js':'api-docs.js','/media-lab.js':'media-lab.js'};
  
+   files['/providers.css']='providers.css';
    if((req.method!=='GET'&&req.method!=='HEAD')||!files[url.pathname])throw fail('页面不存在',404);
    const f=files[url.pathname];return staticServe(req,res,path.join(root,'public',f),f.endsWith('.js')?'text/javascript; charset=utf-8':f.endsWith('.css')?'text/css; charset=utf-8':f.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8');
   }catch(e){const kind=req.protocolKind||(req.url.startsWith('/v1/messages')?'messages':'chat');const error=clientError(kind,e);if(res.headersSent){if(!res.destroyed)res.end('event: error\ndata: '+JSON.stringify(kind==='responses'?{type:'error',message:error.error.message,code:String(e.status||500),param:null}:error)+'\n\n');return;}json(res,e.status||500,error);}
@@ -396,7 +405,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  if(!managed)installWebSocket(server,{authenticate:token=>{try{return identity(token);}catch{return false;}},execute:(input,options)=>{const caller=identity(options.token);return route(input,{...options,apiKeyId:caller.apiKeyId});},originAllowed:(origin,host)=>!origin||origin===`https://${host}`||origin===`http://${host}`||(process.env.WS_ALLOWED_ORIGINS||'').split(',').includes(origin)});
  server.resolveToken=identity;server.execute=(input,options)=>route(input,options);
  server.routingState=()=>({strategy:state.strategy,active:state.active,rules:structuredClone(state.rules),routing:structuredClone(state.routing),providers:state.providers.map(provider=>({...provider,models:[...provider.models]}))});
- server.preview=(input,context)=>{const now=Date.now(),plan=planRoutes(input,{now,context});const policy=context?.policy||state;return {strategy:policy.strategy,maxAttempts:policy.routing.maxAttempts,total:plan.compatible.length,candidates:plan.compatible.slice(0,30).map((p,index)=>({order:index+1,providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason,withinAttemptBudget:index<policy.routing.maxAttempts,health:healthOf(p,p.model,now)})),excluded:plan.excluded.slice(0,20)};};
+ server.preview=(input,context)=>{const now=Date.now(),plan=planRoutes(input,{now,context});const policy=context?.policy||state;return {strategy:policy.strategy,maxAttempts:policy.routing.maxAttempts,total:plan.compatible.length,candidates:plan.compatible.slice(0,30).map((p,index)=>({order:index+1,providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,channel:p.channelOverride,reason:p.routeReason,withinAttemptBudget:index<policy.routing.maxAttempts,health:healthOf(p,p.model,now)})),excluded:plan.excluded.slice(0,20)};};
  server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();apiKeys.close();};server.on('close',server.closeStore);
  server.claimUnassignedKeys=userId=>apiKeys.claimUnassigned(userId);
  return server;

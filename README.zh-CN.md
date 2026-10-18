@@ -9,16 +9,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-![Switchboard 控制台导览](docs/demo/switchboard-tour.gif)
+![Switchboard 工作台（演示数据）](docs/demo/workspace.png)
 
 [v2.2.0 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.2.0) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
-## 为什么选择 Switchboard
+## 主要能力
 
 - **密钥不出你的机器**：自托管 BYOK，服务商密钥 AES-256-GCM 加密落盘，业务 Key 哈希保存，请求日志不记录提示词与回复正文。
-- **是路由，不只是转发**：六种策略（固定、故障转移、加权、延迟优先、关键词规则、经济优先），带熔断、超时和跨服务商的模型级回退。
-- **真控制台，不是配置文件地狱**：服务商、模型、策略、实验室、成员、审计、价格一个界面管完；另有免 Docker/Node 的 macOS 桌面版。
-- **小到可审计**：单 Node.js 进程，运行时仅 2 个第三方依赖（`ws`、`marked`）。无消息队列、无重型框架、无遥测，一个下午能读完源码。
+- **模型级路由**：设置首选模型和失败后的备用方式，可按价格、延迟或权重选路，带关键词例外、熔断和总超时。
+- **工作空间**：管理服务商、模型、实验历史、密钥、成员与用量；`⌘K` / `Ctrl+K` 可搜索页面和可用模型。
+- **部署**：单 Node.js 进程，运行时仅 `ws`、`marked` 两个第三方依赖；macOS App 使用系统 WebKit，内置独立 Node，无需另外安装 Docker 或 Node。
 
 ## 能做什么
 
@@ -34,7 +34,7 @@
 
 这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
 
-当前发布版本为 v2.2.0。GHCR 提供 `2.2.0`、`2.2` 和 `latest` 镜像标签；升级前请备份数据，并核对实际运行的镜像版本。
+当前发布版本为 v2.2.0。主分支包含 [尚未发布的界面与工作流改进](CHANGELOG.md#unreleased)，已发布的 GHCR `2.2.0`、`2.2` 和 `latest` 不自动包含主分支提交。体验主分支请从源码构建；升级前备份数据。
 
 ## 五分钟部署
 
@@ -56,7 +56,7 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 ### macOS 桌面 App
 
-希望直接安装到电脑时，可使用内置运行环境的桌面版，无需 Docker 或 Node。打开 DMG，将 Switchboard 拖入“应用程序”后启动；可从 App 中导入已有部署的独立数据副本。桌面使用、数据目录和打包方式见 [桌面版说明](desktop/README.md)。
+希望直接安装到电脑时，可使用内置运行环境的桌面版，无需 Docker 或 Node。打开 DMG，将 Switchboard 拖入“应用程序”后启动；可从 App 菜单导入已有部署的独立数据副本。菜单栏可查看服务状态、打开实验室与路由，或复制本机 API 地址。桌面使用、数据目录和打包方式见 [桌面版说明](desktop/README.md)。
 
 本机开发版另提供个人 ChatGPT 订阅 OAuth 连接预览，无需 API Key，账户与租户隔离；不等同于组织订阅号池，不向业务 API 或其他成员共享。已在本机验收官方授权、模型获取和实际文本调用；其他账户仍以官方授权结果为准，详见 [订阅连接说明](desktop/README.md#个人订阅连接本机预览)。
 
@@ -106,7 +106,7 @@ docker run -d --name switchboard-ai-router \
 ## 首次配置与调用
 
 1. 在「服务商与模型」添加上游 Base URL 和 API Key；获取模型列表，勾选需要开放的模型并保存。支持自定义兼容服务商，同一服务商可添加备用密钥。
-2. 在「路由策略」选择默认服务商、候选顺序、策略和最多尝试次数。路由预览只计算候选，不向上游发送请求。
+2. 在「路由策略」选首选模型，再选择失败后自动挑选备用、手动指定备用顺序或不换模型。右侧会检查当前草稿的真实调用顺序；确认后点「保存并生效」。进阶设置默认收起，修改草稿和检查顺序都不会请求上游。
 3. 在「模型实验室」调用模型，确认实际命中、协议、输出和错误信息。媒体任务应选择对应的图片、音频、视频或视觉理解入口。
 4. 所有者、管理员和普通成员均可在「API Key 管理」为自己的应用创建 Key、设置有效期和配额；只展示和管理本人创建的 Key。明文仅在创建时显示一次，成员移除或降为只读后，其个人 Key 不再允许新调用。
 
@@ -140,7 +140,7 @@ curl -i http://127.0.0.1:3100/v1/chat/completions \
 | 许可证 | **MIT** | MIT 核心 + 企业目录 | MIT | AGPL-3.0 + 附加条款 | MIT |
 | 运行时 | Node.js · **仅 2 个运行时依赖** | Python SDK + Proxy | Go 单二进制 | Go 单二进制 | Node CLI |
 | 控制台 | ✅ 中文一等公民 | ✅ 英文 | ✅ | ✅ | 以 CLI 为主 |
-| 路由策略 | 6 种（含关键词、经济优先） | 策略丰富 | 渠道级故障转移 | 渠道 + 协议转换 | 面向 Agent 的规则 |
+| 路由策略 | 固定 / 自动；4 个目标 + 任务规则 + 容灾 | 策略丰富 | 渠道级故障转移 | 渠道 + 协议转换 | 面向 Agent 的规则 |
 | 协议互转 | OpenAI Chat / Responses / Completions + Anthropic Messages | 最广（100+ 服务商） | OpenAI 兼容 | OpenAI / Claude / Gemini | 面向 Agent |
 | 多租户 RBAC + 操作审计 | ✅ 内置 | 企业版功能 | 🔶 基础用户/分组 | 🔶 基础用户/分组 | ❌ |
 | 模型实验室与对比 | ✅ 带延迟指标 | 🔶 面板测试 | 🔶 | 🔶 | ❌ |

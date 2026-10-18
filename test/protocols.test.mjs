@@ -42,10 +42,11 @@ test('请求转换保留图片、工具和工具结果；未知模态不静默�
  assert.throws(()=>apiToken({authorization:'Bearer one','x-api-key':'two'}),/不同/);
 });
 test('官方 OpenAI/Anthropic SDK：四种入口、三种上游、图片和工具往返及 SSE',async()=>{
- const dir=mkdtempSync(path.join(tmpdir(),'sdk-protocols-'));const seen=[];
+ const dir=mkdtempSync(path.join(tmpdir(),'sdk-protocols-'));const seen=[];let failNext=0;
  const fetcher=async(url,opts)=>{
   if(opts.method==='GET')return Response.json({data:[{id:'model'},{id:'vision'}]});
   const input=JSON.parse(opts.body);seen.push({url,input});
+  if(failNext-->0)return Response.json({error:'fixture retryable failure'},{status:503});
   if(url.endsWith('/count_tokens'))return Response.json({input_tokens:17});
   const usedTool=input.messages?.some(m=>m.role==='tool'||Array.isArray(m.content)&&m.content.some(p=>p.type==='tool_result'))||input.input?.some(i=>i.type==='function_call_output');
   const wantsTool=!!input.tools?.length&&!usedTool;
@@ -89,6 +90,18 @@ test('官方 OpenAI/Anthropic SDK：四种入口、三种上游、图片和工�
   assert.ok(seen.some(({url,input})=>url.endsWith('/messages')&&input.messages[0]?.content?.some(p=>p.type==='image')));
   assert.ok(seen.some(({url,input})=>url.endsWith('/responses')&&input.input[0]?.content?.some(p=>p.type==='input_image')));
   assert.equal((await anthropic.messages.countTokens({model:'anthropic::model',messages:[{role:'user',content:'hi'}]})).input_tokens,17);
+  await post('/api/routing',{strategy:'fallback',active:'openai',routing:{maxAttempts:3,timeoutMs:120000,requestsPerMinute:1000,concurrency:5}});
+  for(const kind of ['chat','responses','messages'])for(const failures of [0,1,2]){
+   // Fresh fixture model IDs isolate circuit history for each matrix cell.
+   const fixtureModel=`model-${kind}-${failures}`;
+   for(const protocol of ['openai','anthropic','responses'])await post('/api/provider',{id:protocol,name:protocol,baseUrl:`https://${protocol}.example/v1`,protocol,model:fixtureModel,models:[fixtureModel],enabled:true,priority:1});
+   await post('/api/routing',{strategy:'fallback',active:'openai',routing:{maxAttempts:3,timeoutMs:120000,requestsPerMinute:1000,concurrency:5}});
+   failNext=failures;const start=seen.length;
+   if(kind==='messages'){const response=await anthropic.messages.stream({model:'auto',max_tokens:32,messages:[{role:'user',content:'hi'}]}).finalMessage();assert.equal(response.content[0].text,'hello');}
+   else if(kind==='responses'){const stream=await openai.responses.create({model:'auto',input:'hi',stream:true,store:false});let final;for await(const event of stream)if(event.type==='response.completed')final=event.response;assert.equal(final.output[0].content[0].text,'hello');}
+   else {const stream=await openai.chat.completions.create({model:'auto',messages:[{role:'user',content:'hi'}],stream:true});let text='';for await(const chunk of stream)text+=chunk.choices[0]?.delta?.content||'';assert.equal(text,'hello');}
+   assert.equal(seen.length-start,failures+1,'自动路由按重试次数完成 '+kind);
+  }
   await assert.rejects(anthropic.messages.create({model:'openai::model',max_tokens:32,messages:[{role:'user',content:[{type:'document',source:{type:'text',media_type:'text/plain',data:'file'}}]}]}));
  }finally{await new Promise(r=>app.close(r));rmSync(dir,{recursive:true,force:true});}
 });

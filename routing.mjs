@@ -1,6 +1,7 @@
 import {plainText,contentParts} from './protocols.mjs';
 import {usablePrice,priceEstimate,priceAt} from './pricing.mjs';
 import {hasCredential,credentialChannels} from './provider-key.ts';
+import {modelCapabilities} from './public/model-capability.js';
 export const strategies=['manual','fallback','weighted','latency','rules','economy'];
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const retryableStatuses=new Set([401,403,408,429,500,502,503,504,529]);
@@ -42,6 +43,11 @@ export function createRouter(state,usageStore,credentials={}){
   .filter(({model,index})=>hasModelCredential(provider,model,channelOverride)&&((index===0&&!skipOpen)||!recentlyFailed(provider,model,now)))
   .map(({model,index})=>credentialRoutes(provider,model,index===0?(provider.routeReason||'显式起始模型'):'同服务商模型故障转移',channelOverride))
   .reduce((routes,group)=>(routes[0].push(group[0]),routes[1].push(...group.slice(1)),routes),[[],[]]).flat();
+ const ruleFor=input=>{
+  if(state.strategy!=='rules'&&!state.routing.rulesEnabled)return null;
+  const query=plainText([...input.messages].reverse().find(m=>m.role==='user')?.content||'').toLowerCase();
+  return (state.rules||[]).find(rule=>rule.keywords.some(word=>query.includes(word.toLowerCase())));
+ };
  function selectRoutes(input,{sequence=0,now=Date.now(),maxAttempts=state.routing.maxAttempts}={}){
   const available=state.providers.filter(p=>p.enabled&&p.model&&ready(p));
   if(input.model&&input.model!=='auto'){
@@ -60,7 +66,14 @@ export function createRouter(state,usageStore,credentials={}){
    }
    return credentialRoutes(p,model,'显式指定服务商与模型',channelOverride).slice(0,maxAttempts);
   }
-  let candidates=[...available].sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
+  let candidates=available.map(p=>p.id===state.active&&state.routing.primaryModel&&p.models.includes(state.routing.primaryModel)?{...p,model:state.routing.primaryModel}:p).sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
+  if(state.routing.backupMode==='selected'&&state.strategy!=='manual'){
+   const preferred=candidates.find(p=>p.id===state.active),chain=[...(preferred?[{providerId:preferred.id,model:preferred.model}]:[]),...(state.routing.backups||[])];
+   const rule=ruleFor(input);if(rule)chain.unshift({providerId:rule.providerId,model:rule.model});
+   const routes=uniqueRoutes(chain.flatMap((target,index)=>{const p=candidates.find(p=>p.id===target.providerId);return p&&p.models.includes(target.model)&&!recentlyFailed(p,target.model,now)?credentialRoutes(p,target.model,index===0&&rule?'匹配规则：'+rule.name:index===0?'首选模型':'按你设置的备用顺序'):[];}));
+   if(!routes.length)throw fail('首选和备用模型当前均不可用，请检查模型配置或等待熔断恢复',503);
+   return routes.slice(0,maxAttempts);
+  }
   if(state.strategy==='manual')candidates=candidates.filter(p=>p.id===state.active);
   else if(!['economy','fallback','latency','weighted','rules'].includes(state.strategy))candidates=candidates.filter(p=>!recentlyFailed(p,p.model,now));
   if(state.strategy==='economy'){
@@ -69,6 +82,8 @@ export function createRouter(state,usageStore,credentials={}){
    const priced=candidates.flatMap(p=>p.models.filter(model=>channelsFor(p,model).length&&usablePrice(p.prices?.[model],currency,now)&&!recentlyFailed(p,model,now)).map(model=>({...p,model,channelOverride:channelsFor(p,model)[0],routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
    priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));
    if(!priced.length)throw fail('没有同币种且价格有效的候选模型，请同步或录入价格；未知价格不会当作免费',503);
+   const rule=ruleFor(input),matched=rule&&priced.find(route=>route.id===rule.providerId&&route.model===rule.model);
+   if(matched){matched.routeReason=`匹配规则：${rule.name} · 有效参考价`;priced.splice(priced.indexOf(matched),1);priced.unshift(matched);}
    const first=priced[0],next=priced.find(route=>route!==first),other=priced.find(route=>route.id!==first.id);
    const head=[first,next,other].filter((route,index,all)=>route&&all.indexOf(route)===index);
    const ordered=uniqueRoutes([...head,...priced.filter(route=>!head.includes(route)),...priced.flatMap(route=>credentialRoutes(route,route.model,route.routeReason,undefined).slice(1).map(backup=>({...backup,estimatedRequestCost:route.estimatedRequestCost})))]);
@@ -84,14 +99,12 @@ export function createRouter(state,usageStore,credentials={}){
    candidates.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active));
   }
   candidates=candidates.map(p=>({...p,routeReason:reason}));
-  if(state.strategy==='rules'){
-   const text=[...input.messages].reverse().find(m=>m.role==='user')?.content;
-   const query=plainText(text||'').toLowerCase();
-   const rule=(state.rules||[]).find(r=>r.keywords.some(word=>query.includes(word.toLowerCase())));
+  if(state.strategy!=='manual'&&(state.strategy==='rules'||state.routing.rulesEnabled)){
+   const rule=ruleFor(input);
    const provider=rule&&candidates.find(p=>p.id===rule.providerId);
    if(provider&&provider.models.includes(rule.model)&&hasModelCredential(provider,rule.model)&&!recentlyFailed(provider,rule.model,now)){
     candidates=[{...provider,model:rule.model,routeReason:`匹配规则：${rule.name}`},...candidates.filter(p=>p.id!==provider.id)];
-   }else candidates=candidates.map(p=>({...p,routeReason:rule?'规则目标不可用，按默认优先级故障转移':'未匹配任务规则，按默认优先级故障转移'}));
+   }else candidates=candidates.map(p=>({...p,routeReason:rule?'规则目标不可用，按选路目标故障转移':'未匹配任务规则 · '+p.routeReason}));
   }
   if(['fallback','latency','weighted','rules'].includes(state.strategy)){
    // Reserve the first three slots for the primary model, an in-provider model,
@@ -121,7 +134,24 @@ export function validateRouting(body,providers,ready=hasCredential){
   if(!r||typeof r.name!=='string'||!r.name.trim()||r.name.length>80||!Array.isArray(r.keywords)||!r.keywords.length||r.keywords.length>20||r.keywords.some(k=>typeof k!=='string'||!k.trim()||k.length>100))throw fail('规则名称或关键词无效');
   if(!providers.some(p=>p.id===r.providerId&&p.enabled&&p.models.includes(r.model)&&ready(p)))throw fail('规则引用的服务商或模型不可用');
  }
- const routing={currency:'USD',timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5,...body.routing};
+ const routing={currency:'USD',timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5,rulesEnabled:body.strategy==='rules',...body.routing};
+ if(typeof routing.rulesEnabled!=='boolean')throw fail('rulesEnabled 必须为布尔值');
+ if(routing.primaryModel!==undefined&&(typeof routing.primaryModel!=='string'||routing.primaryModel.length>300||routing.primaryModel&&!providers.some(p=>p.id===active&&p.models.includes(routing.primaryModel)&&modelCapabilities(routing.primaryModel).chat)))throw fail('首选模型须为当前首选服务商中已注册的对话模型');
+ if(routing.backupMode!==undefined&&!['auto','selected'].includes(routing.backupMode))throw fail('备用方式无效');
+ if(routing.backups!==undefined){
+  if(!Array.isArray(routing.backups)||routing.backups.length>9)throw fail('最多选择 9 个备用模型');
+  const seen=new Set();for(const target of routing.backups){
+   if(!target||typeof target.providerId!=='string'||typeof target.model!=='string'||!providers.some(p=>p.id===target.providerId&&p.enabled&&ready(p)&&p.models.includes(target.model)&&modelCapabilities(target.model).chat))throw fail('备用模型尚未配置或没有调用权限');
+   const key=JSON.stringify([target.providerId,target.model]);if(seen.has(key))throw fail('备用模型不可重复');seen.add(key);
+  }
+  routing.backups=routing.backups.map(({providerId,model})=>({providerId,model}));
+ }
+ if(routing.backupMode==='selected'){
+  if(!['fallback','rules'].includes(body.strategy)||!active)throw fail('手动备用顺序需要指定首选模型，并使用优先级选路');
+  if(!routing.backups?.length)throw fail('请至少选择一个备用模型，或改为自动挑选');
+  const primary=routing.primaryModel||providers.find(p=>p.id===active)?.model;
+  if(routing.backups.some(p=>p.providerId===active&&p.model===primary))throw fail('备用模型不能与首选模型重复');
+ }
  if(!['USD','CNY'].includes(routing.currency))throw fail('经济优先币种须为 USD 或 CNY');
  for(const [key,min,max] of [['timeoutMs',3000,120000],['maxAttempts',1,10],['requestsPerMinute',1,10000],['concurrency',1,100]]){
   if(!Number.isInteger(routing[key])||routing[key]<min||routing[key]>max)throw fail(`${key} 必须为 ${min}–${max} 的整数`);

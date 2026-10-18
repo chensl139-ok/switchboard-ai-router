@@ -1,9 +1,75 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import {renderDashboard} from '../public/dashboard.js';
+import {mountCommandMenu} from '../public/command-menu.js';
 
 const read=name=>readFileSync(new URL('../'+name,import.meta.url),'utf8');
+
+test('搜索菜单不截获输入法确认键，正常方向键与回车仍可打开页面',()=>{
+ const previousDocument=globalThis.document,events=new Map(),opened=[];
+ const element=()=>({children:[],attributes:new Map(),value:'',isConnected:true,
+  append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;},
+  setAttribute(key,value){this.attributes.set(key,value);},removeAttribute(key){this.attributes.delete(key);},
+  querySelectorAll(){return this.children;},focus(){},scrollIntoView(){},closest(){return this;}});
+ const input=element(),list=element(),close=element(),trigger=element(),dialog=element(),dialogEvents=new Map();
+ Object.assign(dialog,{open:false,querySelector:selector=>selector==='input'?input:selector==='button'?close:list,
+  showModal(){this.open=true;},close(){this.open=false;dialogEvents.get('close')?.();},
+  addEventListener:(type,listener)=>dialogEvents.set(type,listener)});
+ globalThis.document={body:element(),activeElement:trigger,createElement:tag=>tag==='dialog'?dialog:element(),
+  querySelector:()=>dialog.open?dialog:null,addEventListener:(type,listener)=>events.set(type,listener)};
+ try{
+  mountCommandMenu({trigger,canOpen:()=>true,models:()=>[],navigate:id=>opened.push(id),runModel:()=>assert.fail('Unexpected model navigation')});
+  const key=(key,extra={})=>({key,target:input,preventDefault(){this.prevented=true;},...extra});
+  const composingShortcut=key('k',{metaKey:true,isComposing:true});events.get('keydown')(composingShortcut);
+  assert.equal(dialog.open,false);assert.equal(composingShortcut.prevented,undefined);
+  trigger.onclick();assert.equal(dialog.open,true);
+  for(const extra of [{isComposing:true},{isComposing:false,keyCode:229}]){
+   for(const name of ['ArrowDown','ArrowUp','Enter']){
+    const event=key(name,extra);input.onkeydown(event);
+    assert.equal(event.prevented,undefined);assert.equal(dialog.open,true);assert.deepEqual(opened,[]);
+    assert.equal(list.children[0].attributes.get('aria-selected'),'true');
+   }
+  }
+  const down=key('ArrowDown');input.onkeydown(down);assert.equal(down.prevented,true);
+  const enter=key('Enter');input.onkeydown(enter);assert.equal(enter.prevented,true);
+  assert.equal(dialog.open,false);assert.deepEqual(opened,['providers']);
+ }finally{if(previousDocument===undefined)delete globalThis.document;else globalThis.document=previousDocument;}
+});
+
+test('工作空间加载期间导航、重新渲染和搜索均等待当前账户状态',()=>{
+ const app=read('public/app.js'),navigate=app.match(/^function navigate\(next\).*$/m)[0];
+ const render=app.slice(app.indexOf('function render(){'),app.indexOf("\ndocument.addEventListener('visibilitychange'"));
+ const searchGuard=app.match(/commandMenu=mountCommandMenu\(\{trigger:search,canOpen:(.*?),models:/)[1];
+ const navigated=[],context={profile:{tenantId:'one'},state:undefined,tab:'overview',names:{overview:'概览',providers:'服务商'},
+  history:{pushState:(_a,_b,path)=>navigated.push(path)},window:{scrollTo(){}},$:()=>({focus(){}}),
+  canOpen:view=>view!=='audit',render:()=>navigated.push('render')};
+ runInNewContext(navigate+';this.navigate=navigate;this.searchGuard='+searchGuard,context);
+ context.navigate('providers');assert.deepEqual(navigated,[]);assert.equal(context.tab,'overview');assert.equal(context.searchGuard('providers'),false);
+ // The actual render implementation must also return before touching DOM/state.
+ runInNewContext(render+';render();',{profile:context.profile,state:undefined});
+ context.state={providers:[]};context.profile=null;
+ context.navigate('providers');assert.deepEqual(navigated,[]);assert.equal(context.searchGuard('providers'),false);
+ runInNewContext(render+';render();',{profile:null,state:context.state});
+ context.profile={tenantId:'one'};assert.equal(context.searchGuard('providers'),true);assert.equal(context.searchGuard('audit'),false);
+ context.navigate('providers');assert.deepEqual(navigated,['#providers','render']);assert.equal(context.tab,'providers');
+});
+
+test('同租户换账号后拒绝旧 API 响应，当前账号请求仍可成功',async()=>{
+ const api=read('public/app.js').match(/^async function api\(url,data\).*$/m)[0];
+ let finish,bodyReady;
+ const context={profile:{tenantId:'one',user:{id:'first'}},token:'',
+  fetch:async()=>({ok:true,json:()=>new Promise(resolve=>{finish=resolve;bodyReady();})})};
+ runInNewContext(api+';this.api=api;',context);
+ let waitingForBody=new Promise(resolve=>{bodyReady=resolve;});
+ const oldRequest=context.api('/api/state');await waitingForBody;
+ context.profile={tenantId:'one',user:{id:'second'}};finish({providers:['old-account']});
+ await assert.rejects(oldRequest,/账户或租户已切换/);
+ waitingForBody=new Promise(resolve=>{bodyReady=resolve;});
+ const currentRequest=context.api('/api/state');await waitingForBody;
+ const current={providers:['current-account']};finish(current);assert.equal(await currentRequest,current);
+});
 
 test('普通成员控制台展示调用链，但不提供管理路由或修改策略操作',()=>{
  const html=renderDashboard({state:{providers:[],logs:[],strategy:'fallback'},esc:value=>String(value),ready:()=>false,isManager:false});
@@ -56,7 +122,7 @@ test('媒体实验室使用通用视频名称并自动轮询异步任务',()=>{
  const source=read('public/media-lab.js');
  assert.match(source,/video:\{label:'视频生成'/);assert.doesNotMatch(source,/视频生成（硅基流动）/);
  assert.match(source,/setTimeout\(poll,nextDelay\)/);assert.match(source,/clearTimeout\(pollTimer\)/);
- assert.match(source,/videoCompatible/);assert.match(source,/MEDIA STUDIO/);
+ assert.match(source,/videoCompatible/);assert.match(source,/role="tablist"/);
  assert.match(source,/kind==='video'\?supported\.find\(item=>\/T2V\/i\.test\(item\.model\)\)/);
  assert.match(source,/imageRequired=\$\('#media-kind'\)\.value==='video'&&\/I2V\/i/);
  assert.match(source,/data\.pendingSync\?'上游暂不可查 · 自动重试'/);
@@ -167,7 +233,7 @@ test('API 文档提供可复制的快速请求和 Codex / Claude Code 接入边�
  const docs=read('public/api-docs.js'),keys=read('public/api-keys.js'),subscriptions=read('public/subscriptions.js'),spec=read('openapi.mjs');
  assert.match(docs,/section\('start','3 步完成首次调用'/);
  assert.match(docs,/section\('clients','接入 Codex 与 Claude Code'/);
- assert.match(docs,/wire_api = "responses"/);
+ assert.match(docs,/codexConfig=codexSnippets\(\{origin:base,token:'',model:'auto'\}\)\.config/);
  assert.match(docs,/ANTHROPIC_BASE_URL/);
  assert.match(docs,/claudeSettings=JSON\.stringify\(\{env:/);
  assert.match(docs,/data-copy-code="claude-settings"/);
@@ -191,8 +257,10 @@ test('侧栏、模块内部间距和静态缓存由统一规则约束',()=>{
  const css=read('public/workspaces.css'),server=read('server.mjs');
  assert.match(css,/--space-sm: 10px; --space-md: 16px/);
  assert.match(css,/sidebar-heading \.brand-mark \{ display: block/);
- assert.match(css,/sidebar-compact \.sidebar \.nav-item \{ padding-left: 16px/);
- assert.match(css,/#content>\.heading,#content>\.dashboard-heading \{ align-items: center; min-height: 52px; margin-bottom: 12px/);
+ assert.match(css,/body \.sidebar \.nav-item, body\.sidebar-compact \.sidebar \.nav-item \{ padding-left: 15px; \}/);
+ assert.match(css,/body \.sidebar \.nav-item \.nav-icon, body\.sidebar-compact \.sidebar \.nav-item \.nav-icon \{ width: 18px; height: 18px; \}/);
+ assert.match(css,/body \.sidebar \.sidebar-heading, body\.sidebar-compact \.sidebar \.sidebar-heading \{[^}]*height: 48px; min-height: 48px; flex-shrink: 0;/);
+ assert.match(css,/#content>\.heading,#content>\.dashboard-heading \{ align-items: center; min-height: 40px; margin-bottom: 12px/);
  assert.match(server,/createHash\('sha256'\)\.update\(raw\)/);
 });
 
@@ -214,9 +282,13 @@ test('参考价格默认批量导入，单模型映射为可选折叠项',()=>{
  assert.match(prices,/手动设定或服务商自身价格优先/);
 });
 
-test('模型路由展示执行阶段并使用紧凑工作区密度',()=>{
+test('路由只突出首选和失败处理，进阶参数收起，草稿预览与保存分开',()=>{
  const routing=read('public/routing.js'),css=read('public/style.css');
- assert.match(routing,/routing-flow/);assert.match(routing,/健康过滤/);assert.match(routing,/routing-guardrails/);
+ assert.match(routing,/平时先用哪个模型/);assert.match(routing,/失败后怎么办/);assert.match(routing,/id="routing-scope"/);
+ assert.match(routing,/<details class="panel route-advanced"/);assert.match(routing,/name="rulesEnabled"/);assert.match(routing,/api\(endpoint\+'\/inherit'/);
+ assert.match(routing,/草稿 · 未生效/);assert.match(routing,/不发送消息给模型/);assert.match(routing,/route-result-steps/);
+ assert.match(routing,/按列表顺序尝试备用；若配置了关键词例外，例外优先生效/);assert.match(routing,/previewVersion/);assert.match(routing,/form\.onsubmit/);
+ assert.match(routing,/<section class="panel route-outcome" role="complementary"/);assert.doesNotMatch(routing,/<aside class="panel route-outcome"/);
  assert.match(css,/Compact workspace density/);assert.match(css,/\.routing-config-grid/);
 });
 

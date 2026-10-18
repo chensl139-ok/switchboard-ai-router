@@ -4,14 +4,14 @@ import {labChoices,isPersonalTarget,planLabRequest} from './lab-targets.js';
 import {setLabBusy} from './lab-composer.js';
 import {createLabTiming} from './lab-performance.js';
 import {renderAssistantMarkdown} from './markdown.js';
-import {labHistoryRequest,mountLabHistory} from './lab-history-client.js';
+import {labHistoryRequest,mountLabHistory,resumeConversation} from './lab-history-client.js';
 import {cacheHitMetrics} from './cache-metrics.js';
 import {conversationSnapshot} from './lab-history-format.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,conversationId=null,currentViewDraw=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:8192,tools:'[]'};
 let compareModule=null,compareLoad=null,compareEpoch=0;
 const stopCompare=()=>{compareEpoch++;compareModule?.stopModelCompare();};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-const spark=icon('<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>');
+const spark=icon('<path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h6"/>');
 const headerValue=(response,name)=>{const value=response.headers.get(name);if(!value)return '';try{return decodeURIComponent(value)}catch{return value}};
 const responseRoute=response=>{const model=headerValue(response,'x-router-model');if(!model)return null;return {providerId:headerValue(response,'x-router-provider'),provider:headerValue(response,'x-router-provider-name'),model,protocol:headerValue(response,'x-router-protocol'),reason:headerValue(response,'x-router-reason'),attempt:Number(headerValue(response,'x-router-attempt'))||1,fallback:headerValue(response,'x-router-fallback')==='true'}};
 export function stopPlayground(){stopCompare();}
@@ -31,11 +31,11 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  }
  if(settings.target!=='auto'&&!choices.some(c=>c.id===settings.target)&&!isPersonalTarget(settings.target))settings.target='auto';
  root.classList.add('chat-workspace');
- if(!embedded)root.insertAdjacentHTML('beforeend',`<div class="heading lab-heading"><div><div class="eyebrow">MODEL LAB</div><h1>模型实验室<span class="lab-beta">LIVE</span></h1><p>选一个模型直接对话；需要横向评估时，再进入多模型对比。</p></div><div class="compare-heading-actions"><button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="primary">多模型对比 →</button></div></div>`);
+ if(!embedded)root.insertAdjacentHTML('beforeend',`<div class="heading lab-heading"><div><h1>模型实验室</h1></div><div class="compare-heading-actions"><button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="subtle">对比模型</button></div></div>`);
  if(embedded){
   const actions=root.querySelector('#lab-page-actions')||document.createElement('div');
   actions.className='lab-embedded-toolbar';
-  actions.innerHTML='<button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="primary">多模型对比 →</button>';
+  actions.innerHTML='<button id="lab-clear" class="subtle">新建对话</button><button id="lab-compare" class="subtle">对比模型</button>';
   if(!actions.isConnected)root.append(actions);
  }
  root.insertAdjacentHTML('beforeend',`<div class="lab-session-summary" aria-label="当前实验状态"><div><small>运行状态</small><strong class="lab-state" id="lab-state">准备就绪</strong></div><div><small>上下文</small><strong id="lab-turn-count">0 轮</strong></div><div><small>响应方式</small><strong id="lab-transport-label">SSE 流式</strong></div></div>
@@ -59,6 +59,15 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
    const body=document.createElement('div');body.className='lab-history-message-body';if(item.role==='assistant')body.innerHTML=renderAssistantMarkdown(item.content||'');else body.textContent=item.content||'[图片]';message.append(body);
    if(item.reasoning){const thought=document.createElement('details');const summary=document.createElement('summary');summary.textContent='思考内容';const text=document.createElement('p');text.textContent=item.reasoning;thought.append(summary,text);message.append(thought);}
    if(item.route?.model){const route=document.createElement('small');route.className='lab-history-message-route';route.textContent=`实际路由 ${item.route.provider||item.route.providerId||''} / ${item.route.model}`;message.append(route);}if(item.tools){const tools=document.createElement('details');const summary=document.createElement('summary');summary.textContent='工具调用';const text=document.createElement('pre');text.textContent=item.tools;tools.append(summary,text);message.append(tools);}if(item.stats){const metrics=document.createElement('small');metrics.className='lab-history-message-route';metrics.textContent=statLine({...item,status:'完成'});message.append(metrics);}content.append(message);}
+ },onResume:row=>{
+  if(controller)throw Error('当前对话正在生成，请停止或等待完成后再继续历史对话。');
+  const restored=resumeConversation(row);
+  if((draft.trim()||pendingImages.length)&&!confirm('替换当前未发送的草稿并继续这条历史对话？'))throw Error('未替换当前草稿。');
+  contextVersion++;history=restored.messages;conversationId=null;pendingImages=[];draft=restored.draft;
+  const route=[...history].reverse().find(item=>item.route)?.route;
+  const target=route?JSON.stringify([route.providerId,route.model]):'auto';
+  settings.target=choices.some(choice=>choice.id===target)?target:'auto';$('#lab-model').value=settings.target;
+  $('#lab-prompt').value=draft;$('#lab-error').textContent='';targetLabel();resizePrompt();drawImages();draw();$('#lab-prompt').focus();
  }});
  $('.lab-toolbar').append($('.lab-session-summary'));
  const settingsPanel=$('.lab-settings'),settingsHeading=settingsPanel.querySelector('.lab-settings-heading');
@@ -138,7 +147,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   const updateLast=incremental&&history.at(-1)?.role==='assistant'&&list.children.length===history.length;
   const patched=updateLast&&patchStreamingMessage(list.lastElementChild,history.at(-1));
   if(updateLast&&!patched){list.lastElementChild.outerHTML=messageHtml(history.at(-1),history.length-1);}else if(!updateLast)list.innerHTML=history.length?history.map(messageHtml).join(''):
-  `<div class="lab-empty"><span class="lab-empty-icon">${spark}</span><h2>开始一段模型对话</h2><p>可直接使用自动路由，或在上方指定服务商与模型。</p><div class="lab-prompts"><button type="button" data-example="用一个生活中的例子解释什么是 API。"><small>解释</small>讲清一个概念</button><button type="button" data-example="用 Python 编写一个带注释的快速排序函数。"><small>代码</small>完成编程任务</button><button type="button" data-example="给一个 AI 模型路由平台写三条简洁的产品介绍。"><small>创意</small>探索产品表达</button></div></div>`;
+  `<div class="lab-empty"><h2>新对话</h2><p>在下方输入消息。自动路由按已保存的策略选择模型。</p><div class="lab-prompts" aria-label="测试示例"><button type="button" data-example="请用三句话解释 HTTP 请求和响应。">测试文本回答</button><button type="button" data-example="用 Python 编写一个带类型标注的快速排序函数，并提供测试示例。">测试代码生成</button></div></div>`;
   if(!patched){(updateLast?list.lastElementChild:list).querySelectorAll('[data-thought]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.thought)];if(m)m.thinkingOpen=el.open;}));
   (updateLast?list.lastElementChild:list).querySelectorAll('[data-route]').forEach(el=>el.addEventListener('toggle',()=>{const m=history[Number(el.dataset.route)];if(m)m.routeOpen=el.open;}));}
   if(!incremental)updateSummary();if(nearBottom)list.scrollTop=list.scrollHeight;$('#lab-jump').hidden=list.scrollHeight-list.scrollTop-list.clientHeight<100;
