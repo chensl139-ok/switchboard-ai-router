@@ -4,6 +4,7 @@ const RETENTION_DAYS=90;
 export class UsageStore {
  constructor(dir){
   this.db=new DatabaseSync(path.join(dir,'usage.sqlite'));
+  try{
   this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; PRAGMA synchronous=NORMAL;
    CREATE TABLE IF NOT EXISTS calls(id TEXT PRIMARY KEY, request_id TEXT NOT NULL, time TEXT NOT NULL, actor_id TEXT, api_key_id TEXT,
     provider_id TEXT, provider TEXT, model TEXT, status INTEGER, latency INTEGER, input_tokens INTEGER, output_tokens INTEGER,
@@ -18,6 +19,7 @@ export class UsageStore {
   this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();
   this.routeCache=new Map();this.prune.run(this.routeSince);
   this.sweep=setInterval(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();},6*3600000);this.sweep.unref?.();
+  }catch(error){try{this.close();}catch{}throw error;}
  }
  record(log){
   this.insert.run(log.id,log.requestId||log.id,log.time,

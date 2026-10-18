@@ -9,6 +9,7 @@ export class ApiKeyStore {
   this.file=path.join(dir,'api-keys.json');this.now=now;this.tenantId=tenantId;
   this.state=existsSync(this.file)?JSON.parse(readFileSync(this.file,'utf8')):{legacyEnabled,keys:[]};
   this.db=new DatabaseSync(path.join(dir,'api-key-usage.sqlite'));
+  try{
   this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS counters(
    id TEXT PRIMARY KEY,requests INTEGER NOT NULL,successes INTEGER NOT NULL,failures INTEGER NOT NULL,
    known_tokens INTEGER NOT NULL,day TEXT NOT NULL,daily_used INTEGER NOT NULL,minute INTEGER NOT NULL,
@@ -18,6 +19,7 @@ export class ApiKeyStore {
    requests=excluded.requests,successes=excluded.successes,failures=excluded.failures,known_tokens=excluded.known_tokens,
    day=excluded.day,daily_used=excluded.daily_used,minute=excluded.minute,minute_used=excluded.minute_used,last_used_at=excluded.last_used_at`);
   for(const key of this.state.keys){const row=this.readCounter.get(key.id);if(row)this.applyCounter(key,row);else this.persistCounter(key);}
+  }catch(error){try{this.close();}catch{}throw error;}
  }
  applyCounter(key,row){Object.assign(key,{requests:row.requests,successes:row.successes,failures:row.failures,knownTokens:row.known_tokens,day:row.day,dailyUsed:row.daily_used,minute:row.minute,minuteUsed:row.minute_used,lastUsedAt:row.last_used_at});}
  persistCounter(key){this.writeCounter.run(key.id,key.requests||0,key.successes||0,key.failures||0,key.knownTokens||0,key.day||'',key.dailyUsed||0,key.minute||0,key.minuteUsed||0,key.lastUsedAt||null);}

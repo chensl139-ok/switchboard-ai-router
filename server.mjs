@@ -31,8 +31,10 @@ export const presets=[
 ].map(([id,name,baseUrl,protocol])=>({id,name,baseUrl,protocol,model:'',enabled:false,priority:50}));
 export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admin=process.env.ADMIN_TOKEN,gateway=process.env.GATEWAY_TOKEN,fetcher=safeFetch,allowHttp=process.env.ALLOW_HTTP_UPSTREAM==='true',tenantId=null,managed=false}={}){
  if(!admin||admin.length<24||!gateway||gateway.length<24) throw Error('ADMIN_TOKEN 和 GATEWAY_TOKEN 必须分别设置为至少 24 位随机字符串');
+ let apiKeys,usageStore,warmTimer;
+ try{
  mkdirSync(dir,{recursive:true,mode:0o700});
- const apiKeys=new ApiKeyStore(dir,{tenantId,legacyEnabled:!tenantId||tenantId==='default'});
+ apiKeys=new ApiKeyStore(dir,{tenantId,legacyEnabled:!tenantId||tenantId==='default'});
  const keyPath=path.join(dir,'master.key');
  if(!existsSync(keyPath)){
   const statePath=path.join(dir,'state.json');
@@ -40,7 +42,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   writeFileSync(keyPath,randomBytes(32),{mode:0o600,flag:'wx'});
  }
  const key=readFileSync(keyPath);if(key.length!==32)throw Error('master.key 长度无效');
- const usageStore=new UsageStore(dir);
+ usageStore=new UsageStore(dir);
  const seal=s=>{const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv);return Buffer.concat([iv,c.update(s),c.final(),c.getAuthTag()]).toString('base64')};
  const unseal=s=>{const b=Buffer.from(s,'base64'),c=createDecipheriv('aes-256-gcm',key,b.subarray(0,12));c.setAuthTag(b.subarray(-16));return Buffer.concat([c.update(b.subarray(12,-16)),c.final()]).toString()};
  const file=path.join(dir,'state.json');
@@ -55,7 +57,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  // 每次请求都会在路由层查阅（健康/熔断/延迟），预热一次 SWR 缓存；usageStore 仅作为查询通道注入，不参与持久化序列化
  const {selectRoutes,healthOf}=createRouter(state,usageStore);
  const warmHealth=()=>{try{for(const p of state.providers)for(const m of new Set([p.model,...(p.models||[])].filter(Boolean)))usageStore.routeLogs({id:p.id,name:p.name,model:m});}catch{}};
- warmHealth();const warmTimer=setInterval(()=>{try{warmHealth();}catch{}},30000);warmTimer.unref?.();
+ warmHealth();warmTimer=setInterval(()=>{try{warmHealth();}catch{}},30000);warmTimer.unref?.();
  state.rules??=[];state.routing??={timeoutMs:30000,maxAttempts:3,requestsPerMinute:60,concurrency:5};
  for(const p of state.providers)p.weight??=1;
  const ensureActiveProvider=()=>{if(!state.providers.some(p=>p.id===state.active&&p.enabled&&hasCredential(p)))state.active=state.providers.find(p=>p.enabled&&hasCredential(p))?.id||'';if(state.active){state.providers.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active)||a.priority-b.priority);state.providers.forEach((p,index)=>p.priority=index);}};
@@ -409,6 +411,14 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
  server.usageAudit=days=>usageStore.audit(days);server.resetStatistics=mode=>usageStore.resetStatistics(mode);server.checkReady=()=>{const result=usageStore.db.prepare('PRAGMA quick_check').get();if(result?.quick_check!=='ok')throw Error('用量数据库完整性校验失败');};server.closeStore=()=>{clearInterval(warmTimer);usageStore.close();apiKeys.close();};server.on('close',server.closeStore);
  server.claimUnassignedKeys=userId=>apiKeys.claimUnassigned(userId);
  return server;
+ }catch(error){
+  // A failed constructor has no server.close() path. Release opened SQLite
+  // handles so retries and file restoration also work on Windows.
+  clearInterval(warmTimer);
+  try{usageStore?.close();}catch{}
+  try{apiKeys?.close();}catch{}
+  throw error;
+ }
 }
 // gzip 静态 HTML/JS/CSS；带 ETag + 静态资源 immutable 缓存，命中时 304
 const compressible=/text\/|javascript|json/;

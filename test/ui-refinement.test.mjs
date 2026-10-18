@@ -355,7 +355,7 @@ test('OpenRouter 参考价明确分开采集时间和平台复核期限',()=>{
 
 test('模型目录首次进入就渲染已配置模型，并标识鉴权失败与媒体模型',()=>{
  const source=read('public/model-catalog.js');
- assert.match(source,/list\.onclick=async[\s\S]+\n draw\(\);\n\}/);
+ assert.match(source,/list\.onclick=async[\s\S]+\r?\n draw\(\);\r?\n\}/);
  assert.match(source,/providerHealth\(configured,state\.logs\)/);
  assert.match(source,/媒体 \/ 非对话/);
 });
