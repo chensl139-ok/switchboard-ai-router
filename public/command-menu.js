@@ -1,5 +1,6 @@
 // Commands are rebuilt from the current session on every search. No credentials,
 // recent activity, or tenant-specific results are stored in browser storage.
+export const shortcutLabel=(key,platform=globalThis.navigator?.userAgentData?.platform||globalThis.navigator?.platform||'')=>`${/mac|iphone|ipad/i.test(platform)?'⌘':'Ctrl'} ${key}`;
 export const pageCommands=[
  ['overview','概览','控制台 dashboard'],['providers','服务商与模型','provider 配置 订阅'],
  ['models','模型目录','model 搜索'],['routing','路由策略','fallback 备用 故障转移'],

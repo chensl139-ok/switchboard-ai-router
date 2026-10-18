@@ -3,7 +3,7 @@ import {startAccountUI,showLogin,refreshAccountStatus,accountRequest,renderMembe
 import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.js';
 import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from './dashboard.js';
 import {modelCapabilities} from './model-capability.js';
-import {mountCommandMenu} from './command-menu.js';
+import {mountCommandMenu,shortcutLabel} from './command-menu.js';
 const pageLoader=createPageLoader({
  models:()=>import('./model-catalog.js'),api:()=>import('./api-docs.js'),
  analytics:()=>import('./analytics.js'),prices:()=>import('./prices.js'),
@@ -304,7 +304,7 @@ addEventListener('resize',()=>{const popover=document.querySelector('#tenant-pop
 (()=>{
  const header=document.querySelector('header');if(!header||header.querySelector('.top-actions'))return;
  const actions=document.createElement('div');actions.className='top-actions';
- const search=document.createElement('button');search.id='global-search';search.type='button';search.innerHTML='<span>搜索页面与模型</span><kbd>⌘ K</kbd>';search.setAttribute('aria-label','搜索页面与模型（⌘ K）');
+ const search=document.createElement('button');search.id='global-search';search.type='button';search.innerHTML=`<span>搜索页面与模型</span><kbd>${shortcutLabel('K')}</kbd>`;search.setAttribute('aria-label',`搜索页面与模型（${shortcutLabel('K')}）`);
  const themeBtn=document.createElement('button');themeBtn.id='theme-toggle';themeBtn.className='subtle';themeBtn.type='button';themeBtn.title='切换明暗主题';
  const systemTheme=matchMedia('(prefers-color-scheme: dark)');
  const themeIcon={dark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>',light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>'};
@@ -323,7 +323,7 @@ addEventListener('resize',()=>{const popover=document.querySelector('#tenant-pop
 
 
 const sidebarToggle=document.querySelector('#sidebar-toggle');
-const sidebarLabels=compact=>({label:compact?'展开导航（⌘B）':'收起导航（⌘B）',tip:compact?'展开导航':'收起导航'});
+const sidebarLabels=compact=>({label:`${compact?'展开导航':'收起导航'}（${shortcutLabel('B')}）`,tip:compact?'展开导航':'收起导航'});
 function setSidebarCompact(compact){
  document.body.classList.toggle('sidebar-compact',compact);
  const {label,tip}=sidebarLabels(compact);

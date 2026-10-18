@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {findCommands} from '../public/command-menu.js';
+import {findCommands,shortcutLabel} from '../public/command-menu.js';
+
+test('快捷键提示适配 Windows/Linux 与 macOS，不在 Windows 显示 Command 键',()=>{
+ assert.equal(shortcutLabel('K','Win32'),'Ctrl K');
+ assert.equal(shortcutLabel('B','Windows'),'Ctrl B');
+ assert.equal(shortcutLabel('K','Linux x86_64'),'Ctrl K');
+ assert.equal(shortcutLabel('K','MacIntel'),'⌘ K');
+ assert.equal(shortcutLabel('B','macOS'),'⌘ B');
+});
 
 test('全局搜索按当前权限列出页面，支持协议/客户端别名',()=>{
  const member=id=>!['routing','audit','members','subscription','prices'].includes(id);
