@@ -1,6 +1,8 @@
-# macOS 桌面 App
+# 桌面 App
 
 桌面版使用原生 AppKit / WKWebView 窗口，内置 Node 和生产依赖。安装使用时不需要 Docker、Node、npm 或终端。当前可在 Apple Silicon Mac 上构建和使用，最低系统为 macOS 13。
+
+Windows x64 版使用 WinForms / 系统 WebView2，内置 Node，不附带完整浏览器。安装步骤、系统要求与独立构建流程见 [Windows 桌面版](windows/README.md)。两种安装包都不包含打包者的用户数据。
 
 ## 安装与使用
 
@@ -8,7 +10,7 @@
 2. 将窗口中的 `Switchboard.app` 拖到旁边的 `Applications（应用程序）` 文件夹。
 3. 复制完成后，从“应用程序”打开 Switchboard，再推出安装磁盘；不要直接从 DMG 内运行。
 
-当前安装包适用于 **macOS 13 及以上的 Apple Silicon Mac（M 系列）**，不是 Windows 或 Intel Mac 安装包。当前使用 ad-hoc 签名，尚无 Apple Developer ID 签名和公证；其他电脑下载后可能被系统安全检查阻止。正式分发前需完成签名与公证，不应要求接收者关闭安全检查。
+此 DMG 安装包适用于 **macOS 13 及以上的 Apple Silicon Mac（M 系列）**，不是 Windows 或 Intel Mac 安装包。当前使用 ad-hoc 签名，尚无 Apple Developer ID 签名和公证；其他电脑下载后可能被系统安全检查阻止。正式分发前需完成签名与公证，不应要求接收者关闭安全检查。
 
 升级时先退出正在运行的 App，再拖入新版并确认替换应用程序。此操作不删除下面说明的用户数据目录。
 
@@ -61,6 +63,6 @@ npm run build:desktop
 
 产物在 `dist/desktop/`：App、DMG、SHA256SUMS。打包脚本会校验运行时架构和动态库依赖，执行前端生产构建，只复制程序与生产依赖，排除已编译的 Vue／TypeScript 前端源文件、重复入口与依赖 source map；仅对安装包内的 Node 副本移除调试／局部符号，保留公开符号并重新签名、验证 SQLite 和生产依赖，不修改构建机器的 Node。`.env`、`data/`、测试及本地账号密钥不包含在安装包中。Node 与依赖的许可证随 App 保存。安装包的大部分空间是独立运行所需的 Node，系统 WebKit 不随包重复安装。
 
-默认使用构建时的 `process.execPath`；可通过 `SWITCHBOARD_NODE_BINARY` 指定同架构的官方 Node。原生窗口与运行时必须是同一架构。Intel 包需在对应环境构建并验收；当前交付不含 Windows 安装程序。
+macOS 构建默认使用构建时的 `process.execPath`；可通过 `SWITCHBOARD_NODE_BINARY` 指定同架构的官方 Node。原生窗口与运行时必须是同一架构。Intel Mac 包需在对应环境构建并验收；Windows 安装程序由独立的 Windows 构建流程生成，不能通过重命名 DMG 获得。
 
 当前产物使用本地 ad-hoc 签名，适用于本机安装；没有 Apple Developer ID 签名和公证。向其他电脑正式分发前，应配置开发者签名、加固运行时和公证流水线。不要以关闭系统安全检查作为安装步骤。

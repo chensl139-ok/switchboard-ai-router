@@ -4,6 +4,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,readd
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 
 test('已配置价格改为无限期前先备份，保持来源、采集时间和其他配置',()=>{
  const root=mkdtempSync(path.join(tmpdir(),'switchboard-prices-')),data=path.join(root,'data'),backup=path.join(root,'backup');
@@ -11,7 +12,7 @@ test('已配置价格改为无限期前先备份，保持来源、采集时间�
   mkdirSync(data);const file=path.join(data,'state.json');
   const before={providers:[{id:'a',secret:'encrypted',prices:{m:{source:'openrouter-reference',observedAt:'2026-01-01',expiresAt:'2026-01-08',inputPerMillion:1}}}]};
   writeFileSync(file,JSON.stringify(before));
-  const args=[new URL('../scripts/set-price-expiry.mjs',import.meta.url).pathname,data,`--backup-root=${backup}`];
+  const args=[fileURLToPath(new URL('../scripts/set-price-expiry.mjs',import.meta.url)),data,`--backup-root=${backup}`];
   const preview=JSON.parse(execFileSync(process.execPath,args,{encoding:'utf8'}));assert.equal(preview.report[0].expiring,1);
   assert.deepEqual(JSON.parse(readFileSync(file,'utf8')),before);
   const output=execFileSync(process.execPath,[...args,'--apply'],{encoding:'utf8'}).trim().split('\n').map(JSON.parse);

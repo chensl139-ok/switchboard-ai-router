@@ -47,8 +47,9 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  function refreshFeishu(){configs=bindings.configs();const next=new Map();for(const config of configs){const old=oauths.get(config.key);if(old&&old.config.appId===config.appId&&old.config.appSecret===config.appSecret){old.config=config;next.set(config.key,old);}else next.set(config.key,new FeishuOAuth(config,{fetcher:identityFetcher}));}oauths.clear();for(const [key,client] of next)oauths.set(key,client);accounts.feishuAppsByTenant=new Map(configs.map(config=>[config.tenantId,config.appId]));}
  const oauthForTenant=tenantId=>configs.find(config=>config.tenantId===tenantId);
  const oauthStatus=caller=>{const visible=caller&&!caller.platformAccess?configs.filter(config=>config.tenantId===caller.tenantId):configs;return {enabled:visible.length>0,autoJoin:visible.some(config=>config.autoJoin),providers:visible.map(({key,label,tenantId})=>({key,label:label||'飞书',...(caller?{tenantId}:{})}))};};
- let activeRequests=0;const globalLimit=Number(process.env.GLOBAL_MAX_CONCURRENCY)||20;
+ let activeRequests=0;const globalLimit=Number(process.env.GLOBAL_MAX_CONCURRENCY)||20,tenantRequests=new Map();
  function acquireGlobal(){if(activeRequests>=globalLimit)throw fail('网关总并发已满，请稍后重试',429);activeRequests++;let released=false;return ()=>{if(!released){released=true;activeRequests--;}};}
+ function acquireTenant(id){tenantRequests.set(id,(tenantRequests.get(id)||0)+1);let released=false;return ()=>{if(released)return;released=true;const remaining=tenantRequests.get(id)-1;if(remaining)tenantRequests.set(id,remaining);else tenantRequests.delete(id);};}
  const derive=(purpose,id)=>createHmac('sha256',admin).update(purpose+':'+id).digest('hex');
  function engine(id){
   if(!accounts.state.tenants.some(t=>t.id===id))throw fail('租户不存在',404);
@@ -90,6 +91,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
  async function body(req,maxBytes=65536){const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>maxBytes)throw fail('请求过大',413);chunks.push(part);}try{const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!data||typeof data!=='object'||Array.isArray(data))throw Error();return data;}catch{throw fail('JSON 格式无效');}}
  function rate(req){const key=req.socket.remoteAddress||'unknown';const now=Date.now();for(const [id,item] of limits)if(now-item.start>60000)limits.delete(id);if(limits.size>2000)throw fail('请求过多',429);const item=limits.get(key)||{start:now,count:0};item.count++;limits.set(key,item);if(item.count>20)throw fail('登录/注册尝试过多，请一分钟后重试',429);}
  const server=http.createServer(async(req,res)=>{
+  let releaseTenant;
   const externalId=String(req.headers['x-request-id']||''),requestId=/^[A-Za-z0-9._:-]{1,128}$/.test(externalId)?externalId:randomUUID();
   res.setHeader('X-Request-ID',requestId);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');res.setHeader('Cross-Origin-Opener-Policy','same-origin');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob: https: http:; media-src 'self' blob: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
   try{
@@ -165,6 +167,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     }
     if(route.startsWith('chatgpt/')){
      if(!plan)throw fail('订阅连接仅在本机 App 中可用',404);desktopOrigin();
+     releaseTenant=acquireTenant(current.tenantId);
      if(req.method==='GET'&&route==='chatgpt/status')return json(res,200,plan.status(current));
      if(req.method==='GET'&&route==='chatgpt/models')return json(res,200,{models:await plan.models(current,url.searchParams.get('id'))});
      if(req.method==='GET'&&route==='chatgpt/providers')return json(res,200,{providers:await plan.providers(current)});
@@ -272,6 +275,11 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      accounts.requirePlatformOwner(current);
      if(oauthForTenant(data.tenantId))throw fail('此租户已绑定飞书登录应用，请先移除对应配置再删除',409);
      accounts.validateDeleteTenant(current,data.tenantId);
+     if(tenantRequests.has(data.tenantId))throw fail('此租户仍有进行中的请求，请等待完成后重试删除',409);
+     // SQLite files cannot be renamed while open on Windows. No await may split
+     // this idle check, handle closure and move; failed deletes reopen lazily.
+     engines.get(data.tenantId)?.closeStore();
+     engines.delete(data.tenantId);
      const tenantPath=path.join(dir,'tenants',data.tenantId),pendingRoot=path.join(dir,'tenant-deletion-pending');
      let pendingPath=null;
      if(existsSync(tenantPath)){mkdirSync(pendingRoot,{recursive:true,mode:0o700});pendingPath=path.join(pendingRoot,data.tenantId+'-'+randomUUID());renameSync(tenantPath,pendingPath);}
@@ -280,8 +288,6 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      catch(error){if(pendingPath)renameSync(pendingPath,tenantPath);throw error;}
      labHistory.deleteTenant(removed.deleted);
      try{subscriptions.deleteTenant(removed.deleted);}catch(error){console.error(JSON.stringify({level:'error',event:'tenant_subscription_cleanup_failed',tenantId:removed.deleted,message:error?.message||String(error)}));}
-     engines.get(removed.deleted)?.close();
-     engines.delete(removed.deleted);
      if(pendingPath)try{removeTenantData(pendingPath,{recursive:true,force:true});}catch(error){console.error(JSON.stringify({level:'error',event:'tenant_dir_cleanup_failed',tenantId:removed.deleted,path:pendingPath,message:error?.message||String(error)}));return json(res,202,{...removed,cleanupPending:true});}
      return json(res,200,removed);
     }
@@ -299,6 +305,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
     const token=apiToken(req.headers);
     const current=url.pathname.startsWith('/api/')?session(req):caller(req,token);
     if(req.headers['x-tenant-id']&&req.headers['x-tenant-id']!==current.tenantId)throw fail('租户已切换，请刷新后重试',409);
+    releaseTenant=acquireTenant(current.tenantId);
     req.principal=current;
     if(req.method==='POST'&&configAuditActions.has(url.pathname)){
      const writeHead=res.writeHead;let audited=false;
@@ -308,15 +315,19 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      };
     }
     if(req.method==='POST'&&(generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')){const release=acquireGlobal();res.once('finish',release);res.once('close',release);}
-    engine(current.tenantId).emit('request',req,res);return;
+    // Await the managed handlers, not response close: an aborted connection can
+    // close before the upstream request finishes recording usage in SQLite.
+    const app=engine(current.tenantId);
+    await Promise.all(app.listeners('request').map(handler=>handler.call(app,req,res)));return;
    }
    engine('default').emit('request',req,res);
   }catch(error){const status=error.status||500;if(status>=500)console.error(JSON.stringify({level:'error',event:'request_failed',requestId,method:req.method,path:req.url.split('?')[0],status,message:error.message}));if(!res.headersSent)json(res,status,clientError(req.url.startsWith('/v1/messages')?'messages':'chat',error));else res.end();}
+  finally{releaseTenant?.();}
  });
  installWebSocket(server,{originAllowed,authenticate:(token,req,expectedTenant)=>{try{const current=caller(req,token);if(expectedTenant&&expectedTenant!==current.tenantId)throw fail('租户已切换',409);return current;}catch{return false;}},execute:async(input,options)=>{
   const current=caller(options.request,options.token);if(current.tenantId!==options.authContext.tenantId)throw fail('租户已切换，请重新建立连接',403);
   if(current.role==='viewer')throw fail('只读角色不可调用模型',403);
-  const release=acquireGlobal();try{return await engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});}finally{release();}
+  const release=acquireGlobal(),releaseTenant=acquireTenant(current.tenantId);try{return await engine(current.tenantId).execute(input,{...options,apiKeyId:current.apiKeyId,actorId:current.userId,transport:'ws'});}finally{releaseTenant();release();}
  }});
  server.on('close',()=>{desktop?.close();plan?.close();planResults.clear();for(const app of engines.values())app.closeStore();labHistory.close();});
  return server;

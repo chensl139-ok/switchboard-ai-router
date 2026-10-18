@@ -11,5 +11,8 @@ node_modules/
 coverage/
 public/build/
 dist/desktop/
+dist/windows/
+desktop/windows/bin/
+desktop/windows/obj/
 .local-api-key
 .workbuddy/

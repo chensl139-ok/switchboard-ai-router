@@ -8,9 +8,9 @@ import {conversationSnapshot,historyText} from '../public/lab-history-format.js'
 import {createPlatform} from '../platform.mjs';
 
 test('实验历史按租户和用户隔离，支持更新、查询与删除',()=>{
- const dir=mkdtempSync(path.join(tmpdir(),'switchboard-lab-history-'));
+ const dir=mkdtempSync(path.join(tmpdir(),'switchboard-lab-history-'));let history,restored;
  try{
-  const history=new LabHistory(dir),alice={tenantId:'alpha',userId:'alice'},bob={tenantId:'alpha',userId:'bob'},other={tenantId:'beta',userId:'alice'};
+  history=new LabHistory(dir);const alice={tenantId:'alpha',userId:'alice'},bob={tenantId:'alpha',userId:'bob'},other={tenantId:'beta',userId:'alice'};
   const record=history.put(alice,{area:'media',kind:'video',model:'sample',title:'生成演示视频',status:'submitted',requestId:'job-1'});
   assert.equal(history.list(alice).length,1);assert.equal(history.list(bob).length,0);assert.equal(history.list(other).length,0);
   assert.throws(()=>history.put(bob,{id:record.id,area:'media',status:'completed'}),{status:404});
@@ -20,18 +20,18 @@ test('实验历史按租户和用户隔离，支持更新、查询与删除',()=
   assert.throws(()=>history.get(other,record.id),{status:404});
   assert.throws(()=>history.put(alice,{area:'chat',status:'completed',result:'x'.repeat(MAX_HISTORY_RESULT_BYTES+1)}),{status:400});
   assert.throws(()=>history.delete(bob,record.id),{status:404});
-  const restored=new LabHistory(dir);assert.equal(restored.list(alice)[0].requestId,'job-1');
+  restored=new LabHistory(dir);assert.equal(restored.list(alice)[0].requestId,'job-1');
   assert.equal(restored.delete(alice,record.id).ok,true);assert.equal(restored.list(alice).length,0);
-  restored.put(other,{area:'chat',status:'completed',title:'hello'});restored.deleteTenant('beta');assert.equal(restored.list(other).length,0);restored.close();history.close();
- }finally{rmSync(dir,{recursive:true,force:true});}
+  restored.put(other,{area:'chat',status:'completed',title:'hello'});restored.deleteTenant('beta');assert.equal(restored.list(other).length,0);
+ }finally{restored?.close();history?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('实验历史从旧 JSON 迁移到 SQLite，保留旧文件且不会重复导入',()=>{
- const dir=mkdtempSync(path.join(tmpdir(),'switchboard-lab-history-migrate-')),id='11111111-1111-4111-8111-111111111111',caller={tenantId:'alpha',userId:'alice'};
+ const dir=mkdtempSync(path.join(tmpdir(),'switchboard-lab-history-migrate-')),id='11111111-1111-4111-8111-111111111111',caller={tenantId:'alpha',userId:'alice'};let first,second;
  try{writeFileSync(path.join(dir,'lab-history.json'),JSON.stringify([{id,tenantId:'alpha',userId:'alice',area:'chat',kind:'conversation',status:'completed',title:'旧对话',result:'{"messages":[]}',createdAt:'2026-01-01T00:00:00.000Z',updatedAt:'2026-01-01T00:00:00.000Z'}]));
-  const first=new LabHistory(dir);assert.equal(first.list(caller).length,1);assert.equal(first.get(caller,id).title,'旧对话');first.close();
-  const second=new LabHistory(dir);assert.equal(second.list(caller).length,1);second.close();
- }finally{rmSync(dir,{recursive:true,force:true});}
+  first=new LabHistory(dir);assert.equal(first.list(caller).length,1);assert.equal(first.get(caller,id).title,'旧对话');first.close();first=null;
+  second=new LabHistory(dir);assert.equal(second.list(caller).length,1);
+ }finally{second?.close();first?.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('实验历史 HTTP 接口按登录用户隔离，不允许跨用户删除',async()=>{

@@ -1,0 +1,33 @@
+Switchboard — Windows 安装说明
+
+适用：Windows 10（1903 或更新版本）/ Windows 11，Intel 或 AMD 64 位（x64）。推荐 Windows 11。
+本包不是 Windows ARM64 原生版本，也不适用于 32 位 Windows。
+
+1. 先完整解压 ZIP，再双击 Switchboard-*-Windows-x64-Setup.exe。
+2. 按向导安装；仅安装到当前用户，不需要管理员权限。
+3. 从开始菜单打开 Switchboard；可在安装时勾选桌面快捷方式。
+4. 首次使用需创建自己的本地账号；安装包不包含分享者的账号、API 密钥、订阅授权或历史数据。
+
+运行依赖
+- 无需安装 Docker、Node.js 或开发环境。
+- 系统需有 .NET Framework 4.8（Windows 11 已包含，Windows 10 可通过系统更新安装）。
+- 使用系统共享的 Microsoft Edge WebView2 Runtime，避免额外打包完整浏览器。
+  如果缺失，App/安装器会提示打开微软官网下载 Evergreen Runtime：
+  https://developer.microsoft.com/microsoft-edge/webview2/
+  安装程序不会未经同意下载或安装依赖。
+
+安全与数据
+- 当前程序尚未申请 Windows 代码签名，可能出现 SmartScreen 或“未知发布者”提示。
+  仅在信任来源、并已核对 SHA256SUMS 后安装；公司设备请遵循 IT 策略，不要关闭安全防护。
+- 程序安装位置：%LOCALAPPDATA%\Programs\Switchboard
+- 本地数据位置：%LOCALAPPDATA%\Switchboard
+- 覆盖安装和卸载不会删除本地账号、密钥、订阅授权和历史数据。
+- 本地服务仅监听 127.0.0.1，不会自动向局域网或公网开放。
+
+飞书登录
+- 需要先在飞书应用后台添加本机回调：
+  http://127.0.0.1:3110/api/account/sso/feishu/callback
+- 首次启动会选择可用端口；若 3110 被其他服务占用，请按 App 提示检查实际地址和回调配置。
+- 每台电脑的本地配置互相独立；不要将私人数据目录发给其他人。
+
+项目与问题反馈：https://github.com/chensl139-ok/switchboard-ai-router

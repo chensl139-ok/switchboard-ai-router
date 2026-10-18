@@ -64,6 +64,10 @@ Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。�
 
 订阅模型可在「个人路由（含订阅）」与组织 API 模型共同选路，仅影响本人当前租户的实验室调用。支持模型内及跨服务商故障转移，正文开始后不切换；未知价格的订阅不参与经济优先。Claude 订阅暂未取得官方第三方接入授权，不等同于已支持的 Anthropic API。
 
+### Windows 桌面 App
+
+Windows 用户可使用独立的 [Windows x64 桌面安装包](desktop/windows/README.md)：解压分享 ZIP 后运行 Setup.exe，安装后从开始菜单启动。无需 Docker 或 Node，使用系统 WebView2；当前安装包尚未进行 Windows 代码签名。Windows 构建从主分支工作流生成，不等同于已发布的 v2.2.0 Release 附件。
+
 ### 使用已发布镜像
 
 不想在本机构建镜像时，可从 [GHCR](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router) 拉取 `linux/amd64` 或 `linux/arm64` 版本。先在仓库目录运行一次 `npm run setup`，再执行：

@@ -14,7 +14,8 @@ test('桌面首次启动生成私有配置、只监听本机、初始化不暴�
   runtime=await startDesktop({supportDir:dir,port:0,bootstrapToken:'desktop-session-bootstrap-12345678'});
   assert.equal(runtime.server.address().address,'127.0.0.1');assert.equal(runtime.needsSetup,true);
   const env=readFileSync(path.join(runtime.profileDir,'.env'),'utf8'),admin=env.match(/^ADMIN_TOKEN=(.+)$/m)[1];
-  assert.equal(statSync(path.join(runtime.profileDir,'.env')).mode&0o777,0o600);
+  // Windows chmod does not model owner/group access; validate NTFS ACLs separately.
+  if(process.platform!=='win32')assert.equal(statSync(path.join(runtime.profileDir,'.env')).mode&0o777,0o600);
   const status=await (await fetch(runtime.url+'/api/account/status')).text();assert(!status.includes(admin));assert(!status.includes('desktop-session-bootstrap'));
   const setup=token=>fetch(runtime.url+'/api/account/setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({bootstrapToken:token,name:'Desktop owner',email:'desktop@example.invalid',password:'desktop-password-12345'})});
   assert.equal((await setup(admin)).status,403);
@@ -56,7 +57,9 @@ test('导入完整独立副本，在线 SQLite 使用备份，清除旧会话并
   assert.equal(process.env.COOKIE_SECURE,'false');await runtime.close();runtime=null;
   const marker=readFileSync(path.join(support,'active-profile.json'),'utf8');
   await assert.rejects(startDesktop({supportDir:support,port:0,importFrom:base}),/请选择/);assert.equal(readFileSync(path.join(support,'active-profile.json'),'utf8'),marker);
-  symlinkSync(path.join(source,'.env'),path.join(source,'data','unsafe-link'));
+  // Directory junctions exercise the same rejection without requiring Windows
+  // Developer Mode or the privilege needed to create a file symlink.
+  symlinkSync(process.platform==='win32'?source:path.join(source,'.env'),path.join(source,'data','unsafe-link'),process.platform==='win32'?'junction':'file');
   await assert.rejects(importDeployment(source,support),/符号链接/);
  }finally{await runtime?.close();db.close();rmSync(base,{recursive:true,force:true});}
 });

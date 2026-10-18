@@ -5,10 +5,15 @@ import {parseEnv} from 'node:util';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {DatabaseSync,backup} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
+import {createInterface} from 'node:readline';
 import {createPlatform} from '../platform.mjs';
 import {feishuConfigs} from '../feishu-auth.mjs';
 
-export const defaultSupportDir=()=>path.join(homedir(),'Library','Application Support','Switchboard');
+export function defaultSupportDir(platform=process.platform,env=process.env,home=homedir()){
+ if(platform==='win32')return path.win32.join(env.LOCALAPPDATA||path.win32.join(home,'AppData','Local'),'Switchboard');
+ if(platform==='darwin')return path.join(home,'Library','Application Support','Switchboard');
+ return path.join(env.XDG_DATA_HOME||path.join(home,'.local','share'),'Switchboard');
+}
 const privateDir=dir=>{mkdirSync(dir,{recursive:true,mode:0o700});chmodSync(dir,0o700);};
 const atomicJSON=(file,data)=>{writeFileSync(file+'.tmp',JSON.stringify(data),{mode:0o600});renameSync(file+'.tmp',file);};
 function profileLocation(supportDir){
@@ -95,6 +100,13 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   runtime=await startDesktop({supportDir:process.env.SWITCHBOARD_DESKTOP_SUPPORT_DIR||defaultSupportDir(),port:Number(process.env.SWITCHBOARD_DESKTOP_PORT||3110),bootstrapToken:process.env.SWITCHBOARD_DESKTOP_BOOTSTRAP||randomBytes(32).toString('hex'),importFrom:process.env.SWITCHBOARD_DESKTOP_IMPORT||undefined});
   console.log(JSON.stringify({event:'desktop-ready',url:runtime.url,profileDir:runtime.profileDir,needsSetup:runtime.needsSetup}));
   for(const signal of ['SIGTERM','SIGINT'])process.once(signal,stop);
+  // Windows has no graceful SIGTERM equivalent. The native parent owns this
+  // private stdin pipe; it can request shutdown without an HTTP control endpoint.
+  if(process.env.SWITCHBOARD_DESKTOP_CONTROL==='stdio'){
+   const control=createInterface({input:process.stdin,terminal:false});
+   control.on('line',line=>{if(line.trim()==='{"command":"shutdown"}')void stop();});
+   control.once('close',()=>void stop());
+  }
   const parent=process.ppid;
   // Normal exits use SIGTERM immediately. This slower orphan check is only a
   // crash fallback; avoid waking a mostly idle desktop service every 2 seconds.

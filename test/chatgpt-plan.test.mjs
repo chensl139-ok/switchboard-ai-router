@@ -16,8 +16,15 @@ const jwk={...publicKey.export({format:'jwk'}),kid:'fixture-key',alg:'RS256',use
 const caller={userId:'user1',tenantId:'tenant1',sessionHash:'session1',role:'member'};
 const jwt=claims=>{const parts=[{alg:'RS256',kid:jwk.kid},claims].map(value=>Buffer.from(JSON.stringify(value)).toString('base64url'));return [...parts,sign('RSA-SHA256',Buffer.from(parts.join('.')),privateKey).toString('base64url')].join('.');};
 const stream=(...events)=>new Response(events.map(event=>'data: '+JSON.stringify(event)+'\r\n\r\n').join(''),{headers:{'content-type':'text/event-stream'}});
+function temporaryDirectory(t,prefix){
+ const dir=mkdtempSync(path.join(tmpdir(),prefix)),cleanups=[];
+ // Node after hooks run in registration order. Close servers and SQLite handles
+ // before removing their files; Windows cannot unlink an open SQLite database.
+ t.after(async()=>{for(const cleanup of cleanups.reverse())await cleanup();rmSync(dir,{recursive:true,force:true});});
+ return {dir,cleanup:callback=>cleanups.push(callback)};
+}
 function fixture(t){
- const dir=mkdtempSync(path.join(tmpdir(),'switchboard-plan-test-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const {dir,cleanup}=temporaryDirectory(t,'switchboard-plan-test-');
  let now=2000000000000,valid=true,auth,grant='resource.invoke chatgpt.tokens.use.direct',claims={},refreshes=0,revokes=0,modelCalls=0,response=()=>stream({type:'response.output_text.delta',delta:'你好'},{type:'response.completed',response:{id:'resp_ok',model:'fixture-model',status:'completed',usage:{output_tokens:2}}});
  const fetcher=async(url,options={})=>{
   if(url.endsWith('jwks.json'))return Response.json({keys:[jwk]});
@@ -34,17 +41,19 @@ function fixture(t){
   if(url.endsWith('/responses')){assert.deepEqual(JSON.parse(options.body),planRequest('fixture-model',[{role:'user',content:'hi'}]));return response();}
   throw Error('Unexpected fixture URL');
  };
- const plan=new ChatGPTPlan(dir,'x'.repeat(64),{fetcher,now:()=>now,sessionValid:()=>valid});t.after(()=>plan.close());
+ const plan=new ChatGPTPlan(dir,'x'.repeat(64),{fetcher,now:()=>now,sessionValid:()=>valid});cleanup(()=>plan.close());
  const authorize=()=>{const start=plan.start(caller,'http://127.0.0.1:3110/api/account/chatgpt/callback');const result=plan.authorize(new URL(start.url).searchParams.get('ticket'));auth=new URL(result.url);return result;};
  const callback=()=>plan.callback(new URLSearchParams({state:auth.searchParams.get('state'),code:'fixture-code',client_id:'oaiapp_fixture'}),auth.searchParams.get('state'));
- return {plan,dir,authorize,callback,fetcher,setValid:value=>valid=value,setClaims:value=>claims=value,setGrant:value=>grant=value,setResponse:value=>response=value,advance:ms=>now+=ms,counts:()=>({refreshes,revokes,modelCalls})};
+ return {plan,dir,cleanup,authorize,callback,fetcher,setValid:value=>valid=value,setClaims:value=>claims=value,setGrant:value=>grant=value,setResponse:value=>response=value,advance:ms=>now+=ms,counts:()=>({refreshes,revokes,modelCalls})};
 }
 
 test('OAuth registration validates PKCE, one-use state, issuer identity and encrypted owner-only storage',async t=>{
  const f=fixture(t),start=f.authorize();assert.equal(new URL(start.url).searchParams.get('client_id'),'dynamic_agent_client');assert.equal(new URL(start.url).searchParams.get('agent_name_hint'),'Switchboard');
  await f.callback();await assert.rejects(f.callback(),/校验失败/);
  const [account]=f.plan.status(caller).accounts;assert.equal(account.planEnabled,true);assert.equal(account.connected,true);assert.equal(f.plan.status({...caller,userId:'other'}).accounts.length,0);assert.equal(f.plan.status({...caller,tenantId:'other'}).accounts.length,0);
- const disk=readFileSync(path.join(f.dir,'chatgpt-plan.json'),'utf8');assert(!disk.includes('private-access'));assert(!disk.includes('private-refresh'));assert(!disk.includes('id_token'));assert.equal(statSync(f.plan.file).mode&0o777,0o600);
+ const disk=readFileSync(path.join(f.dir,'chatgpt-plan.json'),'utf8');assert(!disk.includes('private-access'));assert(!disk.includes('private-refresh'));assert(!disk.includes('id_token'));
+ // Windows permissions are governed by NTFS ACLs, not POSIX owner/group bits.
+ if(process.platform!=='win32')assert.equal(statSync(f.plan.file).mode&0o777,0o600);
  await assert.rejects(f.plan.models({...caller,userId:'other'},account.id),error=>error.status===404);
  const renewed=new URL(f.plan.start(caller,'http://127.0.0.1:5555/api/account/chatgpt/callback',account.id).url);const auth=new URL(f.plan.authorize(renewed.searchParams.get('ticket')).url);assert.equal(auth.searchParams.get('client_id'),'oaiapp_fixture');assert.equal(auth.searchParams.has('agent_name_hint'),false);
 });
@@ -102,7 +111,7 @@ test('Unified lab SSE uses session-scoped subscription endpoint, handles errors 
  const ownerToken=await accounts.setup({bootstrapToken:admin,name:'Owner',email:'owner@fixture.invalid',password:'fixture-password-1234'}),owner=accounts.resolve(ownerToken);
  f.plan.save({...f.plan.state,accounts:f.plan.state.accounts.map(record=>({...record,userId:owner.userId,tenantId:owner.tenantId}))});
  const invite=accounts.invite(owner,{email:'member@fixture.invalid',role:'member'}),memberToken=await accounts.register({email:'member@fixture.invalid',name:'Member',password:'fixture-password-1234',inviteCode:invite.code});
- const app=createPlatform({dir:f.dir,admin,gateway:'g'.repeat(64),desktopAuth:'d'.repeat(64),oauthConfig:[],planFetcher:f.fetcher});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>{app.closeAllConnections();app.close(resolve);}));
+ const app=createPlatform({dir:f.dir,admin,gateway:'g'.repeat(64),desktopAuth:'d'.repeat(64),oauthConfig:[],planFetcher:f.fetcher});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));f.cleanup(()=>new Promise(resolve=>{app.closeAllConnections();app.close(resolve);}));
  const base='http://127.0.0.1:'+app.address().port,headers={cookie:'sr_session='+ownerToken,'content-type':'application/json'},nativeFetch=globalThis.fetch;
  const providers=await(await nativeFetch(base+'/api/account/chatgpt/providers',{headers})).json();assert.equal(providers.providers[0].subscriptionId,id);
  const memberHeaders={...headers,cookie:'sr_session='+memberToken};assert.deepEqual((await(await nativeFetch(base+'/api/account/chatgpt/providers',{headers:memberHeaders})).json()).providers,[]);
@@ -139,7 +148,7 @@ test('Personal routing executes private models and cross-provider failover witho
   }return f.fetcher(url,options);
  };
  const fetcher=async()=>{calls.push('shared');return new Response('data: '+JSON.stringify({choices:[{index:0,delta:{content:'shared-ok'}}]})+'\n\ndata: '+JSON.stringify({choices:[],usage:{prompt_tokens:2,completion_tokens:3,total_tokens:5}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});};
- const app=createPlatform({dir:f.dir,admin,gateway:'g'.repeat(64),desktopAuth:'d'.repeat(64),oauthConfig:[],planFetcher,fetcher});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>{app.closeAllConnections();app.close(resolve);}));
+ const app=createPlatform({dir:f.dir,admin,gateway:'g'.repeat(64),desktopAuth:'d'.repeat(64),oauthConfig:[],planFetcher,fetcher});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));f.cleanup(()=>new Promise(resolve=>{app.closeAllConnections();app.close(resolve);}));
  const base='http://127.0.0.1:'+app.address().port,nativeFetch=globalThis.fetch,headers={cookie:'sr_session='+ownerToken,'content-type':'application/json'};
  const post=(endpoint,data,h=headers)=>nativeFetch(base+endpoint,{method:'POST',headers:h,body:JSON.stringify(data)});
  assert.equal((await post('/api/provider',{id:'shared',name:'Shared',baseUrl:'https://shared.fixture.invalid/v1',protocol:'openai',enabled:true,apiKey:'shared-key',model:'shared-model',models:['shared-model']})).status,200);
@@ -206,8 +215,8 @@ test('Auth transactions expire; a logout during exchange cannot save credentials
 });
 
 test('Platform isolates subscription routes from public API keys and non-desktop servers',async t=>{
- const dir=mkdtempSync(path.join(tmpdir(),'switchboard-plan-http-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));const admin='a'.repeat(64),accounts=new Accounts(dir,admin);const token=await accounts.setup({bootstrapToken:admin,name:'Owner',email:'owner@fixture.invalid',password:'fixture-password-1234'});
- const app=createPlatform({dir,admin,gateway:'g'.repeat(64),desktopAuth:'d'.repeat(64),oauthConfig:[]});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>{app.closeAllConnections();app.close(resolve);}));const base='http://127.0.0.1:'+app.address().port;
+ const {dir,cleanup}=temporaryDirectory(t,'switchboard-plan-http-');const admin='a'.repeat(64),accounts=new Accounts(dir,admin);const token=await accounts.setup({bootstrapToken:admin,name:'Owner',email:'owner@fixture.invalid',password:'fixture-password-1234'});
+ const app=createPlatform({dir,admin,gateway:'g'.repeat(64),desktopAuth:'d'.repeat(64),oauthConfig:[]});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));cleanup(()=>new Promise(resolve=>{app.closeAllConnections();app.close(resolve);}));const base='http://127.0.0.1:'+app.address().port;
  assert.equal((await fetch(base+'/api/account/chatgpt/status')).status,401);
  assert.equal((await fetch(base+'/api/account/chatgpt/status',{headers:{authorization:'Bearer '+admin}})).status,401);
  const headers={cookie:'sr_session='+token,'content-type':'application/json'};const status=await(await fetch(base+'/api/account/chatgpt/status',{headers})).json();assert.deepEqual(status.accounts,[]);
@@ -216,5 +225,5 @@ test('Platform isolates subscription routes from public API keys and non-desktop
  const start=await(await fetch(base+'/api/account/chatgpt/start',{method:'POST',headers,body:'{}'})).json();const auth=await fetch(start.url,{redirect:'manual'});assert.equal(new URL(auth.headers.get('location')).host,'auth.openai.com');assert.match(auth.headers.get('set-cookie'),/HttpOnly/);
  const callback=await fetch(base+'/api/account/chatgpt/callback?state=invalid&code=must-not-remain-in-url',{redirect:'manual'});assert.equal(callback.status,303);assert.equal(callback.headers.get('location'),'/api/account/chatgpt/result');
  const resultCookie=callback.headers.getSetCookie().find(cookie=>cookie.startsWith('sr_chatgpt_result=')).split(';')[0],result=await fetch(base+'/api/account/chatgpt/result',{headers:{cookie:resultCookie}});assert.match(await result.text(),/授权校验失败/);assert(!result.headers.has('set-cookie')||!result.headers.get('set-cookie').includes('sr_session='));
- const web=createPlatform({dir,admin,gateway:'g'.repeat(64),oauthConfig:[]});await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>{web.closeAllConnections();web.close(resolve);}));assert.equal((await fetch('http://127.0.0.1:'+web.address().port+'/api/account/chatgpt/status',{headers})).status,404);
+ const web=createPlatform({dir,admin,gateway:'g'.repeat(64),oauthConfig:[]});await new Promise(resolve=>web.listen(0,'127.0.0.1',resolve));cleanup(()=>new Promise(resolve=>{web.closeAllConnections();web.close(resolve);}));assert.equal((await fetch('http://127.0.0.1:'+web.address().port+'/api/account/chatgpt/status',{headers})).status,404);
 });
