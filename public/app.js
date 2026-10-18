@@ -141,15 +141,15 @@ async function renderPage(root){
   // Navigation, logout or tenant changes can finish while a chunk downloads.
   if(!isCurrent())return;
   const {renderModelCatalog,renderApiGuide,renderAnalytics,renderLogs,renderPrices,renderPlayground,renderMediaLab,renderRouting,renderApiKeys,renderAudit,renderSubscriptions,renderConnect}=module;
-  const loadPersonal=async()=>{state.personalProviders=[];if(!profile?.chatgptPlan||profile.role==='viewer')return;try{const result=await api('/api/account/chatgpt/providers');if(isCurrent())state.personalProviders=result.providers;}catch{if(isCurrent())toast('个人订阅模型暂不可用，不影响组织 API 模型');}};
-  if(['models','playground'].includes(tab))await loadPersonal();if(!isCurrent())return;
+  const loadPersonal=async()=>{if(!profile?.chatgptPlan||profile.role==='viewer'){state.personalProviders=[];return [];}try{const result=await api('/api/account/chatgpt/providers');if(isCurrent())state.personalProviders=result.providers;return result.providers;}catch{if(isCurrent())toast('个人订阅模型暂不可用，不影响组织 API 模型');return null;}};
+  if(tab==='models')await loadPersonal();if(!isCurrent())return;
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);
  switch(tab){
   case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(isCurrent())renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(isCurrent()){const chain=root.querySelector('#dashboard-route-chain'),note=root.querySelector('#dashboard-route-note');if(chain)chain.textContent='路由预览暂不可用';if(note)note.textContent=error.message;}});void api('/api/analytics?days=7').then(summary=>{if(isCurrent())renderDashboardSummary(root,summary);}).catch(()=>{const detail=isCurrent()&&root.querySelector('#dashboard-final-detail');if(detail)detail.textContent='用量数据暂不可用';});break;
   case 'providers':renderProviderFilter(root);if(profile?.chatgptPlan&&profile.role!=='viewer')void Promise.all([loadPersonal(),pageLoader.load('planProviders')]).then(([,personal])=>{if(isCurrent())personal.mountPlanProviders({root,state,api,esc,toast,isCurrent,onRun:(id,model)=>{labTarget=JSON.stringify([id,model]);navigate('playground');},onChange:()=>root.querySelector('#provider-search')?.dispatchEvent(new Event('input'))});}).catch(()=>{if(isCurrent())toast('订阅卡片暂时无法加载，请刷新重试');});break;
   case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;},embedded:true});break;
-  case 'playground':renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;break;
+  case 'playground':{const personalLoading=Boolean(profile?.chatgptPlan&&profile.role!=='viewer');const lab=renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget,personalLoading,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;if(personalLoading&&lab?.updatePersonalProviders)void loadPersonal().then(providers=>{if(isCurrent())lab.updatePersonalProviders(providers);});break;}
   case 'media':renderMediaLab({state,tenantId:profile?.tenantId,esc,embedded:true});break;
   case 'api':renderApiGuide({esc,toast});break;
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;

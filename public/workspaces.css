@@ -261,6 +261,7 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
 #content.chat-workspace .lab-toolbar .lab-session-summary>div { display: inline-flex; align-items: center; gap: var(--space-xs); min-width: 0; padding: 7px 0 0; border: 0; }
 #content.chat-workspace .lab-toolbar .lab-session-summary>div:last-child { margin-left: 0; }
 #content.chat-workspace .lab-messages { padding-top: var(--space-md); padding-bottom: var(--space-md); }
+#content.chat-workspace #lab-personal-status { margin: 8px 0 0; padding: 0 var(--space-md); color: var(--ui-muted); }
 #content.chat-workspace .lab-prompts { margin-top: var(--space-md); }
 #content.chat-workspace .lab-settings-body { padding: var(--space-md); }
 #content.chat-workspace .lab-settings label { margin-bottom: var(--space-md); }

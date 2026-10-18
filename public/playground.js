@@ -16,7 +16,7 @@ const headerValue=(response,name)=>{const value=response.headers.get(name);if(!v
 const responseRoute=response=>{const model=headerValue(response,'x-router-model');if(!model)return null;return {providerId:headerValue(response,'x-router-provider'),provider:headerValue(response,'x-router-provider-name'),model,protocol:headerValue(response,'x-router-protocol'),reason:headerValue(response,'x-router-reason'),attempt:Number(headerValue(response,'x-router-attempt'))||1,fallback:headerValue(response,'x-router-fallback')==='true'}};
 export function stopPlayground(){stopCompare();}
 export function resetPlayground(){contextVersion++;controller?.abort();history=[];conversationId=null;pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
-export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView,navigate,initialTarget}){
+export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView,navigate,initialTarget,personalLoading=false}){
  const root=document.querySelector('#content');
  stopCompare();
  if(initialTarget){settings.target=initialTarget;view='chat';}
@@ -40,7 +40,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  }
  root.insertAdjacentHTML('beforeend',`<div class="lab-session-summary" aria-label="当前实验状态"><div><small>运行状态</small><strong class="lab-state" id="lab-state">准备就绪</strong></div><div><small>上下文</small><strong id="lab-turn-count">0 轮</strong></div><div><small>响应方式</small><strong id="lab-transport-label">SSE 流式</strong></div></div>
  <div class="lab-layout chat-canvas"><section class="lab-main"><div class="lab-toolbar"><label class="lab-model-quick"><span>${spark}运行模型</span><select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label><button type="button" id="lab-settings-toggle" aria-expanded="false" aria-controls="lab-settings-panel">${icon('<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>')}<span>生成设置</span></button></div>
- <div class="lab-messages" id="lab-messages" aria-live="polite"></div><div id="lab-error" class="lab-error" role="alert"></div>
+ <p id="lab-personal-status" class="lab-help" role="status" ${personalLoading?'':'hidden'}>正在加载个人订阅模型；组织模型可立即使用。</p><div class="lab-messages" id="lab-messages" aria-live="polite"></div><div id="lab-error" class="lab-error" role="alert"></div>
  <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><form id="lab-form" class="lab-composer"><div id="lab-draft-state" class="lab-draft-state" hidden><span></span>模型正在回复，你可以继续写下一条</div><div id="lab-images" class="lab-images" aria-label="待发送图片"></div><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="2" aria-describedby="lab-compose-hint" placeholder="发送消息，或粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 添加图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span id="lab-compose-hint" aria-live="polite">Enter 发送 · Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
  <div class="lab-privacy">对话文本保存在当前账户的实验历史中，可查看、导出及删除；请求内容不写入请求日志</div></section>
  <aside class="lab-settings" id="lab-settings-panel" aria-label="生成设置" hidden><div class="lab-settings-heading">生成设置<button type="button" id="lab-settings-close" aria-label="关闭生成设置">×</button></div><div class="lab-settings-note">仅影响本次对话 · 协议自动适配</div>
@@ -50,7 +50,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  <label>最大输出 Tokens<input id="lab-max-tokens" type="number" min="1" max="131072" value="${settings.maxTokens}" required></label>
  <details class="lab-tool-config"><summary>函数工具（可选）</summary><textarea id="lab-tools" rows="4" aria-label="函数工具 JSON"></textarea><p class="lab-help">填写 OpenAI tools 数组。这里只展示调用请求，不执行工具；执行后通过 API 回传结果。</p></details><div class="lab-call-info"><span>当前目标</span><strong id="lab-target-label"></strong><p>实验室选择不会改变后台默认路由。</p></div><p class="lab-metric-note">TPS 使用上游输出 Token 数和请求总耗时；估算 TPOT 使用首末输出增量的时间跨度及上游输出 Token 数。浏览器网络分块不能精确还原单 Token 解码时间。</p></aside></div>`);
  const $=selector=>root.querySelector(selector);
- if(isPersonalTarget(settings.target)&&!selectedChoice())$('#lab-model').add(new Option('个人订阅暂不可用 · 请重新连接',settings.target));
+ if(isPersonalTarget(settings.target)&&!selectedChoice())$('#lab-model').add(new Option(personalLoading?'个人订阅模型加载中…':'个人订阅暂不可用 · 请重新连接',settings.target));
  const historyPanel=mountLabHistory(root,{area:'chat',tenantId,onOpen:(row,content)=>{
   let snapshot;try{snapshot=JSON.parse(row.result||'{}');}catch{snapshot={messages:[]};}
   if(snapshot.truncated||snapshot.version!==2){const note=document.createElement('p');note.className='lab-history-truncated';note.textContent=snapshot.version===2?`已达到记录容量上限${snapshot.omittedMessages?'，未保存较早的 '+snapshot.omittedMessages+' 条消息':''}${snapshot.clipped?'，最后一条内容仅保存部分':''}。`:'旧版记录可能只保存了部分对话内容，无法恢复当时未保存的文本';content.append(note);}
@@ -212,6 +212,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-form').onsubmit=async e=>{
   e.preventDefault();e.stopPropagation();if(controller)return;if(addingImages){$('#lab-error').textContent='图片正在读取，请稍后发送';return;}
   const personal=isPersonalTarget(settings.target),choice=selectedChoice(),requestTransport=personal?'sse':settings.transport;
+  if(personal&&personalLoading&&!choice){$('#lab-error').textContent='个人订阅模型正在加载，请稍候；也可先选择组织模型。';return;}
   const prompt=$('#lab-prompt').value.trim();if(!prompt&&!pendingImages.length)return;if(!choices.length&&!personal){$('#lab-error').textContent='请先在服务商管理中配置密钥、添加模型并启用服务商';return;}if(!personal&&(!Number.isInteger(settings.maxTokens)||settings.maxTokens<1||settings.maxTokens>131072)){$('#lab-error').textContent='最大输出 Tokens 需为 1 至 131072 的整数';return;}
   const capability=selectedCapability();if(settings.thinking==='disabled'&&capability?.canDisable===false){$('#lab-error').textContent=capability.reason;return;}
   if(history.at(-1)?.tool_calls?.length){$('#lab-error').textContent='上一次返回了工具调用，请通过 API 回传工具结果，或清空对话后重新测试。';return;}
@@ -240,4 +241,19 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   }catch(error){response.status=request.signal.aborted?'已停止':'失败';if($('#lab-error'))$('#lab-error').textContent=request.signal.aborted?'已停止生成。已返回的内容保留在对话中。':error.message;}
   finally{if(controller===request)controller=null;if(drawTimer){clearTimeout(drawTimer);drawTimer=null;}currentViewDraw?.();if(root.isConnected)$('#lab-prompt').focus();void refresh();if(conversationId&&version===contextVersion)try{await labHistoryRequest(tenantId,'',{id:conversationId,area:'chat',kind:'conversation',model:response.route?.model||upstream_model||'自动路由',title:titleText,status:response.status==='失败'?'failed':response.status==='已停止'?'stopped':'completed',error:response.status==='失败'?($('#lab-error')?.textContent||'调用失败'):'',result:snapshot()});if(historyPanel.section.open)void historyPanel.refresh();}catch{/* Keep the live result even if history storage is unavailable. */}}
  };
+ function refreshPersonalModels(providers){
+  if(!root.isConnected)return;
+  personalLoading=false;
+  const status=$('#lab-personal-status');
+  if(!providers){status.hidden=false;status.textContent='个人订阅模型暂不可用；组织模型仍可正常使用。';if(isPersonalTarget(settings.target)&&!selectedChoice()){const select=$('#lab-model');select.options[select.selectedIndex].textContent='个人订阅暂不可用 · 请重新连接';targetLabel();}return;}
+  state.personalProviders=providers;
+  choices.splice(0,choices.length,...labChoices(state));
+  if(providers.some(provider=>provider.enabled))choices.unshift({id:'personal-auto',label:'个人自动路由 · 组织 API + 本人订阅',personalRouting:true});
+  const select=$('#lab-model'),options=[new Option('自动路由 · 跟随后台策略','auto'),...choices.map(choice=>new Option(choice.label,choice.id))];
+  if(isPersonalTarget(settings.target)&&!selectedChoice())options.push(new Option('个人订阅暂不可用 · 请重新连接',settings.target));
+  // Update only choices. Never rebuild messages, replace a draft, change the
+  // selected target, or interrupt an in-flight generation for catalog loading.
+  select.replaceChildren(...options);select.value=settings.target;status.hidden=true;targetLabel();
+ }
+ return {updatePersonalProviders:refreshPersonalModels};
 }
