@@ -9,11 +9,28 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-![Switchboard workspace — demo data](docs/demo/workspace.png)
+![Workspace overview: route candidates, final success rate and recent calls](docs/demo/overview.jpg)
+
+## See the workflow
+
+Real captures from the current main branch, using isolated demo accounts and simulated upstreams. These numbers are **not performance benchmarks**. Click an image for the full view.
+
+| 1 · Connect your models | 2 · Plan for failures |
+| --- | --- |
+| [![Providers and model selection](docs/demo/providers.jpg)](docs/demo/providers.jpg) | [![Routing and failover coverage](docs/demo/routing.jpg)](docs/demo/routing.jpg) |
+| Enable the models you need. Keep credentials on the server. | Pick a preferred model and backups; preview how many providers your attempt budget covers. |
+| **3 · Test a conversation** | **4 · Continue from history** |
+| [![Streaming chat](docs/demo/playground.jpg)](docs/demo/playground.jpg) | [![Saved conversation](docs/demo/history.jpg)](docs/demo/history.jpg) |
+| Markdown, code blocks, the actual-hit model and timing metrics. | Search, inspect, export or resume text conversations. New records preserve the original routing selection. |
+| **5 · Connect a client** | **6 · Understand usage** |
+| [![Connection guide](docs/demo/connect.jpg)](docs/demo/connect.jpg) | [![Usage in dark mode](docs/demo/analytics.jpg)](docs/demo/analytics.jpg) |
+| Copy configuration for Claude Code, Codex or a compatible client with your own business key. | Distinguish final request success from failed upstream attempts, with tenant-scoped usage and reference costs. |
+
+Try it without provider credentials or paid calls: `npm ci && npm run demo`. This creates a temporary loopback-only workspace and prints a demo login. [Demo details](docs/demo/README.md).
 
 ## Features
 
-- **Your keys stay on your machine.** Self-hosted BYOK gateway: provider keys are AES-256-GCM encrypted at rest, business API keys are stored hashed, and prompts/responses are never written to logs.
+- **Your keys stay on your machine.** Self-hosted BYOK gateway: provider keys are AES-256-GCM encrypted at rest, business API keys are stored hashed, and request logs do not store prompts or responses. Lab history does store conversation text, which users can inspect and delete.
 - **Model-level routing.** Pick a preferred model and automatic or ordered backups, with price/latency/weight objectives, keyword exceptions, circuit breaking and a total request timeout.
 - **A shared workspace.** Providers, models, experiment history, keys, members and usage in one interface. `⌘K` / `Ctrl+K` searches pages and available models within your current permissions.
 - **Local deployment.** One Node.js process with two runtime dependencies (`ws`, `marked`). Native desktop shells use system WebKit on macOS and WebView2 on Windows; no separate Docker or Node installation is needed.
@@ -98,24 +115,21 @@ Personal routing can combine the caller's authorized subscription models with or
 | Business API keys | per-member keys with expiry and quotas, hashed at rest; revocation takes effect on removal |
 | Observability | request metadata logs (never prompt bodies), final-success-rate accounting, per-member/model/key usage, cost estimation, OpenRouter reference pricing import |
 
-## Comparison
+## Routing you can inspect
 
-Snapshot October 2026 — check each project's latest docs, and please PR corrections.
+The policy editor separates preferred model, backup behavior and optional optimization. Previewing a draft does not save it or call a model.
 
-| | Switchboard | LiteLLM | one-api | new-api | claude-code-router |
-| --- | --- | --- | --- | --- | --- |
-| License | **MIT** | MIT core + enterprise dir | MIT | AGPL-3.0 + extra terms | MIT |
-| Runtime | Node.js · **2 runtime deps** | Python SDK + proxy | Go single binary | Go single binary | Node CLI |
-| Web console | ✅ (CN-first, EN i18n planned) | ✅ | ✅ | ✅ | CLI-first |
-| Routing strategies | Fixed / auto; 4 objectives + rules + failover | broad | channel fallback | channel + convert | per-agent rules |
-| Protocol conversion | OpenAI Chat / Responses / Completions + Anthropic Messages | broadest (100+ providers) | OpenAI-compatible | OpenAI / Claude / Gemini | agent-focused |
-| Multi-tenant RBAC + audit | ✅ built-in | enterprise tier | 🔶 basic users/groups | 🔶 basic users/groups | ❌ |
-| Model playground & compare | ✅ with latency metrics | 🔶 dashboard test | 🔶 | 🔶 | ❌ |
-| Media tasks (img/audio/video/embed/rerank) | ✅ | ✅ | 🔶 | ✅ | ❌ |
-| Credit/billing & redemption codes | paywall off (BYOK plan drafts) | 🔶 budgets | ✅ | ✅ | ❌ |
-| Desktop app | ✅ macOS / Windows x64 | ❌ | ❌ | ❌ | CLI |
+| Objective / protection | Behavior |
+| --- | --- |
+| Priority | Preferred model first; automatic fallback reserves room for another provider |
+| Latency | Compare recent model-level successful samples, including models within one provider; at least three samples are required |
+| Cost | Compare valid same-currency reference prices; unknown prices are not free |
+| Weight | Weighted provider rotation with model-level fallback |
+| Ordered backups | Follow an explicit candidate sequence |
+| Attempt budget | Counts actual attempts, including alternate credentials; preview shows effective coverage |
+| Total timeout | Divide remaining time across remaining eligible attempts, not nonexistent candidates |
 
-**When Switchboard is *not* the right pick:** you need 100+ exotic providers out of the box (LiteLLM), you run a public key-reselling storefront with redemption codes (one-api / new-api), or you want a personal CLI shim for one coding agent (claude-code-router). Switchboard is built for **individuals and teams who self-host one governed gateway** for many providers.
+Reference prices are estimates, not supplier invoices. Imported OpenRouter reference prices have lower priority than manual or provider-native prices. Organization subscription plans are a BYOK framework with the payment wall off; wallet top-ups and live payment checkout are not implemented.
 
 ## Deployment & security notes
 
@@ -136,6 +150,18 @@ Full details: [TENANCY.md](TENANCY.md) (roles & Feishu/Lark SSO), [API.md](API.m
 
 All images use `ghcr.io/chensl139-ok/switchboard-ai-router`. The main workflow tests the application and starts an isolated Linux container before publishing both architectures. It does not change stable tags or create a Release. A git push alone runs CI, not image publication. Desktop Windows installers are separate [workflow artifacts](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/windows-desktop.yml), retained for 14 days; download them promptly if you need a lasting copy.
 
+## Verify your deployment
+
+Desktop and Docker share core code but keep separate data directories. Updating one does not update the other or a remote server. See [upgrade and backup guidance](docs/OPERATIONS.md).
+
+```sh
+npm run doctor -- --url http://127.0.0.1:3100
+# Compare with a running desktop instance (use its actual port):
+npm run doctor -- --url http://127.0.0.1:3100 --url http://127.0.0.1:3110
+```
+
+Doctor checks readiness and the shared build fingerprint without credentials or model calls. Matching code does not imply shared data. The same fingerprint is shown under Account & Tenants.
+
 ## Development
 
 ```sh
@@ -143,6 +169,7 @@ npm ci
 npm run check    # syntax, TypeScript/Vue types, web build
 npm test         # automated unit/integration tests
 npm start        # build web assets and serve locally
+npm run demo     # disposable workspace with simulated upstreams
 ```
 
 Push a `v*` tag to cut a release: CI runs checks and tests, builds multi-arch GHCR images, and generates release notes with offline bundles.
@@ -159,4 +186,4 @@ If Switchboard saves you a deployment, a debugging session or a surprise bill �
 
 ## License
 
-[MIT](LICENSE) © 2026 chensl139-ok
+[MIT](LICENSE) © 2026 chensl139-ok · Maintainer: [15652641985@163.com](mailto:15652641985@163.com)

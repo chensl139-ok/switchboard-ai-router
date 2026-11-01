@@ -185,7 +185,8 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    if(attempted>=policy.maxAttempts)break;
    const candidate=candidates[candidateIndex];
    if(rejectedCredentials.has(candidate.id+':'+candidate.routeSecret))continue;
-   const p={...candidate,prices:structuredClone(candidate.prices||{})},remaining=Math.max(1,policy.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=policy.maxAttempts-attempted;
+   const eligibleRemaining=candidates.slice(candidateIndex).filter(route=>!rejectedCredentials.has(route.id+':'+route.routeSecret)).length;
+   const p={...candidate,prices:structuredClone(candidate.prices||{})},remaining=Math.max(1,policy.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=Math.min(policy.maxAttempts-attempted,eligibleRemaining);
    const attempt=++attempted;
    const attemptTimeout=AbortSignal.timeout(Math.max(1,Math.floor(remaining/attemptsLeft))),signal=AbortSignal.any([requestSignal,attemptTimeout]);
    const started=Date.now();let status=502,pendingBytes=0;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};const pendingChunks=[];

@@ -8,6 +8,8 @@
     "start": "node --env-file-if-exists=.env platform.mjs",
     "test": "node --test test/*.test.mjs",
     "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "demo": "npm run build:web && node scripts/demo.mjs",
     "build:desktop": "node scripts/build-desktop.mjs",
     "build:windows": "node scripts/build-windows.mjs",
     "build:web": "vite build",

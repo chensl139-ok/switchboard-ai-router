@@ -216,7 +216,7 @@ test('实验室历史按需读取详情，对话增量只更新末条消息',()=
 test('实验室不显示缓存指标，历史详情和对比保留性能与用量指标',()=>{
  const chat=read('public/playground.js'),compare=read('public/ModelCompare.vue');
  assert.doesNotMatch(chat,/本次输入缓存|cacheHitLabel/);assert.doesNotMatch(compare,/本次输入缓存|cacheHitLabel/);
- assert.match(chat,/conversationSnapshot\(conversationMessages\)/);assert.doesNotMatch(chat,/slice\(0,1200\)/);
+ assert.match(chat,/conversationSnapshot\(conversationMessages[,)]/);assert.doesNotMatch(chat,/slice\(0,1200\)/);
  assert.match(chat,/TTFB/);assert.match(chat,/TTFT/);assert.match(chat,/TPOT/);
  const history=read('public/lab-history-client.js');assert.match(history,/new AbortController/);assert.match(history,/复制内容/);assert.match(history,/导出记录/);assert.match(history,/limit:'20'/);
 });

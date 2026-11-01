@@ -1,5 +1,6 @@
 import {modelCapabilities} from './model-capability.js';
 import {routingObjectives,routingDraft,draftPolicy} from './routing-policy.js';
+import {routeDiagnosticsMarkup,routeSampleLabel} from './route-diagnostics.js';
 
 // This page edits a local draft. Only the Save button changes live routing.
 export function renderRouting({state,api,esc,updated,toast,personalAvailable=false,sharedState=state,canManageShared=true}){
@@ -49,7 +50,7 @@ export function renderRouting({state,api,esc,updated,toast,personalAvailable=fal
   root.querySelector('#route-add-backup').disabled=draft.backups.length>=9;
   root.querySelector('#route-revert').disabled=!dirty();root.querySelector('#route-save-state').textContent=dirty()?'有未保存的修改':'已保存的设置';
   root.querySelector('#route-preview-badge').textContent=dirty()?'草稿 · 未生效':inheriting?'跟随团队':'当前设置';
-  const policy=draftPolicySafe();root.querySelector('#route-overview').textContent=policy?`${policy.strategy==='manual'?'只使用 '+label(draft.preferred):sorting?'由平台按进阶设置挑选模型':'先用 '+(draft.preferred?label(draft.preferred):'平台选出的可用模型')}。${policy.strategy!=='manual'?'失败后'+(draft.backupMode==='selected'?'按你指定的顺序切换。':'自动尝试备用。'):''}整次最多等待 ${draft.timeoutSeconds} 秒，最多 ${draft.maxAttempts} 次尝试。`:'请先把首选与备用模型填写完整。';
+  const policy=draftPolicySafe();root.querySelector('#route-overview').textContent=policy?`${policy.strategy==='manual'?'只使用 '+label(draft.preferred):sorting?'由平台按进阶设置挑选模型':'先用 '+(draft.preferred?label(draft.preferred):'平台选出的可用模型')}。${Number(draft.maxAttempts)===1?'仅尝试一次，失败后不会重试。':policy.strategy!=='manual'?'失败后'+(draft.backupMode==='selected'?'按你指定的顺序切换。':'自动尝试备用。'):''}整次最多等待 ${draft.timeoutSeconds} 秒，最多 ${draft.maxAttempts} 次尝试。`:'请先把首选与备用模型填写完整。';
  }
  function draftPolicySafe(){try{return draftPolicy(draft);}catch{return null;}}
  function drawBackups(){backupList.innerHTML=draft.backups.map((value,index)=>`<div class="route-backup-row" data-backup="${index}"><span>${index+1}</span><label>备用模型 ${index+1}<select required>${options(value,[draft.preferred,...draft.backups.filter((_,i)=>i!==index)])}</select></label><div><button type="button" data-move="up" ${index===0?'disabled':''} aria-label="备用 ${index+1} 上移">↑</button><button type="button" data-move="down" ${index===draft.backups.length-1?'disabled':''} aria-label="备用 ${index+1} 下移">↓</button><button type="button" data-remove-backup="${index}" aria-label="移除备用 ${index+1}">移除</button></div></div>`).join('');}
@@ -62,7 +63,7 @@ export function renderRouting({state,api,esc,updated,toast,personalAvailable=fal
   try{const result=await api(endpoint+'/preview',{model:'auto',prompt:root.querySelector('#route-preview-prompt').value,...(policy?{policy}:{})});if(!current()||version!==previewVersion)return;
    const inside=result.candidates.filter(p=>p.withinAttemptBudget),outside=result.candidates.filter(p=>!p.withinAttemptBudget);
    target.innerHTML=inside.length?`<ol class="route-result-steps">${inside.map((p,index)=>`<li><span>${index+1}</span><div><small>${index===0?'先调用':p.channel==='metered'?'仍失败则用备用密钥':'失败后再调用'}</small><strong>${esc(p.provider)}</strong><code>${esc(p.model)}</code></div></li>`).join('')}</ol>`:'<p class="info">没有符合条件的可用模型，请调整首选、备用或进阶设置。</p>';
-   target.insertAdjacentHTML('beforeend',`<p class="route-preview-help">${outside.length||result.total>result.candidates.length?`另有候选超出 ${result.maxAttempts} 次尝试上限，本次不会调用。可在进阶设置调整上限。`:`最多尝试 ${result.maxAttempts} 次；成功后立即停止，不会重复调用后面的模型。`}</p><details class="route-technical"><summary>为什么是这个顺序？</summary>${result.candidates.map(p=>`<p>${p.order}. ${esc(p.provider)} / ${esc(p.model)}${p.withinAttemptBudget?'':'（超出次数上限）'}<br><small>${esc(p.reason||'按当前设置')} · ${esc(p.protocol)}</small></p>`).join('')}${result.excluded.length?`<p>另有 ${result.excluded.length} 个候选不兼容本次请求，已跳过。</p>`:''}</details>`);
+   target.insertAdjacentHTML('beforeend',`${routeDiagnosticsMarkup(result,esc)}<p class="route-preview-help">${outside.length||result.total>result.candidates.length?`另有候选超出 ${result.maxAttempts} 次尝试上限，本次不会调用。可在进阶设置调整上限。`:`最多尝试 ${result.maxAttempts} 次；成功后立即停止，不会重复调用后面的模型。`}</p><details class="route-technical"><summary>为什么是这个顺序？</summary>${result.candidates.map(p=>`<p>${p.order}. ${esc(p.provider)} / ${esc(p.model)}${p.withinAttemptBudget?'':'（超出次数上限）'}<br><small>${esc(p.reason||'按当前设置')} · ${esc(p.protocol)}<br>${esc(routeSampleLabel(p.health))}</small></p>`).join('')}</details>`);
   }catch(error){if(current()&&version===previewVersion)target.textContent=error.message;}
  }
  drawBackups();drawRules();sync();void preview();

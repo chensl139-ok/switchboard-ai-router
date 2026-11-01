@@ -4,6 +4,7 @@ import {providerCards,providerReady,refreshProviderHealth} from './provider-ui.j
 import {renderDashboard,renderDashboardRoutePreview,renderDashboardSummary} from './dashboard.js';
 import {modelCapabilities} from './model-capability.js';
 import {mountCommandMenu,shortcutLabel} from './command-menu.js';
+import {desktopSubscriptionNotice} from './runtime-info.js';
 const pageLoader=createPageLoader({
  models:()=>import('./model-catalog.js'),api:()=>import('./api-docs.js'),
  analytics:()=>import('./analytics.js'),prices:()=>import('./prices.js'),
@@ -142,6 +143,7 @@ async function renderPage(root){
   if(!isCurrent())return;
   const {renderModelCatalog,renderApiGuide,renderAnalytics,renderLogs,renderPrices,renderPlayground,renderMediaLab,renderRouting,renderApiKeys,renderAudit,renderSubscriptions,renderConnect}=module;
   const loadPersonal=async()=>{if(!profile?.chatgptPlan||profile.role==='viewer'){state.personalProviders=[];return [];}try{const result=await api('/api/account/chatgpt/providers');if(isCurrent())state.personalProviders=result.providers;return result.providers;}catch{if(isCurrent())toast('个人订阅模型暂不可用，不影响组织 API 模型');return null;}};
+  if(tab==='providers'&&!profile?.chatgptPlan&&profile.role!=='viewer')root.querySelector('.provider-grid')?.insertAdjacentHTML('afterend',desktopSubscriptionNotice());
   if(tab==='models')await loadPersonal();if(!isCurrent())return;
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);

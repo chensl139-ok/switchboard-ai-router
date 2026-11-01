@@ -65,9 +65,9 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   if((draft.trim()||pendingImages.length)&&!confirm('替换当前未发送的草稿并继续这条历史对话？'))throw Error('未替换当前草稿。');
   contextVersion++;history=restored.messages;conversationId=null;pendingImages=[];draft=restored.draft;
   const route=[...history].reverse().find(item=>item.route)?.route;
-  const target=route?JSON.stringify([route.providerId,route.model]):'auto';
+  const target=restored.target??(route?JSON.stringify([route.providerId,route.model]):'auto');
   settings.target=choices.some(choice=>choice.id===target)?target:'auto';$('#lab-model').value=settings.target;
-  $('#lab-prompt').value=draft;$('#lab-error').textContent='';targetLabel();resizePrompt();drawImages();draw();$('#lab-prompt').focus();
+  $('#lab-prompt').value=draft;$('#lab-error').textContent=target!==settings.target?'原对话的模型当前不可用，已切换为组织自动路由；发送前请确认运行模型。':'';targetLabel();resizePrompt();drawImages();draw();$('#lab-prompt').focus();
  }});
  $('.lab-toolbar').append($('.lab-session-summary'));
  const settingsPanel=$('.lab-settings'),settingsHeading=settingsPanel.querySelector('.lab-settings-heading');
@@ -227,7 +227,8 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   history.push({role:'user',content:userContent},response);pendingImages=[];drawImages();$('#lab-prompt').value='';draft='';resizePrompt();$('#lab-error').textContent='';
   const request=new AbortController(),version=contextVersion,conversationMessages=history;controller=request;busy(true);draw();
   const title=history.find(item=>item.role==='user')?.content;const titleText=(typeof title==='string'?title:Array.isArray(title)?title.find(item=>item.type==='text')?.text||'图片对话':'模型对话').slice(0,180);
-  const snapshot=()=>conversationSnapshot(conversationMessages);
+  const originalTarget=settings.target;
+  const snapshot=()=>conversationSnapshot(conversationMessages,256*1024,{target:originalTarget});
   try{const saved=await labHistoryRequest(tenantId,'',{...(conversationId?{id:conversationId}:{}),area:'chat',kind:'conversation',model:upstream_model||'自动路由',title:titleText,status:'running',result:snapshot()});if(version===contextVersion)conversationId=saved.id;}catch{/* History failure must not block a model call. */}
   const timing=createLabTiming();
   response.stats={};

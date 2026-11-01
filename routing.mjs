@@ -34,9 +34,12 @@ export function createRouter(state,usageStore,credentials={}){
  const credentialRoutes=(provider,model,routeReason,channelOverride)=>(channelOverride?[channelOverride]:channelsFor(provider,model)).map((channel,index)=>({...provider,model,channelOverride:channel,routeReason:index?`${routeReason} · 备用密钥`:routeReason}));
  const healthOf=(provider,model,now=Date.now())=>routeHealth(state,provider,model,now,usageStore);
  const recentlyFailed=(provider,model,now)=>healthOf(provider,model,now).circuitOpen;
- const latencyScore=(provider,now)=>{
-  const model=[provider.model,...provider.models].find(model=>hasModelCredential(provider,model)&&!recentlyFailed(provider,model,now));
-  return model?healthOf(provider,model,now).averageLatency:Infinity;
+ const fastestModel=(provider,now)=>{
+  const models=[...new Set([provider.model,...provider.models])].filter(model=>modelCapabilities(model).chat&&hasModelCredential(provider,model)).map(model=>({model,health:healthOf(provider,model,now)})).filter(item=>!item.health.circuitOpen);
+  // Keep configured order when measurements are absent or tied. A provider's
+  // slow default must not hide a faster, measured model in its own catalog.
+  models.sort((a,b)=>a.health.averageLatency-b.health.averageLatency);
+  return models[0]?.model||provider.model;
  };
  const modelRoutes=(provider,firstModel,now,channelOverride,skipOpen=false)=>[firstModel,...provider.models.filter(model=>model!==firstModel)]
   .map((model,index)=>({model,index}))
@@ -93,8 +96,10 @@ export function createRouter(state,usageStore,credentials={}){
   if(state.strategy==='weighted'&&candidates.length){
    candidates=weightedFirst(candidates,sequence);reason='按服务商权重轮询';
   }else if(state.strategy==='latency'){
-   candidates.sort((a,b)=>latencyScore(a,now)-latencyScore(b,now)||a.priority-b.priority);
-   reason='实际候选模型近一小时至少 3 条成功样本的平均耗时，无样本按优先级';
+   candidates=candidates.map(p=>({...p,model:fastestModel(p,now)}));
+   const latencyById=new Map(candidates.map(p=>[p.id,healthOf(p,p.model,now).averageLatency]));
+   candidates.sort((a,b)=>latencyById.get(a.id)-latencyById.get(b.id)||a.priority-b.priority);
+   reason='按模型近一小时至少 3 条成功样本的平均耗时择优，同服务商内也比较；无样本按优先级';
   }else{
    candidates.sort((a,b)=>Number(b.id===state.active)-Number(a.id===state.active));
   }

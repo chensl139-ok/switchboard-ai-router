@@ -2,7 +2,7 @@
 export const routingObjectives=[
  ['fallback','优先级优先','默认模型优先，按服务商顺序容灾。'],
  ['economy','经济优先','按有效同币种参考价排序，未知价格不当作免费。'],
- ['latency','延迟优先','按真实成功样本的平均总耗时排序，无样本按优先级。'],
+ ['latency','延迟优先','比较各服务商内的模型，按近期成功样本平均总耗时择优；无样本按优先级。'],
  ['weighted','权重分流','按服务商权重分配首选，失败继续容灾。'],
 ];
 export function routingView(policy){

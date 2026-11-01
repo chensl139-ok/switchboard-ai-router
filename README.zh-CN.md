@@ -9,13 +9,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-![Switchboard 工作台（演示数据）](docs/demo/workspace.png)
+![工作台：候选链、最终成功率和最近调用](docs/demo/overview.jpg)
+
+## 看一遍完整流程
+
+以下为当前主分支的实际界面，使用隔离演示账号与模拟上游。**数字仅用于展示，不是性能基准**；点击图片可查看完整画面。
+
+| ① 连接服务商与模型 | ② 配置路由与备用 |
+| --- | --- |
+| [![服务商与模型](docs/demo/providers.jpg)](docs/demo/providers.jpg) | [![路由与容灾覆盖](docs/demo/routing.jpg)](docs/demo/routing.jpg) |
+| 启用需要的模型，凭证保存在服务端。 | 选择首选与备用，预览真实顺序，查看尝试预算能覆盖几家服务商。 |
+| **③ 在实验室测试** | **④ 从历史继续** |
+| [![流式对话](docs/demo/playground.jpg)](docs/demo/playground.jpg) | [![历史详情](docs/demo/history.jpg)](docs/demo/history.jpg) |
+| Markdown、代码块、实际命中模型与性能指标集中展示。 | 搜索、查看、导出及恢复文本对话；新记录保留原始路由选择。 |
+| **⑤ 接入客户端** | **⑥ 查看调用与用量** |
+| [![客户端接入向导](docs/demo/connect.jpg)](docs/demo/connect.jpg) | [![深色模式用量分析](docs/demo/analytics.jpg)](docs/demo/analytics.jpg) |
+| 复制 Claude Code、Codex 或通用客户端配置，使用自己的业务 Key。 | 区分最终请求成功与上游失败尝试，按租户分析用量和参考成本。 |
+
+无需模型密钥即可体验：`npm ci && npm run demo`。只监听本机，使用临时数据和模拟上游，不产生模型费用。[演示说明](docs/demo/README.md)。
 
 [v2.2.0 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.2.0) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
 
 ## 主要能力
 
-- **密钥不出你的机器**：自托管 BYOK，服务商密钥 AES-256-GCM 加密落盘，业务 Key 哈希保存，请求日志不记录提示词与回复正文。
+- **密钥不出你的机器**：自托管 BYOK，服务商密钥 AES-256-GCM 加密落盘，业务 Key 哈希保存，请求日志不记录提示词与回复正文；实验历史会保存对话文本，用户可查看与删除。
 - **模型级路由**：设置首选模型和失败后的备用方式，可按价格、延迟或权重选路，带关键词例外、熔断和总超时。
 - **工作空间**：管理服务商、模型、实验历史、密钥、成员与用量；`⌘K` / `Ctrl+K` 可搜索页面和可用模型。
 - **部署**：单 Node.js 进程，运行时仅 `ws`、`marked` 两个第三方依赖；macOS 使用系统 WebKit，Windows 使用系统 WebView2，桌面 App 内置 Node，无需另外安装 Docker 或 Node。
@@ -147,24 +164,19 @@ curl -i http://127.0.0.1:3100/v1/chat/completions \
 
 完整接口、SDK 与参数示例见 [API.md](API.md) 和控制台「API 文档」。OpenAPI 3.1 JSON 位于需鉴权的 `/v1/openapi.json`。Cherry Studio 等 OpenAI 兼容客户端将 Base URL 设为 `http://127.0.0.1:3100/v1`，Key 使用平台签发的业务 Key。
 
-## 与同类项目的区别
+## 看得懂的路由
 
-2026 年 10 月快照，请以各项目最新文档为准；如有出入欢迎提 PR 修正。
+先选首选模型，再选备用方式；有需要时再启用优化目标。草稿预览不保存配置，也不调用上游。
 
-| | Switchboard | LiteLLM | one-api | new-api | claude-code-router |
-| --- | --- | --- | --- | --- | --- |
-| 许可证 | **MIT** | MIT 核心 + 企业目录 | MIT | AGPL-3.0 + 附加条款 | MIT |
-| 运行时 | Node.js · **仅 2 个运行时依赖** | Python SDK + Proxy | Go 单二进制 | Go 单二进制 | Node CLI |
-| 控制台 | ✅ 中文一等公民 | ✅ 英文 | ✅ | ✅ | 以 CLI 为主 |
-| 路由策略 | 固定 / 自动；4 个目标 + 任务规则 + 容灾 | 策略丰富 | 渠道级故障转移 | 渠道 + 协议转换 | 面向 Agent 的规则 |
-| 协议互转 | OpenAI Chat / Responses / Completions + Anthropic Messages | 最广（100+ 服务商） | OpenAI 兼容 | OpenAI / Claude / Gemini | 面向 Agent |
-| 多租户 RBAC + 操作审计 | ✅ 内置 | 企业版功能 | 🔶 基础用户/分组 | 🔶 基础用户/分组 | ❌ |
-| 模型实验室与对比 | ✅ 带延迟指标 | 🔶 面板测试 | 🔶 | 🔶 | ❌ |
-| 媒体任务（图/音/视频/嵌入/重排） | ✅ | ✅ | 🔶 | ✅ | ❌ |
-| 计费分发、兑换码 | 未启用付费墙（BYOK 套餐草案） | 🔶 预算 | ✅ | ✅ | ❌ |
-| 桌面 App | ✅ macOS | ❌ | ❌ | ❌ | CLI |
-
-**什么时候不该选 Switchboard**：需要开箱即用的 100+ 冷门服务商（LiteLLM）、要做对外卖 Key 的中转站/兑换码生意（one-api / new-api）、或只想要一个给单个 Coding Agent 用的个人 CLI 小工具（claude-code-router）。Switchboard 面向的是**自托管一个受管网关服务多个服务商的个人与团队**。
+| 目标或保护 | 实际作用 |
+| --- | --- |
+| 优先级 | 首选优先，自动容灾为其他服务商保留候选位置 |
+| 延迟 | 比较模型级近期成功耗时，包括同服务商内模型；至少 3 条成功样本才参与排名 |
+| 经济 | 比较同币种、有效参考价格；未知价格不当成免费 |
+| 权重 | 按服务商权重轮转，并支持模型级回退 |
+| 指定备用 | 按明确的候选列表顺序尝试 |
+| 尝试上限 | 统计真实尝试，包括主备密钥；预览展示有效容灾覆盖 |
+| 总超时 | 按剩余可尝试候选分配剩余时间，不为空候选预留预算 |
 
 ## 模型实验室与媒体
 
@@ -219,6 +231,18 @@ docker compose ps
 ```
 
 若使用 GHCR 的 `docker run` 方式，请拉取新版本镜像，并按原参数重建容器，继续挂载原 `data/`；不要直接删除数据卷。健康检查可访问 `/healthz` 和 `/readyz`。
+
+## 核对部署是否一致
+
+App 与 Docker 共用核心代码，各自保存数据。更新本机不等于更新公网服务器；相同版本号也不一定是同一次构建。详见[升级、备份与实例核对](docs/OPERATIONS.md)。
+
+```sh
+npm run doctor -- --url http://127.0.0.1:3100
+# 对比运行中的 App；默认端口占用时使用 App 菜单显示的实际地址：
+npm run doctor -- --url http://127.0.0.1:3100 --url http://127.0.0.1:3110
+```
+
+Doctor 无需登录，只读检查就绪状态与构建指纹，不读取密钥或调用模型。指纹也显示在「账户与租户 → 版本与运行环境」。代码一致不代表数据已同步。
 
 ## 开发、验证与发布
 

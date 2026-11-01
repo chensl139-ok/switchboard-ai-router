@@ -5,6 +5,17 @@ import {resumeConversation} from '../public/lab-history-client.js';
 
 const record=(messages,status='completed')=>({area:'chat',status,result:conversationSnapshot(messages)});
 
+test('历史保留用户选择的自动路由或显式模型，而不是用命中模型替代',()=>{
+ for(const target of ['auto','personal-auto',JSON.stringify(['atlas','gpt-4.1-mini'])]){
+  const result=conversationSnapshot([{role:'user',content:'Hi'},{role:'assistant',content:'Done',route:{providerId:'backup',model:'other'}}],256*1024,{target});
+  assert.equal(resumeConversation({status:'completed',result}).target,target);
+ }
+ assert.equal(resumeConversation(record([{role:'user',content:'Hi'}])).target,undefined);
+ const bounded=conversationSnapshot([{role:'assistant',content:'x'.repeat(10000)}],1024,{target:'auto'});
+ assert(Buffer.byteLength(bounded)<=1024);
+ assert.equal(JSON.parse(bounded).target,'auto');
+});
+
 test('完整文本历史继续为独立对话，保留路由、正文和性能数据',()=>{
  const row=record([
   {role:'user',content:'解释路由'},

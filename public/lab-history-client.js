@@ -23,7 +23,7 @@ export function resumeConversation(row){
  if(messages.at(-1)?.role==='assistant'&&['失败','已停止'].includes(messages.at(-1).status))messages.pop();
  if(messages.at(-1)?.role==='user')draft=messages.pop().content;
  if(messages.some(item=>item.status==='生成中'||item.status==='等待工具结果'))throw Error('这条记录包含尚未完成的回复，请复制需要的文本开始新对话。');
- return {messages,draft};
+ return {messages,draft,...(typeof snapshot.target==='string'&&snapshot.target.length<=512?{target:snapshot.target}:{})};
 }
 
 export function mountLabHistory(root,{area,tenantId,onOpen,onResume}){

@@ -1,12 +1,13 @@
 // Store complete text until the total UTF-8 budget is reached; never silently
 // clip every answer. Images are deliberately represented by labels, not URLs.
-export function conversationSnapshot(conversation,maxBytes=256*1024){
+export function conversationSnapshot(conversation,maxBytes=256*1024,{target}={}){
+ const metadata=typeof target==='string'&&target.length<=512?{target}:{};
  const messages=conversation.map(item=>({role:item.role,content:typeof item.content==='string'?item.content:Array.isArray(item.content)?item.content.map(part=>part.type==='text'?part.text:'[图片未保存在历史中]').join('\n'):'',reasoning:String(item.reasoning_content||''),status:item.status,label:item.label,route:item.route,stats:item.stats,durationMs:item.durationMs,outputTokens:item.outputTokens,...(item.tool_calls?.length?{tools:JSON.stringify(item.tool_calls)}:{})}));
  let omittedMessages=0,clipped=false;
- const serialize=()=>JSON.stringify({version:2,truncated:omittedMessages>0||clipped,omittedMessages,clipped,messages});
+ const serialize=()=>JSON.stringify({version:2,...metadata,truncated:omittedMessages>0||clipped,omittedMessages,clipped,messages});
  const bytes=value=>new TextEncoder().encode(value).length;
  const sizes=messages.map(item=>bytes(JSON.stringify(item)));let remaining=sizes.reduce((sum,size)=>sum+size,0);
- const envelopeBytes=()=>bytes(JSON.stringify({version:2,truncated:omittedMessages>0||clipped,omittedMessages,clipped,messages:[]}));
+ const envelopeBytes=()=>bytes(JSON.stringify({version:2,...metadata,truncated:omittedMessages>0||clipped,omittedMessages,clipped,messages:[]}));
  while(envelopeBytes()+remaining+Math.max(0,messages.length-1)>maxBytes&&messages.length>1){remaining-=sizes[omittedMessages];messages.shift();omittedMessages++;}
  if(bytes(serialize())>maxBytes&&messages.length){
   clipped=true;

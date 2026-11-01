@@ -1,3 +1,4 @@
+import {runtimeInfoMarkup} from './runtime-info.js';
 let tenantHint='';
 let accountStatus={sso:{feishu:{enabled:false}}};
 const safeText=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -49,6 +50,7 @@ export async function renderAccount({profile,esc,toast,onReady}){
  ${canRename?`<div class="panel section-space"><h2>当前租户</h2><p class="muted">仅修改显示名称，不改变租户 ID、飞书绑定或现有配置。</p><form id="rename-tenant"><label>租户名称<input name="name" required maxlength="80" value="${esc(currentTenant?.name||'')}"></label><button type="submit">保存名称</button></form></div>`:''}
  ${profile.platformAccess?`<div class="panel section-space"><h2>创建新租户</h2><p>仅平台主账号可创建独立工作空间。</p><form id="new-tenant"><label>租户名称<input name="name" required maxlength="80"></label><button class="primary">创建租户</button></form></div><div class="panel section-space"><h2>接受邀请</h2><form id="accept-invite"><label>邀请码<input name="code" type="password" required autocomplete="off"></label><button>加入租户</button></form></div>`:''}
  <div class="panel section-space"><h2>${profile.user.hasPassword?'修改密码':'设置备用密码'}</h2><p>${profile.user.hasPassword?'更新后会退出此账户的其他会话。':'设置后可在飞书不可用时使用邮箱与密码登录。'}</p><form id="change-password">${profile.user.hasPassword?'<label>原密码<input name="currentPassword" type="password" required autocomplete="current-password"></label>':''}<label>新密码<input name="newPassword" type="password" minlength="12" maxlength="256" required autocomplete="new-password"></label><button>${profile.user.hasPassword?'更新密码并退出其他会话':'设置备用密码'}</button></form></div>`;
+ root.insertAdjacentHTML('beforeend',runtimeInfoMarkup(profile,esc));
  const authError=new URLSearchParams(location.search).get('auth_error');if(authError){history.replaceState(null,'',location.pathname+location.hash);toast(authError);}
  root.querySelector('#link-feishu')?.addEventListener('click',async e=>{const button=e.currentTarget;button.disabled=true;try{const result=await accountRequest('sso/feishu/link/start',{});location.assign(result.url);}catch(error){toast(error.message);button.disabled=false;}});
  if(profile.platformAccess){

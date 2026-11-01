@@ -19,7 +19,9 @@ import {ChatGPTPlan,planRequest} from './chatgpt-plan.mjs';
 import {validateRouting} from './routing.mjs';
 import {hasCredential} from './provider-key.ts';
 import {writeSSE} from './realtime.mjs';
+import {readBuildInfo} from './build-info.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
+const buildInfo=readBuildInfo(root);
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const configAuditActions=new Map([
  ['/api/keys','签发 API Key'],['/api/keys/update','修改 API Key'],['/api/keys/toggle','切换 API Key 状态'],['/api/keys/delete','删除 API Key'],['/api/keys/legacy','切换旧版调用令牌'],
@@ -129,7 +131,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
      return res.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT 订阅连接</title><link rel="stylesheet" href="/interface.css"><main class="plan-callback panel"><h1>订阅连接</h1><p>${escaped}</p><a href="switchboard://subscription-connected">返回 Switchboard</a><p>也可直接切回 App，点击“刷新连接”。</p></main></html>`);
     }
-    if(req.method==='GET'&&route==='status'){let viewer=null;try{viewer=session(req);}catch{/* Anonymous login still needs enterprise entry points. */}return json(res,200,{needsSetup:accounts.state.users.length===0,sso:{feishu:oauthStatus(viewer)}});}
+    if(req.method==='GET'&&route==='status'){let viewer=null;try{viewer=session(req);}catch{/* Anonymous login still needs enterprise entry points. */}return json(res,200,{needsSetup:accounts.state.users.length===0,build:buildInfo,sso:{feishu:oauthStatus(viewer)}});}
     if(route.startsWith('sso/feishu/desktop/')){
      if(!desktop)throw fail('此服务未启用桌面登录',404);
      if(req.method==='GET'&&route==='sso/feishu/desktop/authorize'){
@@ -219,7 +221,7 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      }
      throw fail('订阅连接接口不存在',404);
     }
-    if(req.method==='GET'&&route==='me')return json(res,200,{...accounts.me(current),chatgptPlan:Boolean(plan)});
+    if(req.method==='GET'&&route==='me')return json(res,200,{...accounts.me(current),chatgptPlan:Boolean(plan),build:buildInfo});
     if(req.method==='GET'&&route==='lab-history')return json(res,200,labHistory.page(current,{area:url.searchParams.get('area')||undefined,status:url.searchParams.get('status')||undefined,q:url.searchParams.get('q')||'',page:url.searchParams.get('page')||1,limit:url.searchParams.get('limit')||20,order:url.searchParams.get('order')||'recent'}));
     if(req.method==='GET'&&route==='lab-history/item')return json(res,200,labHistory.get(current,url.searchParams.get('id')));
     if(req.method==='GET'&&route==='sso/feishu/bindings'){accounts.requirePlatformOwner(current);return json(res,200,{bindings:bindings.metadata()});}
