@@ -100,12 +100,12 @@ test('导航首屏不闪出旧标签，流式消息局部更新且对比页按�
  assert.match(server,/\/\(\?:build\\\/\)\?assets\\\//);
 });
 
-test('模思品牌图标使用本地 SVG，并由静态路由以 SVG 类型提供',()=>{
- const html=read('public/index.html'),logo=read('public/mosi.svg'),server=read('server.mjs'),css=read('public/workspaces.css');
+test('Switchboard 独立图标使用本地 SVG，并由静态路由以 SVG 类型提供',()=>{
+ const html=read('public/index.html'),logo=read('public/switchboard.svg'),server=read('server.mjs'),css=read('public/workspaces.css');
  assert.match(logo,/<svg[^>]+viewBox="0 0 100 100"/);
- assert.match(html,/<img class="brand-mark" src="\/mosi\.svg"/);
- assert.match(html,/<link rel="icon" type="image\/svg\+xml" href="\/mosi\.svg"/);
- assert.match(server,/'\/mosi\.svg':'mosi\.svg'/);
+ assert.match(html,/<img class="brand-mark" src="\/switchboard\.svg"/);
+ assert.match(html,/<link rel="icon" type="image\/svg\+xml" href="\/switchboard\.svg"/);
+ assert.match(server,/'\/switchboard\.svg':'switchboard\.svg'/);
  assert.match(server,/f\.endsWith\('\.svg'\)\?'image\/svg\+xml'/);
  assert.match(css,/\.sidebar \.brand-mark \{[\s\S]*?background: #fff;/);
 });
@@ -337,7 +337,7 @@ test('服务商序号不覆盖文案，实验室对话整合状态、媒体不�
  assert.match(media,/function setStatus\(label\)/);
  assert.match(css,/\.lab-main>\.lab-session-summary/);
  assert.match(read('public/workspaces.css'),/\.sidebar-heading \.brand-mark \{ display: block;/);
- assert.match(css,/#global-search, body\.theme-dark #global-search \{ flex: 0 1 112px/);
+ assert.match(css,/#global-search \{ flex: 0 1 112px/);
  assert.match(css,/\.sidebar \.nav-group\+\.nav-group, \.sidebar-compact \.sidebar \.nav-group\+\.nav-group \{ margin-top: 0; padding-top: 0; border: 0; \}/);
  assert.match(compare,/compare-nav-row/);
  assert.match(compare,/>多模型对比<\/button>/);

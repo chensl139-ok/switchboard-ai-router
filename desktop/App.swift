@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
     private func makeWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 840), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Switchboard · 模思智能"; window.minSize = NSSize(width: 820, height: 560)
+        window.title = "Switchboard"; window.minSize = NSSize(width: 820, height: 560)
         window.isReleasedWhenClosed = false; window.setFrameAutosaveName("SwitchboardMain"); window.center()
         let root = NSView(); window.contentView = root
         let configuration = WKWebViewConfiguration()
@@ -302,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func zoomIn() { webView.pageZoom = min(1.8, webView.pageZoom + 0.1) }
     @objc private func zoomOut() { webView.pageZoom = max(0.7, webView.pageZoom - 0.1) }
     @objc private func zoomReset() { webView.pageZoom = 1 }
-    @objc private func about() { NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Switchboard · 模思智能", .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "", .credits: NSAttributedString(string: "本机 AI 路由工作空间\n内置运行环境 · 数据保存在本机")]) }
+    @objc private func about() { NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Switchboard", .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "", .credits: NSAttributedString(string: "本机 AI 路由工作空间\n内置运行环境 · 数据保存在本机")]) }
     @objc private func feishuHelp() {
         let address = (baseURL?.absoluteString ?? "http://127.0.0.1:3110") + "/api/account/sso/feishu/callback"
         let alert = NSAlert(); alert.messageText = "桌面版飞书登录"

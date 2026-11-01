@@ -47,7 +47,7 @@ try{
  run('swiftc',[...compilerOptions,'-O',path.join(root,'desktop','App.swift'),'-o',path.join(contents,'MacOS','Switchboard')]);
  const iconRenderer=path.join(temporary,'render-icon'),png=path.join(temporary,'icon.png'),iconset=path.join(temporary,'AppIcon.iconset');
  run('swiftc',[...compilerOptions,path.join(root,'desktop','Icon.swift'),'-o',iconRenderer]);
- run(iconRenderer,[path.join(root,'public','mosi.svg'),png]);mkdirSync(iconset);
+ run(iconRenderer,[path.join(root,'public','switchboard.svg'),png]);mkdirSync(iconset);
  for(const size of [16,32,128,256,512])for(const scale of [1,2])run('sips',['-z',String(size*scale),String(size*scale),png,'--out',path.join(iconset,`icon_${size}x${size}${scale===2?'@2x':''}.png`)],{stdio:'ignore'});
  run('iconutil',['-c','icns',iconset,'-o',path.join(resources,'AppIcon.icns')]);
  run('codesign',['--force','--deep','--sign','-',app]);run('codesign',['--verify','--deep','--strict',app]);

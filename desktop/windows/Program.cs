@@ -233,7 +233,7 @@ namespace Switchboard.Desktop
 
         internal WorkspaceForm()
         {
-            Text = "Switchboard · 模思智能";
+            Text = "Switchboard";
             Size = new Size(1280, 840);
             MinimumSize = new Size(820, 560);
             StartPosition = FormStartPosition.CenterScreen;

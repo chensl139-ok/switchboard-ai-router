@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>cn.mosi.switchboard.desktop</string>
 <key>CFBundleName</key><string>Switchboard</string>
-<key>CFBundleDisplayName</key><string>Switchboard · 模思智能</string>
+<key>CFBundleDisplayName</key><string>Switchboard</string>
 <key>CFBundleExecutable</key><string>Switchboard</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>

@@ -9,8 +9,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-![Workspace overview: route candidates, final success rate and recent calls](docs/demo/overview.jpg)
-
 ## See the workflow
 
 Real captures from the current main branch, using isolated demo accounts and simulated upstreams. These numbers are **not performance benchmarks**. Click an image for the full view.

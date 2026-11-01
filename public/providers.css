@@ -1,14 +1,16 @@
 /* Providers and catalog: a working list, with secondary actions kept close. */
 .provider-grid.provider-list { display: grid; grid-template-columns: minmax(0,1fr); gap: 0; border: 1px solid var(--ui-border); border-radius: 10px; background: var(--ui-surface); }
 .provider-list:empty { display: none; }
-.provider-list .provider-row, body.theme-dark .provider-list .provider-row { display: grid; grid-template-columns: minmax(180px,1fr) minmax(150px,.8fr) minmax(200px,1.1fr) auto; align-items: center; gap: 18px; min-height: 108px; margin: 0; padding: 18px 20px; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.provider-list .provider-row { display: grid; grid-template-columns: minmax(180px,1fr) minmax(150px,.8fr) minmax(200px,1.1fr) auto; align-items: center; gap: 18px; min-height: 108px; margin: 0; padding: 18px 20px; overflow: visible; border: 0; border-radius: 0; }
+.provider-list .provider-row, body.theme-dark .provider-list .provider-row { background: transparent; box-shadow: none; }
 .provider-list .provider-row[hidden] { display: none; }
 .provider-list .provider-row+.provider-row { border-top: 1px solid var(--ui-border); }
 .provider-list .provider-row .card-top { display: flex; gap: 9px; flex-wrap: nowrap; }
 .provider-list .provider-row .provider-title { flex: 1; min-width: 0; }
 .provider-list .provider-row h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 21px; }
 .provider-list .provider-row .provider-title small { margin-top: 2px; color: var(--ui-muted); font-size: 11px; }
-.provider-list .provider-row .provider-rank, body.theme-dark .provider-list .provider-row .provider-rank { position: static; flex: 0 0 22px; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 1px solid var(--ui-border); border-radius: 5px; color: var(--ui-muted); background: transparent; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+.provider-list .provider-row .provider-rank { position: static; flex: 0 0 22px; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 1px solid var(--ui-border); border-radius: 5px; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+.provider-list .provider-row .provider-rank, body.theme-dark .provider-list .provider-row .provider-rank { color: var(--ui-muted); background: transparent; }
 .provider-list .provider-row .tag { order: 0; flex: 0 0 auto; padding: 2px 6px; font-size: 10px; line-height: 18px; }
 .provider-list .provider-row .provider-meta { display: flex; gap: 10px; margin: 7px 0 0 31px; padding: 0; border: 0; }
 .provider-list .provider-row .provider-meta span { padding: 0; background: transparent; color: var(--ui-muted); font-size: 11px; }

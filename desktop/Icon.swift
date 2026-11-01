@@ -5,8 +5,7 @@ final class IconRenderer: NSObject, WKNavigationDelegate {
     func run() {
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 1024)); webView.navigationDelegate = self
         let source = (try? String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)) ?? ""
-        let svg = source.replacingOccurrences(of: "#2C251E", with: "#69dceb", options: .caseInsensitive)
-        webView.loadHTMLString("<html><style>html,body{margin:0;width:1024px;height:1024px;background:transparent}.icon{position:absolute;inset:58px;border-radius:196px;background:linear-gradient(145deg,#132937,#081722);display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 3px #3b6f80}svg{width:660px;height:660px}</style><div class='icon'>\(svg)</div></html>", baseURL: nil)
+        webView.loadHTMLString("<html><style>html,body{margin:0;width:1024px;height:1024px;background:transparent}.icon{position:absolute;inset:58px;border-radius:196px;background:#3D5FC4;display:flex;align-items:center;justify-content:center}svg{width:908px;height:908px}</style><div class='icon'>\(source)</div></html>", baseURL: nil)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         let config = WKSnapshotConfiguration(); config.rect = webView.bounds; config.snapshotWidth = 1024

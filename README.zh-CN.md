@@ -9,8 +9,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-![工作台：候选链、最终成功率和最近调用](docs/demo/overview.jpg)
-
 ## 看一遍完整流程
 
 以下为当前主分支的实际界面，使用隔离演示账号与模拟上游。**数字仅用于展示，不是性能基准**；点击图片可查看完整画面。
@@ -194,7 +192,7 @@ curl -i http://127.0.0.1:3100/v1/chat/completions \
 
 成员通过邀请加入租户；所有者、管理员、成员、只读角色具有不同权限，详见 [TENANCY.md](TENANCY.md)。忘记密码时，所有者／管理员可为成员签发一次性重置码，通过安全渠道交付；系统不会自动发邮件。唯一所有者失去登录能力时，部署管理员需停机后使用 `scripts/reset-admin-password.mjs` 本地恢复。
 
-首次初始化的账户是平台主账号：只有该账号的邮箱密码登录，或该账号已连接的**模思智能（默认租户）飞书身份**登录，才可查看、切换和管理全部租户。
+首次初始化的账户是平台主账号：只有该账号的邮箱密码登录，或该账号已连接的**默认租户的飞书身份**登录，才可查看、切换和管理全部租户。
 
 飞书登录为可选功能。一个飞书企业自建应用仅服务其所在企业；多个独立企业可各自提供一枚企业自建应用，映射到平台中各自独立的租户。配置步骤、安全注意事项与跨企业单入口迁移方案参见 [TENANCY.md](TENANCY.md) 与[飞书开放平台文档](https://open.feishu.cn/document/home/app-types-introduction/robots-web-applications-and-mini-programs)。如果没有自有域名，可用 [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) 把本机控制台以固定 HTTPS 地址开放给同事；注意这会把登录页公开到互联网，应保持强密码并严格管理飞书应用可用范围。
 
