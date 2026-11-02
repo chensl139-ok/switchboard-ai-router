@@ -248,3 +248,36 @@ curl 'http://127.0.0.1:3100/v1/audio/transcriptions' \
 ```
 
 图片按张价格可用于成功图片生成的费用估算；语音／视频若没有可核实计价，则记录未知费用。未开通或未注册对应模型仍会失败；查询目录并加入调用列表后再调用。
+
+## 任务关联、输出验收与成本追踪
+
+普通 Chat / Responses / Messages / Completions 的 HTTP 和 SSE 请求支持可选请求头 `X-Task-ID`。同一业务任务的后续重试复用此 ID；每次进入网关仍生成独立 `x-request-id`，每次上游尝试有独立 `x-attempt-id`。ID 为 1–128 位字母、数字、点、冒号、下划线或短横线；省略时任务 ID 等于请求 ID。
+
+```sh
+curl -sS -D response-headers.txt 'http://127.0.0.1:3100/v1/chat/completions' \
+  -H "Authorization: Bearer $ROUTER_API_KEY" \
+  -H 'X-Task-ID: extraction-001' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"返回一个 JSON 对象"}]}'
+
+# 从响应头 x-request-id 读取实际值。由调用方解析输出后反馈：
+REQUEST_ID='替换为实际请求ID'
+curl -sS "http://127.0.0.1:3100/v1/requests/$REQUEST_ID/feedback" \
+  -H "Authorization: Bearer $ROUTER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"outcome":"rejected","reason":"parse_error"}'
+
+# 再次生成时沿用 X-Task-ID，可按业务需要指定备用模型；
+# 新请求验收通过后，向它自己的反馈地址提交 {"outcome":"accepted"}。
+curl -sS 'http://127.0.0.1:3100/v1/tasks/extraction-001' \
+  -H "Authorization: Bearer $ROUTER_API_KEY"
+```
+
+- **调用结果与输出验收分开**：HTTP 200 不等于业务成功，流式调用需检查结束与错误事件。反馈只允许 `accepted` 或 `rejected`；拒绝时 `reason` 必填：`parse_error`、`schema_error`、`business_error` 或 `other`。不接收回复正文、提示词或错误堆栈。
+- **反馈不可篡改历史**：仅原调用 Key 对正常完成请求反馈；相同结果重复提交幂等，不同结果返回 409。未完成或调用失败也返回 409。反馈不触发模型调用、不消耗次数、不改变服务商健康度。后续尝试创建新请求，不改写前次结果。
+- **身份隔离**：任务按租户与 API Key 隔离，同名 ID 在不同 Key 下独立。账户会话按用户隔离，不与该用户的业务 Key 混合。控制台管理员可查看本租户任务，成员仅查看自己的调用。不存在或无权访问均返回 404。
+- **汇总口径**：`elapsedMs` 为首次请求开始至最后活动的跨度（包含重试间隔与验收等待），`attemptLatencyMs` 是所有上游尝试耗时之和，并发可能重叠。`costs` 按币种分别累计，包含验收失败的调用；`unknownCostAttempts` / `unknownUsageAttempts` 单独标识未知项，不能当作免费。
+- **状态**：有运行中请求为 `running`；否则按最新发起请求显示 `gateway_failed`、`unverified`、`accepted` 或 `rejected`。后续通过不会删除早先验收失败记录。旧的分析成功率仍衡量网关调用，不是业务验收成功率。
+- **边界**：任务 ID 不是幂等键，不自动重试、去重或排除之前模型；每次生成都可能计费。一个任务最多 1000 次请求，超过返回 409。保留期 90 天，清除日志同时清除任务记录；旧日志不推断补齐。媒体生成、专用视觉理解以及 WebSocket 的自定义任务关联尚不支持；媒体入口携带此头会返回 400，避免产生“已关联”的误解。
+
+请求日志新增“输出验收”筛选，搜索支持任务 ID；展开详情可进入任务汇总，汇总不受分页和当前筛选限制。OpenAPI 包含反馈与查询接口；完整交互说明见控制台“API 文档 → 任务追踪与验收”。

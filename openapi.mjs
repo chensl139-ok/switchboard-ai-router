@@ -35,3 +35,19 @@ for(const [path,summary,properties,required,binary,multipart] of [
  ['/v1/embeddings','兼容上游的向量嵌入',{model:{type:'string'},input:{oneOf:[{type:'string'},{type:'array',items:{type:'string'}}]}},['model','input'],false,false],
  ['/v1/rerank','兼容上游的重排',{model:{type:'string'},query:{type:'string'},documents:{type:'array',items:{type:'string'}}},['model','query','documents'],false,false]
 ])platformOpenAPI.paths[path]={post:{operationId:'media_'+path.slice(4).replaceAll('/','_'),tags:['媒体与专用模型'],summary,description:'需显式指定已配置媒体模型，不支持 auto；上游必须支持此协议。生成请求共享 Key 次数额度；视频状态查询不扣生成次数。JSON 最大 10 MB，multipart 最大 52 MB，单音频文件最大 50 MB。媒体调用不自动重试或切换服务商。',requestBody:{required:true,content:{[multipart?'multipart/form-data':'application/json']:{schema:{type:'object',properties,required,additionalProperties:true}}}},responses:{200:{description:binary?'音频二进制（可分块）':'媒体结果，视频提交返回 requestId，查询返回 status / results',content:{[binary?'audio/mpeg':'application/json']:{schema:binary?{type:'string',format:'binary'}:object}}},400:error,401:error,403:error,404:error,413:error,429:error,501:error,502:error}}};
+
+const taskIdSchema={type:'string',minLength:1,maxLength:128,pattern:'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'};
+const taskResult={type:'object',required:['taskId','outcome','requests','attempts','costs','unknownCostAttempts'],properties:{
+ taskId:taskIdSchema,outcome:{type:'string',enum:['running','gateway_failed','accepted','rejected','unverified']},
+ requestCount:{type:'integer'},attemptCount:{type:'integer'},elapsedMs:{type:'integer',description:'首次请求开始至最后活动；含调用间隔与验收等待，进行中使用当前时间'},
+ attemptLatencyMs:{type:'integer',description:'所有上游尝试耗时之和；并发可能重叠'},tokens:{type:'integer'},unknownUsageAttempts:{type:'integer'},unknownCostAttempts:{type:'integer'},
+ costs:{type:'array',items:{type:'object',properties:{currency:{type:'string'},amount:{type:'number'}},required:['currency','amount']}},requests:{type:'array',items:object},attempts:{type:'array',items:object},notice:{type:'string'}
+}};
+for(const endpoint of ['/v1/chat/completions','/v1/messages','/v1/responses','/v1/completions']){
+ const op=platformOpenAPI.paths[endpoint].post;
+ op.parameters=[{name:'X-Task-ID',in:'header',required:false,schema:taskIdSchema,description:'同一业务任务的后续请求复用；按租户及 API Key 隔离。不提供时使用网关请求 ID。仅普通对话生成支持，媒体/专用视觉任务暂不支持。不是幂等键，每次请求均可能计费。'}];
+ op.responses[200].headers['x-task-id']={schema:taskIdSchema,description:'业务任务 ID'};
+ op.responses[200].headers['x-attempt-id']={schema:{type:'string'},description:'开始返回结果的上游尝试 ID；流式最终状态需检查结束/错误事件'};
+}
+platformOpenAPI.paths['/v1/requests/{requestId}/feedback']={post:{operationId:'submitRequestFeedback',summary:'反馈调用方输出验收结果',description:'仅原调用 Key 可提交。调用正常完成不代表验收通过。相同反馈幂等，不同反馈冲突；不修改调用结果、用量、费用和服务商健康度，不自动重试。不保存回复正文。',parameters:[{name:'requestId',in:'path',required:true,schema:{type:'string'}}],requestBody:{required:true,content:{'application/json':{schema:{type:'object',additionalProperties:false,required:['outcome'],properties:{outcome:{type:'string',enum:['accepted','rejected']},reason:{type:'string',enum:['parse_error','schema_error','business_error','other'],description:'rejected 时必填；accepted 时省略'}}},examples:{reject:{value:{outcome:'rejected',reason:'parse_error'}},accept:{value:{outcome:'accepted'}}}}}},responses:{200:{description:'当前任务汇总',content:{'application/json':{schema:taskResult}}},400:error,401:error,403:error,404:error,409:{description:'请求未完成、调用失败或已有不同验收结果'}}}};
+platformOpenAPI.paths['/v1/tasks/{taskId}']={get:{operationId:'getTaskSummary',summary:'查询当前调用身份的任务耗时、用量及费用',description:'保留 90 天。按租户与 API Key 隔离；同名 taskId 不跨 Key 合并。按最新发起请求显示结果，仍有请求运行时为 running；历史未关联记录不推断补齐。费用按币种分别累计，未知费用不计为零。',parameters:[{name:'taskId',in:'path',required:true,schema:taskIdSchema}],responses:{200:{description:'完整保留期内任务汇总，不受日志分页影响',content:{'application/json':{schema:taskResult}}},400:error,401:error,404:error}}};

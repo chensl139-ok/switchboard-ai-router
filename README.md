@@ -110,6 +110,7 @@ Personal routing can combine the caller's authorized subscription models with or
 | Providers & models | preset + custom compatible providers, model discovery, provider-level protocol auto-matching |
 | Model Lab | chat with streaming Markdown, image input and function tools; 2–4 model side-by-side comparison; image / audio / video / vision tasks; TTFB, TTFT, TPS, est. TPOT metrics with actual-hit model reporting |
 | Teams | email+password or Feishu (Lark) OAuth, invites, four roles, tenant isolation, operation audit, password reset codes |
+| Task tracing & acceptance | correlate HTTP/SSE chat retries with `X-Task-ID`; separate caller validation from gateway completion, aggregate attempt time and estimated costs by currency ([API guide](API.md#任务关联输出验收与成本追踪)) |
 | Business API keys | per-member keys with expiry and quotas, hashed at rest; revocation takes effect on removal |
 | Observability | request metadata logs (never prompt bodies), final-success-rate accounting, per-member/model/key usage, cost estimation, OpenRouter reference pricing import |
 

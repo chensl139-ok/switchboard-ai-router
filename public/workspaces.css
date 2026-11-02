@@ -400,3 +400,13 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
  #content.chat-workspace .lab-prompts button { flex: none; }
  #content.media-workspace-page .media-kind { padding-inline: 10px; font-size: 12px; }
 }
+
+/* Task tracing shares the record explorer spacing and responsive rules. */
+.task-trace-summary { margin-bottom: var(--space-md); padding: var(--space-md); }
+.task-trace-summary h2 { margin: 0; }
+.task-trace-summary>p { margin: var(--space-sm) 0; overflow-wrap: anywhere; }
+.task-trace-summary details { margin-top: var(--space-md); }
+.task-trace-summary summary { cursor: pointer; margin-bottom: var(--space-sm); }
+@media (min-width: 1200px) {
+ .record-request-filters { grid-template-columns: minmax(180px,2fr) repeat(4,minmax(100px,1fr)) auto; }
+}

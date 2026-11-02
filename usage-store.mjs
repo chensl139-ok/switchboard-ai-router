@@ -1,5 +1,6 @@
 import {DatabaseSync} from 'node:sqlite';
 import path from 'node:path';
+import {TaskTracking} from './task-tracking.mjs';
 const RETENTION_DAYS=90;
 export class UsageStore {
  constructor(dir){
@@ -13,18 +14,21 @@ export class UsageStore {
    CREATE INDEX IF NOT EXISTS calls_route_id ON calls(provider_id,model,time DESC);
    CREATE INDEX IF NOT EXISTS calls_route_name ON calls(provider,model,time DESC);
    CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT);`);
-  this.insert=this.db.prepare(`INSERT OR IGNORE INTO calls VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const columns=new Set(this.db.prepare('PRAGMA table_info(calls)').all().map(row=>row.name));
+  for(const [column,type] of [['started_at','INTEGER'],['upstream_status','INTEGER'],['failure_kind','TEXT']])if(!columns.has(column))this.db.exec(`ALTER TABLE calls ADD COLUMN ${column} ${type}`);
+  this.tasks=new TaskTracking(this.db);
+  this.insert=this.db.prepare(`INSERT OR IGNORE INTO calls(id,request_id,time,actor_id,api_key_id,provider_id,provider,model,status,latency,input_tokens,output_tokens,tokens,usage_known,currency,estimated_cost,price_source,reason,transport,started_at,upstream_status,failure_kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   this.prune=this.db.prepare('DELETE FROM calls WHERE time < ?');
   this.routeHits=this.db.prepare(`SELECT status,latency,time FROM calls WHERE (provider_id=? OR (provider_id IS NULL AND provider=?)) AND model=? AND time>=? ORDER BY time DESC LIMIT 200`);
   this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();
-  this.routeCache=new Map();this.prune.run(this.routeSince);
-  this.sweep=setInterval(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();},6*3600000);this.sweep.unref?.();
+  this.routeCache=new Map();this.prune.run(this.routeSince);this.db.prepare('DELETE FROM task_requests WHERE started_at < ?').run(Date.parse(this.routeSince));
+  this.sweep=setInterval(()=>{this.prune.run(new Date(Date.now()-RETENTION_DAYS*86400000).toISOString());this.routeSince=new Date(Date.now()-RETENTION_DAYS*86400000).toISOString();this.db.prepare('DELETE FROM task_requests WHERE started_at < ?').run(Date.parse(this.routeSince));},6*3600000);this.sweep.unref?.();
   }catch(error){try{this.close();}catch{}throw error;}
  }
  record(log){
   this.insert.run(log.id,log.requestId||log.id,log.time,
    log.actorId||null,log.apiKeyId||null,log.providerId||null,log.provider||'',log.model||'',log.status,log.latency||0,
-   log.inputTokens??null,log.outputTokens??null,log.tokens||0,log.usageKnown?1:0,log.currency||null,log.estimatedCost??null,log.priceSource||null,log.reason||'',log.transport||'http');
+   log.inputTokens??null,log.outputTokens??null,log.tokens||0,log.usageKnown?1:0,log.currency||null,log.estimatedCost??null,log.priceSource||null,log.reason||'',log.transport||'http',log.startedAt??null,log.upstreamStatus??null,log.failureKind||null);
   this.routeCache.delete((log.providerId||'')+'|'+(log.provider||'')+'|'+(log.model||''));
  }
  migrate(logs){if(this.db.prepare("SELECT value FROM metadata WHERE key='legacy_import'").get())return;for(const log of logs)this.record({...log,usageKnown:false});this.prune.run(this.routeSince);this.db.prepare("INSERT INTO metadata VALUES('legacy_import','done')").run();}
@@ -38,23 +42,26 @@ export class UsageStore {
   const at=new Date().toISOString(),deletedCalls=mode==='clear'?this.db.prepare('SELECT count(*) AS total FROM calls').get().total:0;
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   if(mode==='clear')this.db.exec('DELETE FROM calls');
+   if(mode==='clear')this.db.exec('DELETE FROM calls; DELETE FROM task_requests');
    this.db.prepare("INSERT INTO metadata(key,value) VALUES('statistics_since',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at);
    this.db.exec('COMMIT');this.routeCache.clear();return {mode,at,deletedCalls};
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
- logs({page=1,limit=50,provider='',status='',apiKeyId='',q='',days='',requestId=''}={}){
+ logs({page=1,limit=50,provider='',status='',apiKeyId='',q='',days='',requestId='',taskRequestId='',acceptance='',actorId}={}){
   page=Math.max(1,Math.min(10000,Math.trunc(Number(page))||1));limit=Math.max(1,Math.min(100,Math.trunc(Number(limit))||50));
   const clauses=['1=1'],args=[];
+  if(actorId){clauses.push('actor_id = ?');args.push(actorId);}
+  if(taskRequestId){clauses.push('request_id IN (SELECT request_id FROM task_requests WHERE (task_id,scope)=(SELECT task_id,scope FROM task_requests WHERE request_id=?))');args.push(taskRequestId);}
+  if(['accepted','rejected','unverified'].includes(acceptance)){clauses.push(acceptance==='unverified'?"id NOT IN (SELECT final_attempt_id FROM task_requests WHERE feedback IS NOT NULL AND final_attempt_id IS NOT NULL)":'id IN (SELECT final_attempt_id FROM task_requests WHERE feedback=?)');if(acceptance!=='unverified')args.push(acceptance);}
   if(provider){clauses.push('provider_id = ?');args.push(provider);}
   if(apiKeyId){clauses.push('api_key_id = ?');args.push(apiKeyId);}
-  if(q){const columns=['model','provider','request_id','reason'];clauses.push('('+columns.map(column=>`instr(lower(${column}), lower(?)) > 0`).join(' OR ')+')');args.push(...columns.map(()=>String(q).trim().slice(0,200)));}
+  if(q){const columns=['model','provider','request_id','reason',"(SELECT task_id FROM task_requests WHERE request_id=calls.request_id)"];clauses.push('('+columns.map(column=>`instr(lower(${column}), lower(?)) > 0`).join(' OR ')+')');args.push(...columns.map(()=>String(q).trim().slice(0,200)));}
   if(requestId){clauses.push('request_id = ?');args.push(String(requestId).slice(0,200));}
   if(days){const period=Math.max(1,Math.min(90,Math.trunc(Number(days))||7));clauses.push('time >= ?');args.push(new Date(Date.now()-period*86400000).toISOString());}
   if(status==='success')clauses.push('status = 200');else if(status==='error')clauses.push('status <> 200');
   const where=clauses.join(' AND ');const total=this.db.prepare(`SELECT count(*) AS total FROM calls WHERE ${where}`).get(...args).total;
   page=Math.min(page,Math.max(1,Math.ceil(total/limit)));
-  const items=this.db.prepare(`SELECT * FROM calls WHERE ${where} ORDER BY time DESC, id DESC LIMIT ? OFFSET ?`).all(...args,limit,(page-1)*limit);
+  const items=this.db.prepare(`SELECT calls.*,(SELECT task_id FROM task_requests WHERE request_id=calls.request_id) AS task_id,(SELECT feedback FROM task_requests WHERE request_id=calls.request_id AND final_attempt_id=calls.id) AS acceptance,(SELECT feedback_reason FROM task_requests WHERE request_id=calls.request_id AND final_attempt_id=calls.id) AS acceptance_reason FROM calls WHERE ${where} ORDER BY time DESC, id DESC LIMIT ? OFFSET ?`).all(...args,limit,(page-1)*limit);
   return {items,total,page,limit,retentionDays:90};
  }
  summary(days=7){

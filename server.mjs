@@ -4,6 +4,7 @@ import {createClientStream} from './protocol-stream.mjs';
 import {platformOpenAPI} from './openapi.mjs';
 import {flattenDiscovery,callableModels,anthropicModels,createDiscovery} from './model-catalog.mjs';
 import {safeFetch} from './network.mjs';
+import {taskIdentifier,taskScope} from './task-tracking.mjs';
 import {UsageStore} from './usage-store.mjs';
 import {validatePrice,openRouterPrice,matchOpenRouterModel,canImportOpenRouterPrice,refreshedReferencePrice,usageCost,normalizeUsage} from './pricing.mjs';
 import {assertThinkingDisabled} from './thinking.mjs';
@@ -156,7 +157,17 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   return {compatible,excluded};
  }
  let inFlight=0;let windowStart=Date.now(),windowUsed=0;
- async function route(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http',context=null}={}){
+ async function route(input,options={}){
+  const requestIdentifier=options.requestIdentifier||crypto.randomUUID();
+  const taskId=taskIdentifier(options.taskId,requestIdentifier);
+  usageStore.tasks.start(requestIdentifier,taskId,options.callerScope||taskScope(options));
+  try{
+   const result=await routeAttempt(input,{...options,requestIdentifier});
+   usageStore.tasks.finish(requestIdentifier,'completed',result.route?.attemptId);
+   return result;
+  }catch(error){usageStore.tasks.finish(requestIdentifier,'failed');throw error;}
+ }
+ async function routeAttempt(input,{signal:clientSignal,onChunk,onNativeEvent,onStreamComplete,onRouteSelected,clientKind='chat',requestIdentifier,apiKeyId,actorId=null,transport='http',context=null}={}){
   if(!input||typeof input!=='object'||Array.isArray(input))throw fail('请求格式错误');
   input=normalizeRequest('chat',input);
   input={...input,max_tokens:input.max_tokens===undefined?8192:input.max_tokens};
@@ -189,13 +200,14 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
    const p={...candidate,prices:structuredClone(candidate.prices||{})},remaining=Math.max(1,policy.timeoutMs-(Date.now()-routeStarted)),attemptsLeft=Math.min(policy.maxAttempts-attempted,eligibleRemaining);
    const attempt=++attempted;
    const attemptTimeout=AbortSignal.timeout(Math.max(1,Math.floor(remaining/attemptsLeft))),signal=AbortSignal.any([requestSignal,attemptTimeout]);
-   const started=Date.now();let status=502,pendingBytes=0;let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};const pendingChunks=[];
+   const started=Date.now(),attemptId=crypto.randomUUID();let status=null,pendingBytes=0,phase='prepare';let usage={known:false,inputTokens:0,outputTokens:0,totalTokens:0};const pendingChunks=[];
    try{
     const upstream=p.private?null:requestFor(p,input,signal);
+    phase='transport';
     const resp=p.private?await context.response(p,input,signal):await fetcher(upstream.url,upstream.options);
-    status=resp.status;
+    status=resp.status;phase='response_processing';
     if(!resp.ok)throw fail(`上游返回 HTTP ${status}`,status);
-    const routeInfo={providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt,fallback:attempt>1};
+    const routeInfo={attemptId,providerId:p.id,provider:p.name,model:p.model,protocol:p.protocol,reason:p.routeReason||state.strategy,attempt,fallback:attempt>1};
     if(onRouteSelected)await onRouteSelected(routeInfo);
     if(input.stream){
      const tokens=await consumeSSE(resp,p.protocol,p.model,async chunk=>{
@@ -210,19 +222,21 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      const cacheDetails=!usage.cacheUsageInvalid&&(usage.cacheReported||usage.cacheCreationReported)?{prompt_tokens_details:{...(usage.cacheReported?{cached_tokens:usage.cachedInputTokens}:{}),...(usage.cacheCreationReported?{cache_creation_tokens:usage.cacheCreationTokens}:{})}}:{};
      const publicUsage={prompt_tokens:usage.inputTokens,completion_tokens:usage.outputTokens,total_tokens:tokens,...cacheDetails};
      if(onStreamComplete)await onStreamComplete({provider:p.id,model:p.model,usage:publicUsage});
-     record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
-     succeeded=true;usedTokens=tokens;return {provider:p.id,model:p.model,route:routeInfo,usage:publicUsage};
+     record({id:attemptId,startedAt:started,upstreamStatus:status,requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
+     succeeded=true;usedTokens+=tokens;return {provider:p.id,model:p.model,route:routeInfo,usage:publicUsage};
     }
     let data=await resp.json();
+    usage=normalizeUsage(data.usage);
     const native=p.protocol==='anthropic'?data:null;data=toChatResponse(data,p.protocol,p.model);
     if(!Array.isArray(data.choices))throw fail('上游响应格式错误',502);
     for(const choice of data.choices)assertThinkingDisabled(input,choice.message);
     const converted=clientKind==='messages'&&native?native:clientResponse(clientKind,data);
     usage=normalizeUsage(data.usage);
-    record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens:usage.totalTokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
-    succeeded=true;usedTokens=usage.totalTokens;return {data,native,converted,provider:p.id,model:p.model,route:routeInfo};
+    record({id:attemptId,startedAt:started,upstreamStatus:status,requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:200,latency:Date.now()-started,tokens:usage.totalTokens,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started)});
+    succeeded=true;usedTokens+=usage.totalTokens;return {data,native,converted,provider:p.id,model:p.model,route:routeInfo};
    }catch(e){
-    record({id:randomBytes(6).toString('hex'),requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:0,usageKnown:false});
+    usedTokens+=usage.known?usage.totalTokens||0:0;
+    record({id:attemptId,startedAt:started,upstreamStatus:status,requestId,actorId,transport,time:new Date().toISOString(),apiKeyId:apiKeyId||null,providerId:p.id,reason:p.routeReason,provider:p.name,model:p.model,status:e.status||502,latency:Date.now()-started,tokens:usage.totalTokens||0,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,usageKnown:usage.known,...usageCost(p,p.model,usage,started),failureKind:clientSignal?.aborted?'cancelled':signal.aborted?'timeout':status>=400?'upstream_http':phase});
     if(e.status===401){rejectedCredentials.add(p.id+':'+p.routeSecret);authFailedName=p.name;}
     if(e.status===422)throw e;
     const retryable=[401,403,408,429,500,502,503,504,529].includes(e.status||502)||(e.status===400&&(!explicit||input.allow_fallback));
@@ -247,7 +261,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     const keyScope=req.principal?{userId:caller.userId,manageLegacy:Boolean(canManage)}:undefined;
     const canManageOwnKeys=Boolean(req.principal?.userId)&&['owner','admin','member'].includes(caller.role);
     if(url.pathname.startsWith('/api/')&&!canManage){
-     const allowedRead=req.method==='GET'&&['/api/state','/api/analytics','/api/logs'].includes(url.pathname)&&caller.role;
+     const allowedRead=req.method==='GET'&&['/api/state','/api/analytics','/api/logs','/api/tasks'].includes(url.pathname)&&caller.role;
      const routePreviewAction=req.method==='POST'&&url.pathname==='/api/routing/preview'&&caller.role==='member';
      const ownKeyAction=canManageOwnKeys&&(req.method==='GET'&&url.pathname==='/api/keys'||req.method==='POST'&&['/api/keys','/api/keys/update','/api/keys/toggle','/api/keys/delete'].includes(url.pathname));
      if(!allowedRead&&!routePreviewAction&&!ownKeyAction&&!(url.pathname==='/api/chat'&&canChat))throw fail('当前角色无权执行此操作',403);
@@ -255,7 +269,18 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if((generationPaths[url.pathname]||mediaPaths.has(url.pathname)||url.pathname==='/v1/messages/count_tokens')&&!canChat)throw fail('只读角色不可调用模型',403);
     if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`&&req.headers.origin!==`https://${req.headers.host}`)throw fail('跨域请求被拒绝',403);
     if(req.method==='GET'&&url.pathname==='/api/analytics')return json(res,200,usageStore.summary(url.searchParams.get('days')));
-    if(req.method==='GET'&&url.pathname==='/api/logs')return json(res,200,usageStore.logs(Object.fromEntries(url.searchParams)));
+    if(req.method==='GET'&&url.pathname==='/api/logs')return json(res,200,usageStore.logs({...Object.fromEntries(url.searchParams),...(!canManage?{actorId:caller.userId}: {})}));
+    if(req.method==='GET'&&url.pathname==='/api/tasks'){
+     const requestId=url.searchParams.get('requestId');
+     if(!canManage&&!usageStore.db.prepare('SELECT 1 FROM calls WHERE request_id=? AND actor_id=?').get(requestId,caller.userId))throw fail('任务记录不存在',404);
+     return json(res,200,usageStore.tasks.fromRequest(requestId));
+    }
+    const feedbackMatch=url.pathname.match(/^\/v1\/requests\/([A-Za-z0-9-]{1,128})\/feedback$/);
+    if(req.method==='POST'&&feedbackMatch){
+     if(!canChat)throw fail('只读角色不可提交验收',403);
+     return json(res,200,usageStore.tasks.feedback(feedbackMatch[1],taskScope(caller),await body(req)));
+    }
+    if(req.method==='GET'&&url.pathname.startsWith('/v1/tasks/'))return json(res,200,usageStore.tasks.summary(taskIdentifier(decodeURIComponent(url.pathname.slice('/v1/tasks/'.length))),taskScope(caller)));
     if(req.method==='POST'&&url.pathname==='/api/keys/delete'){const b=await body(req);return json(res,200,apiKeys.delete(b.id,keyScope));}
     if(req.method==='GET'&&url.pathname==='/api/keys')return json(res,200,apiKeys.list(keyScope));
     if(req.method==='POST'&&url.pathname==='/api/keys')return json(res,201,apiKeys.create(await body(req),req.principal?.userId||null));
@@ -366,22 +391,22 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
      if(state.active&&state.active!==previousActive){const index=state.providers.findIndex(p=>p.id===state.active);state.providers.unshift(...state.providers.splice(index,1));state.providers.forEach((p,position)=>p.priority=position);}
      save();return json(res,200,safe());
     }
-    if(req.method==='POST'&&mediaPaths.has(url.pathname))return await handleMedia(req,res,caller);
+    if(req.method==='POST'&&mediaPaths.has(url.pathname)){if(req.headers['x-task-id']!==undefined)throw fail('媒体任务暂不支持 X-Task-ID，请使用媒体任务自身的 ID');return await handleMedia(req,res,caller);}
     if(req.method==='POST'&&generationPaths[url.pathname]){
      const kind=generationPaths[url.pathname],raw=await body(req);req.protocolKind=kind;
      if(kind==='responses'){
       const requested=typeof raw.model==='string'?raw.model:'';
       const name=requested.includes('::')?requested.slice(requested.indexOf('::')+2):state.providers.find(provider=>provider.id===requested)?.model||requested;
-      if(modelCapabilities(name).vision)return await handleMedia(req,res,caller,raw);
+      if(modelCapabilities(name).vision){if(req.headers['x-task-id']!==undefined)throw fail('专用视觉任务暂不支持 X-Task-ID');return await handleMedia(req,res,caller,raw);}
      }
-     const input=normalizeRequest(kind,raw),abort=new AbortController();const requestIdentifier=crypto.randomUUID();res.setHeader('x-request-id',requestIdentifier);res.setHeader('request-id',requestIdentifier);
+     const input=normalizeRequest(kind,raw),abort=new AbortController();const requestIdentifier=crypto.randomUUID();res.setHeader('x-request-id',requestIdentifier);res.setHeader('request-id',requestIdentifier);const taskId=taskIdentifier(req.headers['x-task-id'],requestIdentifier);res.setHeader('x-task-id',taskId);
      res.on('close',()=>{if(!res.writableEnded)abort.abort();});
      const encoder=createClientStream(kind,async(event,chunk)=>{
       if(!res.headersSent)res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache, no-transform','x-accel-buffering':'no'});
       await writeSSE(res,chunk,abort.signal,event);
      });
-     const setRouteHeaders=route=>{if(res.headersSent)return;for(const [name,value] of Object.entries({'x-router-provider':route.providerId,'x-router-provider-name':route.provider,'x-router-model':route.model,'x-router-protocol':route.protocol,'x-router-reason':route.reason,'x-router-attempt':String(route.attempt),'x-router-fallback':String(route.fallback)}))res.setHeader(name,encodeURIComponent(value||''));};
-     const out=await route(input,{clientKind:kind,requestIdentifier,onRouteSelected:setRouteHeaders,onStreamComplete:result=>encoder.finish(result),apiKeyId:caller.apiKeyId,actorId:caller.userId,transport:input.stream?'sse':'http',signal:abort.signal,onChunk:chunk=>encoder.push(chunk),...(kind==='messages'?{onNativeEvent:event=>encoder.nativeEvent(event)}:{})});
+     const setRouteHeaders=route=>{if(res.headersSent)return;for(const [name,value] of Object.entries({'x-attempt-id':route.attemptId,'x-router-provider':route.providerId,'x-router-provider-name':route.provider,'x-router-model':route.model,'x-router-protocol':route.protocol,'x-router-reason':route.reason,'x-router-attempt':String(route.attempt),'x-router-fallback':String(route.fallback)}))res.setHeader(name,encodeURIComponent(value||''));};
+     const out=await route(input,{clientKind:kind,requestIdentifier,taskId,callerScope:taskScope(caller),onRouteSelected:setRouteHeaders,onStreamComplete:result=>encoder.finish(result),apiKeyId:caller.apiKeyId,actorId:caller.userId,transport:input.stream?'sse':'http',signal:abort.signal,onChunk:chunk=>encoder.push(chunk),...(kind==='messages'?{onNativeEvent:event=>encoder.nativeEvent(event)}:{})});
      if(input.stream){res.end();return;}
      setRouteHeaders(out.route);return json(res,200,out.converted);
     }
