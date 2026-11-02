@@ -28,6 +28,16 @@ export function feishuConfigs(env=process.env){
  return configs;
 }
 
+// OAuth state cookies must be set on the same origin that receives the callback.
+// Only normalize local aliases to the operator-configured loopback address;
+// never derive a redirect destination from Host or forwarded headers.
+export function localFeishuOriginMismatch(req,redirectUri){
+ const target=new URL(redirectUri);
+ if(!['127.0.0.1','localhost'].includes(target.hostname))return null;
+ const protocol=req.socket?.encrypted||req.headers['x-forwarded-proto']==='https'?'https:':'http:';
+ return req.headers.host!==target.host||protocol!==target.protocol?target.origin:null;
+}
+
 export class FeishuOAuth {
  constructor(config,{fetcher=globalThis.fetch,now=()=>Date.now()}={}){this.config=config;this.fetcher=fetcher;this.now=now;this.states=new Map();}
  publicStatus(){return {enabled:this.config.enabled,autoJoin:this.config.autoJoin};}

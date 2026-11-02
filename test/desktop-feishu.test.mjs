@@ -71,9 +71,10 @@ test('桌面系统浏览器飞书登录回到 App，保持跨企业隔离并拒�
 test('桌面关联飞书账号通过系统授权返回账户页，保留现有登录；注销后不能继续关联',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'switchboard-desktop-link-')),admin='a'.repeat(64),secret='d'.repeat(64),accounts=new Accounts(dir,admin);
  const token=await accounts.setup({bootstrapToken:admin,name:'Owner',email:'owner@fixture.invalid',password:'fixture-password-12345'});
- const config={enabled:true,key:'primary',tenantId:'default',legacy:true,appId:'cli_first',appSecret:'first-secret',redirectUri:'https://deployment.example/api/account/sso/feishu/callback',allowedTenantKey:'first'};
+ const config={enabled:true,key:'bound-default',tenantId:'default',legacy:true,appId:'cli_first',appSecret:'first-secret',redirectUri:'https://deployment.example/api/account/sso/feishu/callback',allowedTenantKey:'first'};
  const identityFetcher=async url=>url.endsWith('/token')?Response.json({access_token:'fixture'}):Response.json({data:{open_id:'ou_owner',tenant_key:'first',name:'Owner'}});
  const server=createPlatform({dir,admin,gateway:'g'.repeat(64),desktopAuth:secret,oauthConfig:[config],identityFetcher});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port,cookie='sr_session='+token;
+ const implicit=await fetch(base+'/api/account/sso/feishu/desktop/start',{method:'POST',headers:{'content-type':'application/json','x-switchboard-desktop':secret},body:'{}'});assert.equal(implicit.status,200,'单个绑定应用无需提供旧 primary 标识');
  const start=()=>fetch(base+'/api/account/sso/feishu/link/start',{method:'POST',headers:{'content-type':'application/json',cookie,'user-agent':'SwitchboardDesktop'},body:'{}'});
  const authorize=async()=>{const flow=await(await start()).json();assert(flow.id);const response=await fetch(flow.url,{redirect:'manual'});const url=new URL(response.headers.get('location'));return {...flow,callback:base+'/api/account/sso/feishu/callback?state='+url.searchParams.get('state')+'&code=sample',cookie:response.headers.get('set-cookie').split(';')[0]};};
  try{
