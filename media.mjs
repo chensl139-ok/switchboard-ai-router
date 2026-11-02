@@ -6,6 +6,7 @@ import {priceAt,normalizeUsage,usageCost} from './pricing.mjs';
 import {credentialFor,channelFor} from './provider-key.ts';
 import {protocolForModel} from './model-protocol.mjs';
 import {modelCapabilities} from './public/model-capability.js';
+import {validateImageGeneration,mossImageErrors} from './image-generation.mjs';
 export const mediaPaths=new Set(['/v1/images/generations','/v1/images/edits','/v1/audio/speech','/v1/audio/transcriptions','/v1/audio/translations','/v1/video/submit','/v1/video/status','/v1/embeddings','/v1/rerank']);
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const owner=caller=>caller.apiKeyId?'key:'+caller.apiKeyId:caller.userId?'user:'+caller.userId:caller.admin?'admin':'legacy';
@@ -64,6 +65,7 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
   if(pathname==='/v1/images/edits'&&sf(p))throw fail('硅基流动图像编辑请调用 /v1/images/generations，使用 image 字段',501);
   if(!poll&&!form){if(['/v1/images/generations','/v1/video/submit'].includes(pathname)&&(typeof data.prompt!=='string'||!data.prompt.trim()))throw fail('prompt 不能为空');if(pathname==='/v1/audio/speech'&&(typeof data.input!=='string'||!data.input.trim()))throw fail('input 不能为空');if(data.stream&&pathname!=='/v1/audio/speech')throw fail('此媒体接口不支持 SSE，请移除 stream 参数');}
   const payload=poll?{requestId:job.upstreamId}:pathname==='/v1/responses'?visionPayload(data,p.model):{...data,model:p.model};delete payload.upstream_model;
+  const imageCapabilities=pathname==='/v1/images/generations'?validateImageGeneration(p,payload):null;
   if(sf(p)&&pathname==='/v1/images/generations'){
    if(payload.n!==undefined&&payload.batch_size!==undefined&&payload.n!==payload.batch_size)throw fail('n 与 batch_size 不一致');
    if(payload.size!==undefined&&payload.image_size!==undefined&&payload.size!==payload.image_size)throw fail('size 与 image_size 不一致');
@@ -77,10 +79,11 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
   const release=acquire();try{if(caller.apiKeyId&&!poll)apiKeys.admit(caller.apiKeyId);}catch(error){release();throw error;}
   const started=Date.now(),requestId=randomUUID(),abort=new AbortController();res.setHeader('x-request-id',requestId);res.setHeader('request-id',requestId);
   const onClose=()=>{if(!res.writableEnded)abort.abort();};res.on('close',onClose);
-  const signal=AbortSignal.any([abort.signal,AbortSignal.timeout(180000)]);let succeeded=false,tokens=0,status=502,cost={estimatedCost:null},usage={known:false};
+  const signal=AbortSignal.any([abort.signal,AbortSignal.timeout(imageCapabilities?.moss?900000:180000)]);let succeeded=false,tokens=0,status=502,cost={estimatedCost:null},usage={known:false};
   try{
    const response=await fetcher(p.baseUrl+pathname.slice(3),{method:'POST',headers,body:requestBody,signal,redirect:'error',maxResponseBytes:64*1024*1024});
    status=response.status;if(!response.ok){
+    if(imageCapabilities?.moss){let code;try{code=(await limitedJSON(response)).error?.code;}catch{/* Fall back to the HTTP error. */}if(Object.hasOwn(mossImageErrors,code))throw fail(mossImageErrors[code],status);}
     await response.body?.cancel();
     if(poll&&status===404){
      const submittedAt=job.submittedAt??job.expiresAt-86400000;

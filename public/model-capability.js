@@ -20,14 +20,15 @@ const normalize=(model='')=>String(model).toLowerCase().replace(/\s+/g,'');
 
 export function modelCapabilities(model){
  const normalized=normalize(model);
- const image=mediaPatterns.image.test(normalized);
+ const promptEnhancer=/(?:^|\/|::)moss-image-prompt-enhancer(?:-|$)/i.test(normalized);
+ const image=mediaPatterns.image.test(normalized)&&!promptEnhancer;
  const speech=mediaPatterns.speech.test(normalized);
  const transcription=mediaPatterns.transcription.test(normalized);
  const video=mediaPatterns.video.test(normalized);
  const vision=mossVisionPattern.test(normalized);
  const mediaOnly=image||speech||transcription||video||vision;
  // 可对话：既非媒体生成模型，也非 embedding/rerank/OCR 等非对话模型。
- const chat=!mediaOnly&&!nonChatPattern.test(normalized);
+ const chat=!mediaOnly&&!promptEnhancer&&!nonChatPattern.test(normalized);
  return {image,speech,transcription,video,vision,mediaOnly,chat};
 }
 

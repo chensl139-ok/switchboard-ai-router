@@ -341,6 +341,14 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
 #content.media-workspace-page .media-form-panel textarea { border-radius: 6px; font-size: 13px; color: var(--ui-text); }
 #content.media-workspace-page .media-form-panel .field-help { font-size: 11px; line-height: 1.6; }
 #content.media-workspace-page .media-form-panel .media-options { gap: 12px; }
+#content.media-workspace-page #media-size-label { grid-column: 1 / -1; }
+#content.media-workspace-page .media-image-options { border-top: 1px solid var(--ui-border); padding-top: 14px; }
+#content.media-workspace-page .media-image-options .form-grid { gap: 12px; }
+#content.media-workspace-page .media-image-options .field-help { display: block; margin-top: 6px; }
+#content.media-workspace-page .media-image-options summary { padding: 0 0 12px; color: var(--ui-muted); font-size: 12px; cursor: pointer; }
+#content.media-workspace-page .media-image-options textarea { min-height: 66px; }
+#content.media-workspace-page .media-image-summary { border-top: 1px solid var(--ui-border); padding-top: 12px; margin-top: 14px; font-size: 12px; }
+.media-image-summary p,.lab-history-media-result details p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 #content.media-workspace-page .media-actions { margin-top: 0; }
 #content.media-workspace-page .media-actions button { min-height: 34px; border-radius: 6px; font-size: 13px; }
 #content.media-workspace-page .media-result { min-height: 340px; gap: 14px; }
