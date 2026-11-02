@@ -58,6 +58,7 @@ export function createMediaHandler({state,dir,fetcher,unseal,apiKeys,record,acqu
   const {data,form}=providedData?{data:providedData,form:null}:await readBody(req);let p,job;
   if(poll){if(typeof data.requestId!=='string'||!Object.hasOwn(jobs,data.requestId))throw fail('视频任务不存在或不属于当前调用方',404);job=jobs[data.requestId];if(!job||job.expiresAt<Date.now()||(!(caller.admin||['owner','admin'].includes(caller.role))&&job.owner!==owner(caller)))throw fail('视频任务不存在或不属于当前调用方',404);p=state.providers.find(p=>p.id===job.providerId&&p.enabled&&p.baseUrl===job.baseUrl&&credentialFor(p,job.model));if(!p)throw fail('任务对应服务商配置已改变或未启用',409);p={...p,model:job.model,secret:credentialFor(p,job.model),prices:channelFor(p,job.model)==='metered'||!p.meteredSecret?p.prices:{}};}
   else p=mediaProvider(state,data.model);
+  if(modelCapabilities(p.model).enhancement)throw fail('该模型属于专用增强模型，不能使用普通生图、语音合成或转录接口；独立增强接口尚未适配。MOSS 图片内置改写请使用 Image Base / SFT 的 prompt_enhance。',400);
   if(pathname.startsWith('/v1/video/')&&!sf(p))throw fail('视频任务协议当前支持硅基流动，其他服务商视频协议尚未适配',501);
   if(form&&!['/v1/images/edits','/v1/audio/transcriptions','/v1/audio/translations'].includes(pathname))throw fail('此接口仅接受 JSON');
   if(!form&&['/v1/audio/transcriptions','/v1/audio/translations'].includes(pathname))throw fail('音频转文字请使用 multipart/form-data，包含 model 和 file');

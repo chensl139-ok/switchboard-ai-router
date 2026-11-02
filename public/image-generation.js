@@ -37,3 +37,28 @@ export function buildImageOptions(capabilities,{watermark='',enhance=false,seed=
  validateMossImagePayload({prompt:'validation',...options});
  return options;
 }
+
+// Only show text the upstream actually returned. Never infer an enhanced prompt
+// from the original input. Keep per-image associations for multi-image providers.
+export function imageGenerationResult(data){
+ const rows=Array.isArray(data?.data)?data.data:Array.isArray(data?.images)?data.images:[];
+ const promptDetails=[];let budget=64000,promptDetailsOmitted=false;
+ const collect=(item,imageIndex)=>{
+  if(!item||typeof item!=='object')return;
+  const field=['revised_prompt','enhanced_prompt'].find(key=>typeof item[key]==='string'&&item[key].trim());
+  if(!field)return;
+  const text=item[field];
+  if(text.length>budget||promptDetails.length>=100){promptDetailsOmitted=true;return;}
+  budget-=text.length;promptDetails.push({text,imageIndex,source:field});
+ };
+ rows.forEach((item,index)=>collect(item,index+1));
+ collect(data,null);
+ return {images:rows.map(item=>({url:item?.url})),imageUsage:data?.usage||{},promptDetails,promptDetailsOmitted};
+}
+export function imagePromptStatus(result,status){
+ if(result.promptDetails?.length)return '上游已返回改写正文';
+ if(status==='running')return '等待上游返回';
+ if(status==='failed'||status==='stopped')return '任务未完成，未取得改写正文';
+ if(result.generationOptions?.prompt_enhance)return '上游未返回增强正文；无法查看内部改写内容';
+ return '未请求内置增强；上游未返回改写正文';
+}

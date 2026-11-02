@@ -142,7 +142,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
   const router=context?createRouter(scoped,usageStore,{ready:p=>p.private?p.enabled:hasCredential(p),channels:(p,model)=>p.private?(p.enabled&&p.models.includes(model)?['subscription']:[]):credentialChannels(p,model)}):{selectRoutes};
   const validate=(p,input)=>p.private?context.validate(p,input):payloadFor(p,input);
   const planned=router.selectRoutes(input,{sequence:sequenceValue,now,maxAttempts:Infinity}).map(p=>({...p,protocol:p.private?'responses':protocolForModel(p,p.model),routeSecret:p.private?undefined:credentialFor(p,p.model,p.channelOverride),prices:p.prices}));
-  if(input.model&&input.model!=='auto'&&planned[0]&&!modelCapabilities(planned[0].model).chat)throw fail('所选模型不是对话模型，请在媒体实验室使用',400);
+  if(input.model&&input.model!=='auto'&&planned[0]&&!modelCapabilities(planned[0].model).chat)throw fail('所选模型不是对话模型；媒体生成请使用媒体实验室，专用增强模型需适配对应接口',400);
   if(input.model&&input.model!=='auto')validate(planned[0],input);
   const compatible=[],excluded=[];
   for(const candidate of planned){

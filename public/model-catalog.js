@@ -1,10 +1,10 @@
 import {providerHealth} from './provider-ui.js';
-import {modelCapabilities} from './model-capability.js';
+import {modelCapabilities,enhancementLabel} from './model-capability.js';
 
 const PAGE_SIZE=40;
 const modelList=models=>(models||[]).map(model=>typeof model==='string'?{id:model,name:model}:model).filter(model=>model&&typeof model.id==='string'&&model.id);
 const category=model=>{const capability=modelCapabilities(model);return capability.chat?'chat':capability.mediaOnly?'media':'other';};
-const categoryLabel=model=>{const capability=modelCapabilities(model);return capability.vision?'视觉理解 · 非对话':capability.chat?'对话':capability.mediaOnly?'媒体 / 非对话':'其他 / 非对话';};
+const categoryLabel=model=>{const capability=modelCapabilities(model);return capability.enhancement?enhancementLabel(capability.enhancement)+' · 专用接口待适配':capability.vision?'视觉理解 · 非对话':capability.chat?'对话':capability.mediaOnly?'媒体 / 非对话':'其他 / 非对话';};
 
 // Discovery is supplemental: a failed refresh must not erase configured models.
 // Private subscription rows never receive a public API route ID.

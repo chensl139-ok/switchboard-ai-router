@@ -1,6 +1,6 @@
 import {filterModelsForMediaKind,modelCapabilities} from './model-capability.js';
 import {buildVisionRequest,visionOutputText} from './vision-form.js';
-import {imageGenerationCapabilities,buildImageOptions,validateMossImagePayload} from './image-generation.js';
+import {imageGenerationCapabilities,buildImageOptions,validateMossImagePayload,imageGenerationResult,imagePromptStatus} from './image-generation.js';
 import {labHistoryRequest,mountLabHistory} from './lab-history-client.js';
 let controller=null,objectUrl=null,pollTimer=null,viewEpoch=0;const activeRequests=new Set();
 const kinds={image:{label:'图片生成',hint:'根据文字描述生成图片',action:'生成图片'},speech:{label:'语音合成',hint:'将文字转换为自然语音',action:'生成语音'},transcription:{label:'音频转文字',hint:'上传音频并提取文本',action:'开始转录'},video:{label:'视频生成',hint:'创建文字或图片驱动的视频',action:'生成视频'},vision:{label:'视觉理解',hint:'理解图片或视频并输出文本',action:'开始理解'}};
@@ -23,7 +23,7 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
   const renderResult=current=>{content.replaceChildren();let result;try{result=JSON.parse(current.result||'{}');}catch{result={text:current.result};}
    const details=document.createElement('div');details.className='lab-history-media-result';if(current.requestId){const task=document.createElement('p');task.className='lab-history-task-id';task.textContent=`任务 ID：${current.requestId}`;details.append(task);}
    const values=Array.isArray(result.images)?result.images:Array.isArray(result.videos)?result.videos:[];for(const item of values){const url=safeURL(typeof item==='string'?item:item.url);if(!url)continue;const preview=document.createElement(current.kind==='video'?'video':'img');preview.src=url;if(current.kind==='video'){preview.controls=true;preview.preload='none';}else{preview.alt='历史生成图片';preview.loading='lazy';}details.append(preview);const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noreferrer';link.textContent='打开生成结果 ↗';details.append(link);}
-   if(result.text){const text=document.createElement('p');text.textContent=result.text;details.append(text);}if(!values.length&&!result.text&&!current.error){const empty=document.createElement('p');empty.className='muted';empty.textContent='暂无可查看的结果';details.append(empty);}if(current.error){const error=document.createElement('p');error.className='lab-history-error';error.textContent=current.error;details.append(error);}renderImageInfo(result,details);content.append(details);
+   if(result.text){const text=document.createElement('p');text.textContent=result.text;details.append(text);}if(!values.length&&!result.text&&!current.error){const empty=document.createElement('p');empty.className='muted';empty.textContent='暂无可查看的结果';details.append(empty);}if(current.error){const error=document.createElement('p');error.className='lab-history-error';error.textContent=current.error;details.append(error);}renderImageInfo(result,details,current.status);content.append(details);
    if(current.kind==='video'&&current.requestId&&['submitted','running'].includes(current.status)){const button=document.createElement('button');button.type='button';button.className='subtle';button.textContent='刷新远程任务状态';button.onclick=async()=>{button.disabled=true;button.textContent='正在查询…';try{const response=await fetch('/v1/video/status',{method:'POST',headers:{'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},body:JSON.stringify({requestId:current.requestId})}),data=await response.json();if(!response.ok)throw Error(data.error?.message||'视频状态查询失败');const status=data.status==='Succeed'?'completed':data.status==='Failed'?'failed':'submitted';const updated=await labHistoryRequest(tenantId,'',{id:current.id,area:'media',kind:'video',model:current.model,title:current.title,status,requestId:current.requestId,result:JSON.stringify({videos:data.results?.videos||[],remoteStatus:data.status}),error:status==='failed'?data.reason||'视频生成失败':''});updateDetail(updated);if(content.closest('dialog')?.open&&content.closest('dialog').dataset.recordId===current.id)renderResult(updated);await refresh();}catch(error){if(!button.isConnected)return;button.disabled=false;button.textContent='重新查询';let message=content.querySelector('[data-history-query-error]');if(!message){message=document.createElement('p');message.className='lab-history-error';message.dataset.historyQueryError='';button.after(message);}message.textContent=error.message;}};content.append(button);}
   };renderResult(row);
  }});
@@ -37,16 +37,26 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
   $('#media-image-advanced').hidden=!image||!cap.advanced;
   $('#media-text').maxLength=image&&cap.moss?4000:10000;
   $('#media-watermark-help').textContent=cap.moss?'MOSS 默认开启；关闭后本次生成不添加可见水印。':'当前模型未适配水印开关，沿用服务商默认。';
-  $('#media-rewrite-help').textContent=cap.moss?'在同一次图片请求内先增强再生图，可能增加耗时；增强正文由 MOSS 内部使用。':'当前模型未适配原生提示词增强。';
+  $('#media-rewrite-help').textContent=cap.moss?'在同一次图片请求内先增强再生图，可能增加耗时；返回改写正文时可在结果与历史记录中查看，未返回时会明确标注。':'当前模型未适配原生提示词增强。';
   $('#media-size-help').hidden=!image||!cap.moss;
  }
- function renderImageInfo(result,parent){
+ function renderImageInfo(result,parent,status){
   if(!result.prompt)return;
-  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='提示词与生成参数';details.append(summary);
+  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='查看提示词与生成参数';details.append(summary);details.className='image-prompt-details';
   const add=(label,value)=>{const line=document.createElement('p');line.textContent=label+'：'+value;details.append(line);};
-  add('提交提示词',result.prompt);
+  const promptBlock=(label,value)=>{
+   const block=document.createElement('section'),heading=document.createElement('div'),title=document.createElement('strong'),copy=document.createElement('button'),text=document.createElement('p');
+   block.className='image-prompt-block';heading.className='image-prompt-heading';title.textContent=label;text.textContent=value;copy.type='button';copy.textContent='复制';copy.setAttribute('aria-label','复制'+label);
+   copy.onclick=async()=>{try{await navigator.clipboard.writeText(value);copy.textContent='已复制';}catch{copy.textContent='请选中文本复制';}};
+   heading.append(title,copy);block.append(heading,text);details.append(block);
+  };
+  promptBlock('提交提示词',result.prompt);
+  const returned=Array.isArray(result.promptDetails)?result.promptDetails:[];
+  for(const item of returned)if(typeof item.text==='string')promptBlock(item.imageIndex?'图片 '+item.imageIndex+' · 上游改写提示词':'上游改写提示词',item.text);
+  add('改写正文',imagePromptStatus(result,status));
+  if(result.promptDetailsOmitted)add('提示','部分改写正文过长，未存入实验历史；请通过 API 保存完整响应');
   const options=result.generationOptions||{};
-  add('智能改写',options.prompt_enhance?'MOSS 内置增强（上游未返回增强正文）':'关闭');
+  add('智能改写',options.prompt_enhance?'MOSS 内置增强':'未请求内置增强');
   add('水印请求',options.output_watermark?.enabled===false?'关闭可见水印':options.output_watermark?.enabled===true?'保留可见水印':'服务商默认');
   if(result.size)add('请求尺寸',result.size);
   if(options.seed!==undefined)add('随机种子',options.seed);
@@ -128,7 +138,7 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
   const persist=async(status,result='',error='',requestId='')=>{if(!savedId)return;try{await labHistoryRequest(tenantId,'',{id:savedId,area:'media',kind,model,title,status,requestId,result:imageMeta?JSON.stringify({...imageMeta,...JSON.parse(result||'{}')}):result,error});if(historyPanel.section.open)void historyPanel.refresh();}catch{/* The live result remains available if history storage fails. */}};
   try{
    try{const saved=await labHistoryRequest(tenantId,'',{area:'media',kind,model,title,status:'running'});savedId=saved.id;if(current())recordId=savedId;}catch{/* Do not block model execution if history storage is unavailable. */}
-   if(imageMeta){await persist('running');if(current()){const info=$('#media-image-summary');info.replaceChildren();renderImageInfo(imageMeta,info);info.hidden=false;setStatus(imageMeta.generationOptions.prompt_enhance?'增强并生成图片…':'生成图片…');}}
+   if(imageMeta){await persist('running');if(current()){const info=$('#media-image-summary');info.replaceChildren();renderImageInfo(imageMeta,info,'running');info.hidden=false;setStatus(imageMeta.generationOptions.prompt_enhance?'增强并生成图片…':'生成图片…');}}
    request.signal.throwIfAborted();
    const requestHeaders=headers();if(body instanceof FormData)delete requestHeaders['content-type'];
    const response=await fetch(route,{method:'POST',headers:requestHeaders,body,signal:request.signal});
@@ -138,12 +148,12 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
     objectUrl=URL.createObjectURL(blob);const audio=document.createElement('audio');audio.controls=true;audio.src=objectUrl;const download=document.createElement('a');download.href=objectUrl;download.download='switchboard-speech.mp3';download.className='media-download';download.textContent='下载音频';$('#media-result').append(audio,download);
    }else{
     const data=await response.json();
-    if(kind==='image')await persist('completed',JSON.stringify({images:(data.data||data.images||[]).map(item=>({url:item.url})),imageUsage:data.usage||{}}),'',response.headers.get('x-request-id')||'');
+    if(kind==='image'){Object.assign(imageMeta,imageGenerationResult(data));await persist('completed',JSON.stringify(imageMeta),'',response.headers.get('x-request-id')||'');}
     if(kind==='transcription')await persist('completed',JSON.stringify({text:data.text||JSON.stringify(data)}));
     if(kind==='vision'){const output=visionOutputText(data);if(!output)throw Error('视觉理解未返回文本结果');await persist('completed',JSON.stringify({text:output,usage:data.usage||{}}));}
     if(kind==='video')await persist('submitted',JSON.stringify({remoteStatus:'InQueue'}),'',data.requestId);
     if(!current())return;
-    if(kind==='image')showLinks(data.data||data.images||[],'img');
+    if(kind==='image'){showLinks(data.data||data.images||[],'img');const info=$('#media-image-summary');info.replaceChildren();renderImageInfo(imageMeta,info,'completed');info.hidden=false;}
     if(kind==='transcription'){const output=document.createElement('p');output.className='media-transcript';output.textContent=data.text||JSON.stringify(data);$('#media-result').append(output);$('#media-copy').hidden=false;}
     if(kind==='vision'){const text=visionOutputText(data);if(!text)throw Error('视觉理解未返回文本结果');const output=document.createElement('p');output.className='media-transcript';output.textContent=text;$('#media-result').append(output);$('#media-copy').hidden=false;const usage=data.usage||{},input=Number(usage.input_tokens),outputTokens=Number(usage.output_tokens);if(Number.isFinite(input)&&Number.isFinite(outputTokens)){$('#media-vision-usage').textContent=`输入 ${input} tokens · 输出 ${outputTokens} tokens`;$('#media-vision-usage').hidden=false;}}
     if(kind==='video'){
@@ -151,7 +161,7 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
     }
    }
    if(current()&&kind!=='video')setStatus('已完成');
-  }catch(error){await persist(request.signal.aborted?'stopped':'failed','',request.signal.aborted?'等待已取消；远程任务可能仍在继续。':error.message);if(current()){$('#media-error').textContent=request.signal.aborted?'已取消等待；已提交的远程任务可能仍会继续执行。':error.message;setStatus('未完成');}}
+  }catch(error){await persist(request.signal.aborted?'stopped':'failed','',request.signal.aborted?'等待已取消；远程任务可能仍在继续。':error.message);if(current()){if(imageMeta){const info=$('#media-image-summary');info.replaceChildren();renderImageInfo(imageMeta,info,request.signal.aborted?'stopped':'failed');info.hidden=false;}$('#media-error').textContent=request.signal.aborted?'已取消等待；已提交的远程任务可能仍会继续执行。':error.message;setStatus('未完成');}}
   finally{activeRequests.delete(request);if(controller===request)controller=null;if(current()){$('#media-send').disabled=!supportedModels(kind).length;$('#media-stop').hidden=true;}}
  };
 }

@@ -18,18 +18,30 @@ const mossVisionPattern=/(?:^|\/|::)moss-vl-1\.0(?:-\d{4}-\d{2}-\d{2})?$/i;
 
 const normalize=(model='')=>String(model).toLowerCase().replace(/\s+/g,'');
 
+// Enhance models perform a dedicated transformation, not ordinary generation.
+// Match whole name segments so e.g. a chat model named "enhanced" stays usable.
+export function enhancementKind(model){
+ const name=normalize(model).split('::').at(-1).split('/').at(-1);
+ if(!/(?:^|[\/_.:-])(?:enhance|enhancer|enhancement)(?=$|[\/_.:-])/i.test(name))return '';
+ if(/prompt/.test(name))return 'prompt';
+ if(/speech|audio|voice/.test(name))return 'audio';
+ if(/image|photo|picture/.test(name))return 'image';
+ if(/video/.test(name))return 'video';
+ return 'other';
+}
+export function enhancementLabel(kind){return {prompt:'提示词增强',audio:'音频增强',image:'图片增强',video:'视频增强',other:'专用增强'}[kind]||'';}
 export function modelCapabilities(model){
  const normalized=normalize(model);
- const promptEnhancer=/(?:^|\/|::)moss-image-prompt-enhancer(?:-|$)/i.test(normalized);
- const image=mediaPatterns.image.test(normalized)&&!promptEnhancer;
- const speech=mediaPatterns.speech.test(normalized);
- const transcription=mediaPatterns.transcription.test(normalized);
- const video=mediaPatterns.video.test(normalized);
+ const enhancement=enhancementKind(normalized);
+ const image=mediaPatterns.image.test(normalized)&&!enhancement;
+ const speech=mediaPatterns.speech.test(normalized)&&!enhancement;
+ const transcription=mediaPatterns.transcription.test(normalized)&&!enhancement;
+ const video=mediaPatterns.video.test(normalized)&&!enhancement;
  const vision=mossVisionPattern.test(normalized);
  const mediaOnly=image||speech||transcription||video||vision;
  // 可对话：既非媒体生成模型，也非 embedding/rerank/OCR 等非对话模型。
- const chat=!mediaOnly&&!promptEnhancer&&!nonChatPattern.test(normalized);
- return {image,speech,transcription,video,vision,mediaOnly,chat};
+ const chat=!mediaOnly&&!enhancement&&!nonChatPattern.test(normalized);
+ return {image,speech,transcription,video,vision,mediaOnly,chat,enhancement};
 }
 
 export function filterModelsForMediaKind(models,kind){

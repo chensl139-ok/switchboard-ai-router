@@ -418,3 +418,9 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
 @media (min-width: 1200px) {
  .record-request-filters { grid-template-columns: minmax(180px,2fr) repeat(4,minmax(100px,1fr)) auto; }
 }
+
+.image-prompt-details { min-width: 0; }
+.image-prompt-block { padding: 10px 0; border-bottom: 1px solid var(--ui-border); }
+.image-prompt-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.image-prompt-heading button { flex: none; padding: 4px 10px; font-size: 12px; }
+.image-prompt-block p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

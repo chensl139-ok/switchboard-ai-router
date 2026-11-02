@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {imageGenerationCapabilities,buildImageOptions,validateMossImagePayload} from '../public/image-generation.js';
+import {imageGenerationCapabilities,buildImageOptions,validateMossImagePayload,imageGenerationResult,imagePromptStatus} from '../public/image-generation.js';
 import {validateImageGeneration} from '../image-generation.mjs';
 import {modelCapabilities} from '../public/model-capability.js';
 const moss={baseUrl:'https://api.mosi.cn/v1',model:'moss-image-sft-1.0-2026-10-09'};
@@ -32,17 +32,38 @@ test('MOSS 图片端到端透传原生参数，拒绝无效请求且不自动重
   calls++;assert.equal(url,'https://api.mosi.cn/v1/images/generations');
   const payload=JSON.parse(options.body);assert.equal(payload.model,moss.model);assert.equal(payload.prompt_enhance,true);assert.deepEqual(payload.output_watermark,{enabled:false});assert.equal(payload.guidance_scale,0);assert.equal(payload.seed,0);assert.equal(payload.num_inference_steps,8);assert.equal(payload.watermark,undefined);assert.equal(options.headers['X-Enable-Watermark'],undefined);
   if(failCode)return Response.json({error:{code:failCode,message:'private upstream text'}},{status:403});
-  return Response.json({data:[{url:'https://example.test/result.png'}],usage:{generated_images:1,output_width:512,output_height:512}});
+  return Response.json({data:[{url:'https://example.test/result.png',revised_prompt:'A cat in soft window light'}],usage:{generated_images:1,output_width:512,output_height:512}});
  }});await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.address().port;
  try{
   const setup=await fetch(base+'/api/account/setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({bootstrapToken:'a'.repeat(32),name:'Owner',email:'moss@example.test',password:'fixture-password-123'})});const cookie=setup.headers.get('set-cookie').split(';')[0];
   const post=(route,data)=>fetch(base+route,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(data)});
-  assert.equal((await post('/api/provider',{id:'moss',name:'MOSS',protocol:'openai',baseUrl:moss.baseUrl,apiKey:'fixture-key',model:moss.model,models:[moss.model,'moss-image-prompt-enhancer-1.0'],enabled:true})).status,200);
+  assert.equal((await post('/api/provider',{id:'moss',name:'MOSS',protocol:'openai',baseUrl:moss.baseUrl,apiKey:'fixture-key',model:moss.model,models:[moss.model,'moss-image-prompt-enhancer-1.0','moss-speech-enhance'],enabled:true})).status,200);
   const input={model:'moss::'+moss.model,prompt:'cat',size:'512x512',prompt_enhance:true,output_watermark:{enabled:false},seed:0,guidance_scale:0,num_inference_steps:8};
-  const generated=await post('/v1/images/generations',input);assert.equal(generated.status,200);assert.equal((await generated.json()).usage.generated_images,1);assert.equal(calls,1);
+  const generated=await post('/v1/images/generations',input);assert.equal(generated.status,200);const data=await generated.json();assert.equal(data.usage.generated_images,1);assert.equal(data.data[0].revised_prompt,'A cat in soft window light');assert.equal(calls,1);
+  const speech=await post('/v1/audio/speech',{model:'moss::moss-speech-enhance',input:'hello',voice:'default'});assert.equal(speech.status,400);assert.match((await speech.json()).error.message,/专用增强/);assert.equal(calls,1);
+  const history=await post('/api/account/lab-history',{area:'media',kind:'image',model:input.model,title:'cat',status:'completed',result:JSON.stringify({prompt:input.prompt,...imageGenerationResult(data)})});assert.equal(history.status,200);const saved=await history.json();assert.equal(JSON.parse(saved.result).promptDetails[0].text,'A cat in soft window light');
   assert.equal((await post('/v1/images/generations',{...input,size:'2048x2048'})).status,400);assert.equal(calls,1);
   assert.equal((await post('/v1/images/generations',{...input,model:'moss::moss-image-prompt-enhancer-1.0'})).status,400);assert.equal(calls,1);
   failCode='prompt_enhancement_refused';const failed=await post('/v1/images/generations',input);assert.equal(failed.status,403);assert.match((await failed.json()).error.message,/增强拒绝/);assert.equal(calls,2);
   failCode='unknown_error';const unknown=await post('/v1/images/generations',input);assert.equal(unknown.status,403);assert.doesNotMatch(await unknown.text(),/private upstream text/);assert.equal(calls,3);
  }finally{app.closeAllConnections();await new Promise(resolve=>app.close(resolve));rmSync(dir,{recursive:true,force:true});}
+});
+
+test('改写提示词只来自上游，保留逐图关联、原始换行与可追溯字段',()=>{
+ const data={data:[{url:'https://example.test/1',revised_prompt:'  first\nline  '},{url:'https://example.test/2',enhanced_prompt:'second'}],enhanced_prompt:'shared'};
+ const result=imageGenerationResult(data);
+ assert.deepEqual(result.promptDetails,[{text:'  first\nline  ',imageIndex:1,source:'revised_prompt'},{text:'second',imageIndex:2,source:'enhanced_prompt'},{text:'shared',imageIndex:null,source:'enhanced_prompt'}]);
+ assert.equal(result.images.length,2);assert.equal(result.promptDetailsOmitted,false);
+ const absent=imageGenerationResult({data:[{url:'https://example.test/1',revised_prompt:{text:'not a string'}}],prompt:'original'});assert.deepEqual(absent.promptDetails,[]);
+ assert.match(imagePromptStatus({...absent,generationOptions:{prompt_enhance:true}},'completed'),/上游未返回/);
+ assert.match(imagePromptStatus(absent,'running'),/等待/);assert.match(imagePromptStatus(absent,'failed'),/未完成/);
+ assert.deepEqual(imageGenerationResult(null).promptDetails,[]);
+ const huge=imageGenerationResult({data:[{revised_prompt:'a'.repeat(64001)},{revised_prompt:'safe'}]});assert.equal(huge.promptDetailsOmitted,true);assert.equal(huge.promptDetails[0].text,'safe');
+});
+
+test('图片参数文档不污染视频提交协议',async()=>{
+ const {platformOpenAPI}=await import('../openapi.mjs');
+ const properties=route=>platformOpenAPI.paths[route].post.requestBody.content['application/json'].schema.properties;
+ assert.ok(properties('/v1/images/generations').prompt_enhance);
+ assert.equal(properties('/v1/video/submit').prompt_enhance,undefined);
 });
