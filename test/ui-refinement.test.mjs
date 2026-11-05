@@ -145,7 +145,8 @@ test('模型实验室切换页面保留任务，历史按账号租户保存；�
  const media=read('public/media-lab.js'),chat=read('public/playground.js'),account=read('public/accounts.js');
  assert.match(media,/export function stopMediaLab\(\)\{viewEpoch\+\+;controller=null/);
  assert.match(media,/await persist\('submitted'/);assert.match(media,/mountLabHistory\(root,\{area:'media'/);
- assert.match(chat,/export function stopPlayground\(\)\{stopCompare\(\);\}/);
+ const stopChat=chat.match(/export function stopPlayground\(\)\{([^}]+)\}/)?.[1]||'';
+ assert.match(stopChat,/stopCompare\(\)/);assert.doesNotMatch(stopChat,/controller[?.]*abort/);assert.match(stopChat,/videoPreparation\?\.abort\(\)/);
  assert.match(chat,/mountLabHistory\(root,\{area:'chat'/);
  assert.match(account,/id="feishu-login"/);assert.match(account,/id="feishu-choice"/);
  assert.doesNotMatch(account,/使用 \$\{safeText\(provider\.label\)\} 飞书登录/);

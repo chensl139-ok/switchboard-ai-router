@@ -108,11 +108,19 @@ Personal routing can combine the caller's authorized subscription models with or
 | Model routing | fixed / failover / weighted / latency-first / keyword rules / cost-first; fallback within and across providers; primary+backup keys per model |
 | Protocol gateway | OpenAI Chat Completions, Responses, legacy Completions; Anthropic Messages; SSE; custom WebSocket text protocol |
 | Providers & models | preset + custom compatible providers, model discovery, provider-level protocol auto-matching |
-| Model Lab | chat with streaming Markdown, image input and function tools; 2–4 model side-by-side comparison; image / audio / video / vision tasks; TTFB, TTFT, TPS, est. TPOT metrics with actual-hit model reporting |
+| Model Lab | chat with streaming Markdown, image input and function tools; 2–4 model side-by-side comparison; image / audio / video / vision tasks; Kimi K3 video understanding with timestamped frames or native video input; TTFB, TTFT, TPS, est. TPOT metrics with actual-hit model reporting |
 | Teams | email+password or Feishu (Lark) OAuth, invites, four roles, tenant isolation, operation audit, password reset codes |
 | Task tracing & acceptance | correlate HTTP/SSE chat retries with `X-Task-ID`; separate caller validation from gateway completion, aggregate attempt time and estimated costs by currency ([API guide](API.md#任务关联输出验收与成本追踪)) |
 | Business API keys | per-member keys with expiry and quotas, hashed at rest; revocation takes effect on removal |
 | Observability | request metadata logs (never prompt bodies), final-success-rate accounting, per-member/model/key usage, cost estimation, OpenRouter reference pricing import |
+
+### Kimi K3 video understanding
+
+In **Model Lab → Chat**, select a configured `kimi-k3`, attach a video and ask follow-up questions in the same conversation. This uses frame sampling and keeps the selected model fixed. Reloaded history includes text only, so video conversations require reattaching the source to resume.
+
+In **Model Lab → Media → Visual understanding**, select **Video** and your configured `kimi-k3`. The default frame-sampling mode reads a local MP4/WebM/MOV (up to 6 MB / 10 minutes), sends up to 12 timestamped frames, and saves the text result in experiment history. It does not analyze audio and may miss brief events. Videos and frame images are not stored in history.
+
+Native mode uses `POST /v1/chat/completions` with a `video_url` content block. HTTPS URLs, video Base64 and `ms://` file references require upstream support; a channel accepting text/images may reject native video. For `ms://`, use a file uploaded through the same upstream account, an explicit `provider::kimi-k3`, and `allow_fallback: false`. Switchboard does not provide the upstream file-upload endpoint. The in-app API guide includes an example. See [Kimi visual-input documentation](https://platform.kimi.com/docs/guide/use-kimi-vision-model).
 
 ## Routing you can inspect
 

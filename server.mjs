@@ -13,6 +13,7 @@ import {createRouter,validateRouting} from './routing.mjs';
 import {credentialFor,hasCredential,channelFor,credentialChannels} from './provider-key.ts';
 import {modelProtocolMap,protocolForModel} from './model-protocol.mjs';
 import {modelCapabilities} from './public/model-capability.js';
+import {hasVideoInput} from './protocols.mjs';
 import {ApiKeyStore} from './key-store.mjs';
 import {consumeSSE, installWebSocket, writeSSE} from './realtime.mjs';
 import http from 'node:http';
@@ -240,6 +241,7 @@ export function createApp({dir=process.env.DATA_DIR||path.join(root,'data'),admi
     if(e.status===401){rejectedCredentials.add(p.id+':'+p.routeSecret);authFailedName=p.name;}
     if(e.status===422)throw e;
     const retryable=[401,403,408,429,500,502,503,504,529].includes(e.status||502)||(e.status===400&&(!explicit||input.allow_fallback));
+    if((committed||requestSignal.aborted||(explicit&&!canFallback)||!retryable)&&e.status===400&&hasVideoInput(input))throw fail('当前服务商拒绝原生视频输入。请在媒体实验室选择抽帧理解，或使用支持 video_url 的渠道和素材格式。',502);
     if(committed||requestSignal.aborted||(explicit&&!canFallback)||!retryable)throw fail(e.status===401?`服务商 ${p.name} 密钥验证失败（401），请更新 API Key`:`服务商 ${p.name} 调用失败（${e.status||502}），请检查模型与配置`,502);
    }
   }

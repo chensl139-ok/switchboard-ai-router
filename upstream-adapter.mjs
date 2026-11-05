@@ -1,8 +1,13 @@
-import {anthropicPayload,responsesPayload,chatPayload} from './protocols.mjs';
+import {isKimiVideoModel} from './public/video-input.js';
+import {anthropicPayload,responsesPayload,chatPayload,hasVideoInput} from './protocols.mjs';
 import {thinkingOptions} from './thinking.mjs';
 
 export function createUpstreamAdapter({unseal}){
  function payloadFor(provider,input){
+  if(hasVideoInput(input)){
+   if(provider.protocol!=='openai'||!isKimiVideoModel(provider.model))throw Object.assign(Error('当前路由不支持视频输入，请选择 Kimi K3 的 Chat Completions 模型'),{status:400});
+   if(['dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com'].includes(new URL(provider.baseUrl).hostname))throw Object.assign(Error('当前百炼 Kimi K3 渠道不支持视频输入，请切换已开通视频能力的服务商'),{status:400});
+  }
   let extra={};
   if(!(provider.protocol==='anthropic'&&input._nativeThinking)){
    if(input._nativeThinking?.budget_tokens&&provider.protocol!=='anthropic')throw Object.assign(Error('指定 Anthropic 思考预算需要 Anthropic 上游'),{status:400});

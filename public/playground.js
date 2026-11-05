@@ -1,3 +1,5 @@
+import {isKimiVideoModel} from './video-input.js';
+import {extractVideoFrames,buildVideoFramesRequest} from './video-frames.js';
 import {thinkingCapability} from './thinking-capability.js';
 import {streamChat} from './stream-client.js';
 import {labChoices,isPersonalTarget,planLabRequest} from './lab-targets.js';
@@ -8,14 +10,15 @@ import {labHistoryRequest,mountLabHistory,resumeConversation} from './lab-histor
 import {cacheHitMetrics} from './cache-metrics.js';
 import {conversationSnapshot} from './lab-history-format.js';
 let draft='',contextVersion=0,pendingImages=[],history=[],controller=null,conversationId=null,currentViewDraw=null,view='chat',settingsOpen=false,settings={target:'auto',transport:'sse',thinking:'auto',showThinking:true,maxTokens:8192,tools:'[]'};
+let pendingVideo=null,videoPreparation=null;
 let compareModule=null,compareLoad=null,compareEpoch=0;
 const stopCompare=()=>{compareEpoch++;compareModule?.stopModelCompare();};
 const icon=(paths)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const spark=icon('<path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h6"/>');
 const headerValue=(response,name)=>{const value=response.headers.get(name);if(!value)return '';try{return decodeURIComponent(value)}catch{return value}};
 const responseRoute=response=>{const model=headerValue(response,'x-router-model');if(!model)return null;return {providerId:headerValue(response,'x-router-provider'),provider:headerValue(response,'x-router-provider-name'),model,protocol:headerValue(response,'x-router-protocol'),reason:headerValue(response,'x-router-reason'),attempt:Number(headerValue(response,'x-router-attempt'))||1,fallback:headerValue(response,'x-router-fallback')==='true'}};
-export function stopPlayground(){stopCompare();}
-export function resetPlayground(){contextVersion++;controller?.abort();history=[];conversationId=null;pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
+export function stopPlayground(){stopCompare();videoPreparation?.abort();}
+export function resetPlayground(){contextVersion++;controller?.abort();videoPreparation?.abort();pendingVideo=null;history=[];conversationId=null;pendingImages=[];draft='';settings.target='auto';settings.tools='[]';}
 export function renderPlayground({state,token,tenantId,esc,refresh,embedded=false,renderView,navigate,initialTarget,personalLoading=false}){
  const root=document.querySelector('#content');
  stopCompare();
@@ -41,7 +44,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  root.insertAdjacentHTML('beforeend',`<div class="lab-session-summary" aria-label="当前实验状态"><div><small>运行状态</small><strong class="lab-state" id="lab-state">准备就绪</strong></div><div><small>上下文</small><strong id="lab-turn-count">0 轮</strong></div><div><small>响应方式</small><strong id="lab-transport-label">SSE 流式</strong></div></div>
  <div class="lab-layout chat-canvas"><section class="lab-main"><div class="lab-toolbar"><label class="lab-model-quick"><span>${spark}运行模型</span><select id="lab-model"><option value="auto">自动路由 · 跟随后台策略</option>${choices.map(c=>`<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label><button type="button" id="lab-settings-toggle" aria-expanded="false" aria-controls="lab-settings-panel">${icon('<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>')}<span>生成设置</span></button></div>
  <p id="lab-personal-status" class="lab-help" role="status" ${personalLoading?'':'hidden'}>正在加载个人订阅模型；组织模型可立即使用。</p><div class="lab-messages" id="lab-messages" aria-live="polite"></div><div id="lab-error" class="lab-error" role="alert"></div>
- <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><form id="lab-form" class="lab-composer"><div id="lab-draft-state" class="lab-draft-state" hidden><span></span>模型正在回复，你可以继续写下一条</div><div id="lab-images" class="lab-images" aria-label="待发送图片"></div><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="2" aria-describedby="lab-compose-hint" placeholder="发送消息，或粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 添加图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><span id="lab-compose-hint" aria-live="polite">Enter 发送 · Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
+ <button type="button" id="lab-jump" class="lab-jump" hidden>↓ 回到最新消息</button><form id="lab-form" class="lab-composer"><div id="lab-draft-state" class="lab-draft-state" hidden><span></span>模型正在回复，你可以继续写下一条</div><div id="lab-images" class="lab-images" aria-label="待发送附件"></div><label for="lab-prompt" class="sr-only">输入消息</label><textarea id="lab-prompt" rows="2" aria-describedby="lab-compose-hint" placeholder="发送消息，或粘贴图片…"></textarea><div class="lab-compose-bottom"><button type="button" id="lab-image-button">＋ 添加图片</button><input id="lab-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden multiple><button type="button" id="lab-video-button" hidden>＋ 视频</button><input id="lab-video-input" type="file" accept=".mp4,.webm,.mov" hidden><span id="lab-compose-hint" aria-live="polite">Enter 发送 · Shift + Enter 换行</span><button type="button" id="lab-stop" hidden>停止生成</button><button class="primary" id="lab-send">发送 ${icon('<path d="m5 12 7-7 7 7M12 5v14"/>')}</button></div></form>
  <div class="lab-privacy">对话文本保存在当前账户的实验历史中，可查看、导出及删除；请求内容不写入请求日志</div></section>
  <aside class="lab-settings" id="lab-settings-panel" aria-label="生成设置" hidden><div class="lab-settings-heading">生成设置<button type="button" id="lab-settings-close" aria-label="关闭生成设置">×</button></div><div class="lab-settings-note">仅影响本次对话 · 协议自动适配</div>
  <label>响应方式<select id="lab-transport"><option value="sse">SSE · 流式输出</option><option value="ws">WebSocket · 实时连接</option><option value="http">HTTP · 完整响应</option></select></label>
@@ -62,8 +65,8 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  },onResume:row=>{
   if(controller)throw Error('当前对话正在生成，请停止或等待完成后再继续历史对话。');
   const restored=resumeConversation(row);
-  if((draft.trim()||pendingImages.length)&&!confirm('替换当前未发送的草稿并继续这条历史对话？'))throw Error('未替换当前草稿。');
-  contextVersion++;history=restored.messages;conversationId=null;pendingImages=[];draft=restored.draft;
+  if((draft.trim()||pendingImages.length||pendingVideo)&&!confirm('替换当前未发送的草稿并继续这条历史对话？'))throw Error('未替换当前草稿。');
+  contextVersion++;videoPreparation?.abort();pendingVideo=null;history=restored.messages;conversationId=null;pendingImages=[];draft=restored.draft;
   const route=[...history].reverse().find(item=>item.route)?.route;
   const target=restored.target??(route?JSON.stringify([route.providerId,route.model]):'auto');
   settings.target=choices.some(choice=>choice.id===target)?target:'auto';$('#lab-model').value=settings.target;
@@ -92,7 +95,8 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   const [id,model]=JSON.parse(settings.target);return thinkingCapability({...state.providers.find(p=>p.id===id),model});
  }
  function updateSummary(){const turns=history.filter(m=>m.role==='user').length;$('#lab-turn-count').textContent=`${turns} 轮`;const names={sse:'SSE 流式',ws:'WebSocket',http:'HTTP 完整'};$('#lab-transport-label').textContent=isPersonalTarget(settings.target)?'SSE · 个人订阅':names[settings.transport]||settings.transport;}
- function subscriptionControls(){const personal=isPersonalTarget(settings.target),routed=settings.target==='personal-auto';for(const id of ['#lab-transport','#lab-max-tokens','#lab-thinking','#lab-tools','#lab-image-button'])$(id).disabled=personal||!!controller;$('#lab-transport').value=personal?'sse':settings.transport;$('.lab-tool-config').hidden=personal;$('.lab-settings-note').textContent=routed?'个人自动路由 · 仅本人当前租户':personal?'个人订阅 · 固定模型 · 仅本人可用':'仅影响本次对话 · 协议自动适配';$('#lab-prompt').placeholder=routed?'发送文本消息 · 使用个人路由策略…':personal?'发送文本消息 · 使用个人订阅…':'发送消息，或粘贴图片…';}
+ function supportsVideo(){return !isPersonalTarget(settings.target)&&settings.target!=='auto'&&isKimiVideoModel(JSON.parse(settings.target)[1]);}
+ function subscriptionControls(){const personal=isPersonalTarget(settings.target),routed=settings.target==='personal-auto';for(const id of ['#lab-transport','#lab-max-tokens','#lab-thinking','#lab-tools','#lab-image-button'])$(id).disabled=personal||!!controller;$('#lab-video-button').hidden=!supportsVideo();$('#lab-video-button').disabled=!!controller||!!videoPreparation;$('#lab-transport').value=personal?'sse':settings.transport;$('.lab-tool-config').hidden=personal;$('.lab-settings-note').textContent=routed?'个人自动路由 · 仅本人当前租户':personal?'个人订阅 · 固定模型 · 仅本人可用':'仅影响本次对话 · 协议自动适配';$('#lab-prompt').placeholder=routed?'发送文本消息 · 使用个人路由策略…':personal?'发送文本消息 · 使用个人订阅…':'发送消息，或粘贴图片…';}
  function targetLabel(){const el=$('#lab-model');$('#lab-target-label').textContent=el.options[el.selectedIndex]?.textContent||'自动路由';const capability=selectedCapability();$('#lab-thinking').querySelector('option[value=disabled]').disabled=capability?.canDisable===false;$('#lab-thinking-help').textContent=capability?.reason||'按实际选中的模型校验关闭能力；不支持的默认目标会拒绝请求。';subscriptionControls();updateSummary();}
  function statLine(m){
   if(m.status==='失败'||m.status==='已停止')return '';
@@ -110,6 +114,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  }
  const answerCache=new WeakMap();
  function answerText(m){
+  if(m.video)return m.video.prompt;
   const content=typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(part=>part.type==='text').map(part=>part.text).join('\n'):'';
   return content|| (m.status==='生成中'?'':m.tool_calls?.length?'':m.reasoning_content?'本次仅返回思考内容，可增加输出上限后重试。':'');
  }
@@ -122,7 +127,7 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  }
  let drawTimer=null;
  const scheduleDraw=()=>{if(drawTimer)return;drawTimer=setTimeout(()=>{drawTimer=null;if(root.isConnected)draw(true);},120);};
- const messageHtml=(m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&m.status==='生成中'&&m.stats?.ttft!=null?`<span class="lab-live-stats">${esc(statLine(m))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${routeDetails(m,index)}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer ${m.status==='生成中'?'is-streaming':''}">${answerHtml(m)}</div>${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'&&statLine(m)?`<div class="lab-response-meta" title="TTFB：首个响应数据；TTFT：首个输出；TPS：端到端输出吞吐；TPOT：有连续流式增量和上游用量时的估算"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`;
+ const messageHtml=(m,index)=>`<article class="lab-message ${m.role}"><div class="lab-speaker"><span class="lab-message-avatar">${m.role==='user'?'U':spark}</span><strong>${m.role==='user'?'你':esc(m.label||'模型回复')}</strong><small class="${m.status==='失败'?'failed':''}">${esc(m.status||'')}</small>${m.role==='assistant'&&m.status==='生成中'&&m.stats?.ttft!=null?`<span class="lab-live-stats">${esc(statLine(m))}</span>`:''}${m.role==='assistant'&&m.content&&m.status!=='生成中'?`<button type="button" class="lab-copy" data-copy-reply="${index}" aria-label="复制模型回复">复制</button>`:''}</div><div class="lab-message-body">${routeDetails(m,index)}${m.reasoning_content&&settings.showThinking?`<details class="lab-thought" data-thought="${index}" ${m.thinkingOpen===false?'':'open'}><summary>${icon('<path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0l-1 2H9z"/>')}思考内容<span>模型 API 返回</span></summary><div>${esc(m.reasoning_content)}</div></details>`:''}${m.notice?`<p class="lab-notice">${esc(m.notice)}</p>`:''}<div class="lab-answer ${m.status==='生成中'?'is-streaming':''}">${answerHtml(m)}</div>${m.video?`<details class="lab-video-frames"><summary>视频 · ${esc(m.video.name)} · 抽帧理解 ${m.video.frameCount} 帧 · 不含音轨</summary><p class="lab-help">采样可能遗漏短暂事件；当前对话可继续追问，历史只保存文字。</p><div class="lab-video-gallery">`:''}${Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>`<img class="lab-message-image" src="${esc(p.image_url.url)}" alt="用户输入的图片">`).join(''):''}${m.video?'</div></details>':''}${m.tool_calls?.length?`<div class="lab-tool-calls"><strong>模型请求调用工具</strong>${m.tool_calls.map(t=>`<details open><summary>${esc(t.function.name)}</summary><pre>${esc(t.function.arguments||'{}')}</pre></details>`).join('')}<p>请由调用方执行工具并带 tool_call_id 回传结果。</p></div>`:''}${m.role==='assistant'&&m.status!=='生成中'&&statLine(m)?`<div class="lab-response-meta" title="TTFB：首个响应数据；TTFT：首个输出；TPS：端到端输出吞吐；TPOT：有连续流式增量和上游用量时的估算"><span>${esc(statLine(m))}</span></div>`:''}${m.status==='生成中'?'<span class="lab-cursor"></span>':''}</div></article>`;
  function appendStreamingText(element,text){
   const previous=element._streamText??element.textContent;
   if(text===previous)return;
@@ -154,14 +159,15 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  }
  const busy=value=>{setLabBusy(root,value);subscriptionControls();};
  currentViewDraw=()=>{if(root.isConnected){busy(!!controller);draw();}};
- function drawImages(){const el=$('#lab-images');if(el)el.innerHTML=pendingImages.map((image,index)=>`<span><img src="${image.url}" alt="待发送图片"><button type="button" data-remove-image="${index}" aria-label="移除图片">×</button></span>`).join('');}
+ function drawImages(){const el=$('#lab-images');if(el)el.innerHTML=pendingImages.map((image,index)=>`<span><img src="${image.url}" alt="待发送图片"><button type="button" data-remove-image="${index}" aria-label="移除图片">×</button></span>`).join('')+(pendingVideo?`<div class="lab-video-attachment"><strong>${esc(pendingVideo.name)}</strong><small>抽帧理解 · ${pendingVideo.frames.length} 帧 · 不含音轨</small><button type="button" data-remove-video aria-label="移除视频">×</button></div>`:'');}
  targetLabel();draw();drawImages();busy(!!controller);
  $('#lab-tools').oninput=()=>settings.tools=$('#lab-tools').value;
  $('#lab-image-button').onclick=()=>$('#lab-image-input').click();
- $('#lab-images').onclick=e=>{const b=e.target.closest('[data-remove-image]');if(b&&!controller){pendingImages.splice(Number(b.dataset.removeImage),1);drawImages();}};
+ $('#lab-images').onclick=e=>{if(e.target.closest('[data-remove-video]')&&!controller){pendingVideo=null;drawImages();return;}const b=e.target.closest('[data-remove-image]');if(b&&!controller){pendingImages.splice(Number(b.dataset.removeImage),1);drawImages();}};
  let addingImages=false;
  async function addImages(files){
   if(isPersonalTarget(settings.target)){$('#lab-error').textContent='当前订阅连接仅支持文本；图片可选择组织 API 视觉模型';return;}
+  if(pendingVideo||videoPreparation){$('#lab-error').textContent='请先移除视频后再添加图片';return;}
   if(controller||addingImages)return;const version=contextVersion;addingImages=true;const button=$('#lab-image-button');button.disabled=true;button.textContent='读取中…';
   try{
    for(const file of files){
@@ -175,6 +181,17 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
   }catch(error){if(root.isConnected)$('#lab-error').textContent=error.message;}
   finally{addingImages=false;if(root.isConnected){drawImages();button.disabled=!!controller;button.textContent='＋ 图片';}}
  }
+ $('#lab-video-button').onclick=()=>$('#lab-video-input').click();
+ $('#lab-video-input').onchange=async e=>{
+  const file=e.target.files?.[0];e.target.value='';if(!file||controller||addingImages||videoPreparation)return;
+  if(!supportsVideo()){$('#lab-error').textContent='请先选择 Kimi K3 模型';return;}
+  if(pendingImages.length){$('#lab-error').textContent='请先移除图片后再添加视频';return;}
+  const request=new AbortController(),version=contextVersion,target=settings.target;videoPreparation=request;
+  $('#lab-video-button').disabled=true;$('#lab-video-button').textContent='处理视频…';$('#lab-send').disabled=true;
+  try{const sampled=await extractVideoFrames(file,request.signal);if(!request.signal.aborted&&version===contextVersion&&target===settings.target){pendingVideo={name:file.name,...sampled};$('#lab-error').textContent='';drawImages();}}
+  catch(error){if(error.name!=='AbortError'&&version===contextVersion&&$('#lab-error'))$('#lab-error').textContent=error.message;}
+  finally{if(videoPreparation===request)videoPreparation=null;if($('#lab-video-button')){$('#lab-video-button').textContent='＋ 视频';$('#lab-send').disabled=!!controller;subscriptionControls();}}
+ };
  $('#lab-image-input').onchange=async e=>{await addImages(Array.from(e.target.files));e.target.value='';};
  $('#lab-prompt').addEventListener('paste',e=>{
   const images=Array.from(e.clipboardData?.items||[]).filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);
@@ -184,12 +201,12 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  $('#lab-messages').onscroll=()=>{const list=$('#lab-messages');$('#lab-jump').hidden=list.scrollHeight-list.scrollTop-list.clientHeight<100;};
 
 
- $('#lab-model').onchange=()=>{settings.target=$('#lab-model').value;targetLabel();};
+ $('#lab-model').onchange=()=>{videoPreparation?.abort();settings.target=$('#lab-model').value;targetLabel();};
  $('#lab-transport').onchange=()=>{settings.transport=$('#lab-transport').value;updateSummary();};
  $('#lab-thinking').onchange=()=>settings.thinking=$('#lab-thinking').value;
  $('#lab-show-thinking').onchange=()=>{settings.showThinking=$('#lab-show-thinking').checked;draw();};
  $('#lab-max-tokens').onchange=()=>settings.maxTokens=Number($('#lab-max-tokens').value);
- $('#lab-clear').onclick=()=>{if(!controller){history=[];conversationId=null;pendingImages=[];draft='';$('#lab-prompt').value='';resizePrompt();drawImages();draw();$('#lab-error').textContent='';}};
+ $('#lab-clear').onclick=()=>{if(!controller){contextVersion++;videoPreparation?.abort();pendingVideo=null;history=[];conversationId=null;pendingImages=[];draft='';$('#lab-prompt').value='';resizePrompt();drawImages();draw();$('#lab-error').textContent='';}};
  $('#lab-stop').onclick=()=>controller?.abort();
  $('#lab-messages').addEventListener('click',async e=>{
   const codeButton=e.target.closest('[data-copy-code]');
@@ -210,23 +227,25 @@ export function renderPlayground({state,token,tenantId,esc,refresh,embedded=fals
  });
  $('#lab-prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229&&!controller){e.preventDefault();if(!e.repeat)$('#lab-form').requestSubmit();}});
  $('#lab-form').onsubmit=async e=>{
-  e.preventDefault();e.stopPropagation();if(controller)return;if(addingImages){$('#lab-error').textContent='图片正在读取，请稍后发送';return;}
+  e.preventDefault();e.stopPropagation();if(controller)return;if(videoPreparation){$('#lab-error').textContent='视频正在处理，请稍后发送';return;}if(addingImages){$('#lab-error').textContent='图片正在读取，请稍后发送';return;}
   const personal=isPersonalTarget(settings.target),choice=selectedChoice(),requestTransport=personal?'sse':settings.transport;
   if(personal&&personalLoading&&!choice){$('#lab-error').textContent='个人订阅模型正在加载，请稍候；也可先选择组织模型。';return;}
-  const prompt=$('#lab-prompt').value.trim();if(!prompt&&!pendingImages.length)return;if(!choices.length&&!personal){$('#lab-error').textContent='请先在服务商管理中配置密钥、添加模型并启用服务商';return;}if(!personal&&(!Number.isInteger(settings.maxTokens)||settings.maxTokens<1||settings.maxTokens>131072)){$('#lab-error').textContent='最大输出 Tokens 需为 1 至 131072 的整数';return;}
+  const prompt=$('#lab-prompt').value.trim();if(!prompt&&!pendingImages.length&&!pendingVideo)return;if(!choices.length&&!personal){$('#lab-error').textContent='请先在服务商管理中配置密钥、添加模型并启用服务商';return;}if(!personal&&(!Number.isInteger(settings.maxTokens)||settings.maxTokens<1||settings.maxTokens>131072)){$('#lab-error').textContent='最大输出 Tokens 需为 1 至 131072 的整数';return;}
+  const videoContext=!!pendingVideo||history.some(m=>m.video);if(videoContext&&!supportsVideo()){$('#lab-error').textContent='此对话包含视频画面，请选择 Kimi K3 继续，或新建对话后切换模型。';return;}
   const capability=selectedCapability();if(settings.thinking==='disabled'&&capability?.canDisable===false){$('#lab-error').textContent=capability.reason;return;}
   if(history.at(-1)?.tool_calls?.length){$('#lab-error').textContent='上一次返回了工具调用，请通过 API 回传工具结果，或清空对话后重新测试。';return;}
   const context=history.filter(m=>m.status!=='已停止'&&m.status!=='失败').map(({role,content,reasoning_content,tool_calls})=>({role,content,...(reasoning_content?{reasoning_content}:{}),...(tool_calls?{tool_calls}:{})}));
   if(context.length>=99){$('#lab-error').textContent='对话达到上限，请清空对话后继续。';return;}
   const [model,upstream_model]=['auto','personal-auto'].includes(settings.target)?['auto']:JSON.parse(settings.target);
   let tools;try{tools=personal?[]:JSON.parse(settings.tools||'[]');if(!Array.isArray(tools))throw Error();}catch{$('#lab-error').textContent='tools 必须为有效 JSON 数组';return;}
-  const userContent=pendingImages.length?[{type:'text',text:prompt},...pendingImages.map(image=>({type:'image_url',image_url:{url:image.url}}))]:prompt;
-  let input;try{input=settings.target==='personal-auto'?{model:'auto',messages:planLabRequest({subscriptionId:'validation',model:'auto'},[...context,{role:'user',content:userContent}]).messages}:personal?planLabRequest(choice,[...context,{role:'user',content:userContent}]):{...(tools.length?{tools}:{}),model,...(upstream_model?{upstream_model,allow_fallback:true}:{}),messages:[...context,{role:'user',content:userContent}],max_tokens:settings.maxTokens,thinking_mode:settings.thinking};}catch(error){$('#lab-error').textContent=error.message;return;}
+  let videoContent;try{if(pendingVideo)videoContent=buildVideoFramesRequest({model:upstream_model,instruction:prompt||'请描述这段视频',maxOutputTokens:Math.min(settings.maxTokens,8192),...pendingVideo}).messages[0].content;}catch(error){$('#lab-error').textContent=error.message;return;}
+  const userContent=videoContent|| (pendingImages.length?[{type:'text',text:prompt},...pendingImages.map(image=>({type:'image_url',image_url:{url:image.url}}))]:prompt);
+  let input;try{input=settings.target==='personal-auto'?{model:'auto',messages:planLabRequest({subscriptionId:'validation',model:'auto'},[...context,{role:'user',content:userContent}]).messages}:personal?planLabRequest(choice,[...context,{role:'user',content:userContent}]):{...(tools.length?{tools}:{}),model,...(upstream_model?{upstream_model,allow_fallback:!videoContext}:{}),messages:[...context,{role:'user',content:userContent}],max_tokens:settings.maxTokens,thinking_mode:settings.thinking};}catch(error){$('#lab-error').textContent=error.message;return;}
   const response={role:'assistant',content:'',reasoning_content:'',status:'生成中',label:upstream_model||'自动路由',thinkingOpen:true};
   if(new Blob([JSON.stringify(input)]).size>10*1024*1024){$('#lab-error').textContent='含历史的请求超过 10 MB，请移除图片或清空对话';return;}
-  history.push({role:'user',content:userContent},response);pendingImages=[];drawImages();$('#lab-prompt').value='';draft='';resizePrompt();$('#lab-error').textContent='';
+  history.push({role:'user',content:userContent,...(pendingVideo?{video:{name:pendingVideo.name,prompt:prompt||'请描述这段视频',frameCount:pendingVideo.frames.length}}:{})},response);pendingVideo=null;pendingImages=[];drawImages();$('#lab-prompt').value='';draft='';resizePrompt();$('#lab-error').textContent='';
   const request=new AbortController(),version=contextVersion,conversationMessages=history;controller=request;busy(true);draw();
-  const title=history.find(item=>item.role==='user')?.content;const titleText=(typeof title==='string'?title:Array.isArray(title)?title.find(item=>item.type==='text')?.text||'图片对话':'模型对话').slice(0,180);
+  const firstUser=history.find(item=>item.role==='user');const title=firstUser?.video?.prompt||firstUser?.content;const titleText=(typeof title==='string'?title:Array.isArray(title)?title.find(item=>item.type==='text')?.text||'图片对话':'模型对话').slice(0,180);
   const originalTarget=settings.target;
   const snapshot=()=>conversationSnapshot(conversationMessages,256*1024,{target:originalTarget});
   try{const saved=await labHistoryRequest(tenantId,'',{...(conversationId?{id:conversationId}:{}),area:'chat',kind:'conversation',model:upstream_model||'自动路由',title:titleText,status:'running',result:snapshot()});if(version===contextVersion)conversationId=saved.id;}catch{/* History failure must not block a model call. */}

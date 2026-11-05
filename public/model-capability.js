@@ -1,3 +1,4 @@
+import {isKimiVideoModel} from './video-input.js';
 // 模型能力分类。
 // MOSS-VL API 是单轮图片/视频理解任务，尽管模型架构属于 VLM，不能归入普通对话。
 // 其他可多轮对话的视觉语言模型仍可归入 chat；能力不能只按通用 VL 字样推断。
@@ -37,11 +38,11 @@ export function modelCapabilities(model){
  const speech=mediaPatterns.speech.test(normalized)&&!enhancement;
  const transcription=mediaPatterns.transcription.test(normalized)&&!enhancement;
  const video=mediaPatterns.video.test(normalized)&&!enhancement;
- const vision=mossVisionPattern.test(normalized);
+ const vision=mossVisionPattern.test(normalized),videoUnderstanding=isKimiVideoModel(normalized);
  const mediaOnly=image||speech||transcription||video||vision;
  // 可对话：既非媒体生成模型，也非 embedding/rerank/OCR 等非对话模型。
  const chat=!mediaOnly&&!enhancement&&!nonChatPattern.test(normalized);
- return {image,speech,transcription,video,vision,mediaOnly,chat,enhancement};
+ return {image,speech,transcription,video,vision,mediaOnly,chat,enhancement,videoUnderstanding};
 }
 
 export function filterModelsForMediaKind(models,kind){
@@ -49,6 +50,6 @@ export function filterModelsForMediaKind(models,kind){
  if(kind==='speech')return models.filter(item=>item.modelCapabilities?.speech);
  if(kind==='transcription')return models.filter(item=>item.modelCapabilities?.transcription);
  if(kind==='video')return models.filter(item=>item.modelCapabilities?.video);
- if(kind==='vision')return models.filter(item=>item.modelCapabilities?.vision);
+ if(kind==='vision')return models.filter(item=>item.modelCapabilities?.vision||item.modelCapabilities?.videoUnderstanding);
  return models;
 }

@@ -1,3 +1,4 @@
+import {validateVideoURL} from './public/video-input.js';
 import {randomUUID} from 'node:crypto';
 export const NORMALIZED=Symbol('normalized request');
 export const generationPaths={'/api/chat':'chat','/v1/chat/completions':'chat','/v1/completions':'completions','/v1/responses':'responses','/v1/messages':'messages'};
@@ -28,6 +29,7 @@ export function contentParts(value){
  return value.map(part=>{
   object(part,'内容块');
   if(['text','input_text','output_text'].includes(part.type))return {type:'text',text:text(part.text)};
+  if(part.type==='video_url'){try{return {type:'video_url',video_url:{url:validateVideoURL(part.video_url?.url)}};}catch(error){throw protocolError(error.message);}}
   if(part.type==='image_url')return {type:'image_url',image_url:{url:imageURL(part.image_url?.url),...(part.image_url?.detail?{detail:part.image_url.detail}:{})}};
   if(part.type==='input_image')return {type:'image_url',image_url:{url:imageURL(part.image_url),...(part.detail?{detail:part.detail}:{})}};
   if(part.type==='image'){
@@ -35,7 +37,7 @@ export function contentParts(value){
    const url=source.type==='url'?source.url:source.type==='base64'?`data:${source.media_type};base64,${source.data}`:null;
    return {type:'image_url',image_url:{url:imageURL(url)}};
   }
-  throw protocolError('不支持的内容块：'+part.type+'；当前支持文本与图片输入');
+  throw protocolError('不支持的内容块：'+part.type+'；当前支持文本、图片与 Kimi K3 video_url 视频输入');
  });
 }
 const compact=value=>typeof value==='string'?value:contentParts(value);
@@ -47,6 +49,8 @@ function chatMessages(value){
   object(m,'消息');const role=m.role==='developer'?'system':m.role;
   if(!['system','user','assistant','tool'].includes(role))throw protocolError('消息角色无效');
   const out={role,content:compact(m.content??'')};
+  const videos=contentParts(out.content).filter(p=>p.type==='video_url');
+  if(videos.length&&(role!=='user'||videos.length>1))throw protocolError('每条 user 消息最多包含一个视频，其他角色不支持视频输入');
   if(m.tool_calls){if(role!=='assistant'||!Array.isArray(m.tool_calls))throw protocolError('工具调用只能出现在 assistant 消息');out.tool_calls=m.tool_calls.map(toolCall);}
   if(role==='tool')out.tool_call_id=text(m.tool_call_id,'工具结果 ID');
   if(m.reasoning_content!==undefined)out.reasoning_content=text(m.reasoning_content);
@@ -126,10 +130,14 @@ export function normalizeRequest(kind,raw){
  if(raw.parallel_tool_calls!==undefined){if(typeof raw.parallel_tool_calls!=='boolean')throw protocolError('parallel_tool_calls 必须为布尔值');input.parallel_tool_calls=raw.parallel_tool_calls;}
  if(kind==='messages'&&raw.tool_choice?.disable_parallel_tool_use!==undefined)input.parallel_tool_calls=!raw.tool_choice.disable_parallel_tool_use;
  if(input.top_p!==undefined&&(!Number.isFinite(input.top_p)||input.top_p<0||input.top_p>1))throw protocolError('top_p 需在 0–1 之间');
+ if(hasVideoInput(input)&&input.messages.some(m=>contentParts(m.content).some(p=>p.type==='video_url'&&p.video_url.url.startsWith('ms://')))&&(!input.model.includes('::')||input.allow_fallback!==false))throw protocolError('ms:// 文件仅属于原服务商：需指定 provider::model 并设置 allow_fallback=false');
  return input;
 }
+export function hasVideoInput(input){return input.messages.some(m=>contentParts(m.content).some(p=>p.type==='video_url'));}
+function rejectVideoConversion(input){if(hasVideoInput(input))throw protocolError('视频输入当前需使用 Kimi K3 的 Chat Completions 上游，不能转为 Anthropic 或 Responses');}
 function imageSource(part){const url=part.image_url.url;const match=/^data:([^;]+);base64,(.*)$/s.exec(url);return match?{type:'base64',media_type:match[1],data:match[2]}:{type:'url',url};}
 export function anthropicPayload(input,model){
+ rejectVideoConversion(input);
  const system=input.messages.filter(m=>m.role==='system').map(m=>plainText(m.content)).join('\n'),messages=[];
  for(const m of input.messages){if(m.role==='system')continue;const role=m.role==='tool'?'user':m.role;
   let content=m.role==='tool'?[{type:'tool_result',tool_use_id:m.tool_call_id,content:contentParts(m.content).map(p=>p.type==='text'?p:{type:'image',source:imageSource(p)}),...(m._toolError?{is_error:true}:{})}]:[
@@ -145,6 +153,7 @@ export function anthropicPayload(input,model){
  if(input.parallel_tool_calls===false&&payload.tools)payload.tool_choice={...(payload.tool_choice||{type:'auto'}),disable_parallel_tool_use:true};return payload;
 }
 export function responsesPayload(input,model){
+ rejectVideoConversion(input);
  if(input.stop)throw protocolError('Responses 上游不支持 stop 参数');
  const items=[];for(const m of input.messages){
   if(m.role==='tool'){items.push({type:'function_call_output',call_id:m.tool_call_id,output:typeof m.content==='string'?m.content:contentParts(m.content).map(p=>p.type==='text'?{type:'input_text',text:p.text}:{type:'input_image',image_url:p.image_url.url})});continue;}

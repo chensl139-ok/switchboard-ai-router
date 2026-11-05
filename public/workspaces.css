@@ -424,3 +424,12 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
 .image-prompt-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .image-prompt-heading button { flex: none; padding: 4px 10px; font-size: 12px; }
 .image-prompt-block p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Keep video attachments and sampled frames inside the conversation column. */
+.chat-workspace .lab-composer .lab-video-attachment { position: relative; display: flex; flex-direction: column; justify-content: center; flex: 0 0 min(100%,320px); min-width: 0; gap: 6px; padding: 10px 36px 10px 12px; border: 1px solid var(--ui-border); border-radius: 9px; background: var(--ui-surface-soft); }
+.lab-video-attachment strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.lab-video-attachment small { font-size: 11px; color: var(--ui-text-muted); }
+.lab-video-frames { margin-top: 10px; font-size: 12px; }
+.lab-video-frames summary { cursor: pointer; overflow-wrap: anywhere; }
+.lab-video-gallery { display: flex; flex-wrap: wrap; gap: 8px; }
+.lab-video-gallery .lab-message-image { width: 120px; height: 90px; object-fit: contain; margin: 0; }

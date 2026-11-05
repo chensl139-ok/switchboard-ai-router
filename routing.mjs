@@ -80,7 +80,7 @@ export function createRouter(state,usageStore,credentials={}){
   if(state.strategy==='manual')candidates=candidates.filter(p=>p.id===state.active);
   else if(!['economy','fallback','latency','weighted','rules'].includes(state.strategy))candidates=candidates.filter(p=>!recentlyFailed(p,p.model,now));
   if(state.strategy==='economy'){
-   if(input.messages.some(m=>contentParts(m.content).some(p=>p.type==='image_url')))throw fail('经济优先尚不估算图片费用，请显式指定模型或选择其他策略');
+   if(input.messages.some(m=>contentParts(m.content).some(p=>['image_url','video_url'].includes(p.type))))throw fail('经济优先尚不估算图片或视频费用，请显式指定模型或选择其他策略');
    const currency=state.routing.currency||'USD';const estimatedInput=Math.ceil(Buffer.byteLength(JSON.stringify(input.messages),'utf8')/3);const outputBudget=input.max_tokens||8192;
    const priced=candidates.flatMap(p=>p.models.filter(model=>channelsFor(p,model).length&&usablePrice(p.prices?.[model],currency,now)&&!recentlyFailed(p,model,now)).map(model=>({...p,model,channelOverride:channelsFor(p,model)[0],routeReason:`经济优先：${currency}，${priceAt(p.prices[model],now).periodLabel||'基础'}价格，按输入估算与输出上限比较`,estimatedRequestCost:priceEstimate(p.prices[model],estimatedInput,outputBudget,0,now)})));
    priced.sort((a,b)=>a.estimatedRequestCost-b.estimatedRequestCost||a.priority-b.priority||a.id.localeCompare(b.id));

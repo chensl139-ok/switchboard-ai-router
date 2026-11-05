@@ -1,6 +1,6 @@
 export function setLabBusy(root,value){
  const get=id=>root.querySelector('#'+id);
- for(const id of ['lab-model','lab-transport','lab-thinking','lab-max-tokens','lab-clear','lab-send','lab-tools','lab-image-button','lab-image-input']){
+ for(const id of ['lab-model','lab-transport','lab-thinking','lab-max-tokens','lab-clear','lab-send','lab-tools','lab-image-button','lab-image-input','lab-video-button','lab-video-input']){
   const element=get(id);if(element)element.disabled=value;
  }
  const prompt=get('lab-prompt');if(prompt)prompt.disabled=false;

@@ -167,6 +167,21 @@ OpenAI Chat 使用 `assistant.tool_calls` 和 `role:tool/tool_call_id`；Respons
 支持多工具调用及流式 JSON 参数增量。图片型工具结果可用于 Anthropic/Responses 上游；Chat Completions 上游不支持该类型时会明确拒绝。
 实验室允许填写工具定义并查看模型请求的工具调用；工具执行和结果回传需由 API 客户端完成。
 
+## Kimi K3 视频理解
+
+对话实验室选择 `kimi-k3` 后可添加本地视频，并在同一对话继续追问。媒体实验室也提供独立的视觉理解任务。默认采用抽帧理解：MP4/WebM/MOV，最大 6 MB、10 分钟，最多 12 帧，附带时间戳；不含音轨，可能遗漏短暂事件。对话使用固定模型，不回退至其他模型；历史只保留文字，不保存视频和图片，恢复时需重新添加素材。
+
+原生视频是否可用取决于渠道；支持图片或文本不代表支持 `video_url`。当前验证的 MOSS 渠道接受抽帧输入，原生视频返回 400。支持原生视频的渠道可使用：
+
+```sh
+curl http://127.0.0.1:3100/v1/chat/completions \
+  -H "Authorization: Bearer $ROUTER_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"provider::kimi-k3","allow_fallback":false,"max_tokens":8192,"messages":[{"role":"user","content":[{"type":"text","text":"描述视频中的变化"},{"type":"video_url","video_url":{"url":"ms://YOUR_FILE_ID"}}]}]}'
+```
+
+将 `provider` 替换为服务商 ID。`ms://` 文件必须来自同一上游账号的 `purpose=video` 上传，且必须指定服务商并关闭回退；平台不代理文件上传接口。网关也接受 HTTPS 视频地址及不超过 6 MB 的视频 Base64，但需上游明确支持对应格式。参考 [Kimi 官方视觉输入说明](https://platform.kimi.com/docs/guide/use-kimi-vision-model)。
+
 ## 上游协议选择
 
 服务商配置中可选 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages。相同的对外入口可转换到这三种上游。选择 Responses 时上游 Base URL 仍以 `/v1` 或相应 API 根路径结束，网关会追加 `/responses`。
@@ -175,7 +190,7 @@ OpenAI Chat 使用 `assistant.tool_calls` 和 `role:tool/tool_call_id`；Respons
 
 ## 明确不支持
 
-- 聊天消息中的音视频内容块、通用文档文件存储、内置工具。图片／语音／视频生成使用下方专用媒体接口。
+- 聊天消息中的音频内容块、通用文档文件存储、内置工具。视频输入仅适用于支持原生 `video_url` 的 Kimi K3 Chat Completions 上游，不转换为 Anthropic / Responses。图片／语音／视频生成使用下方专用媒体接口。
 - Responses 服务端会话：previous_response_id、conversation、background、store=true。
 - 传统 Completions 的多 prompt、token 数组、n>1、best_of、echo。
 - logprobs、JSON schema 结构化输出、模型特有的 reasoning 参数；现有 thinking_mode 扩展仍按模型能力校验。
