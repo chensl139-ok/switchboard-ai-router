@@ -1,5 +1,24 @@
 import {confirmAction} from './accounts.js';
 import {claudeCodeSnippets,codexSnippets} from './connect.js';
+
+export function keyPresentation(key,now=Date.now()){
+ const expires=Date.parse(key.expiresAt),starts=Date.parse(key.startsAt);
+ const status=key.enabled===false||key.status==='disabled'?'disabled':Number.isFinite(starts)&&starts>now?'scheduled':Number.isFinite(expires)&&expires<=now?'expired':Number.isFinite(starts)||Number.isFinite(expires)?'active':key.status||'active';
+ const expiring=['active','scheduled'].includes(status)&&expires>now&&expires-now<=7*86400000;
+ return {status,expiring,daysLeft:expiring?Math.ceil((expires-now)/86400000):null};
+}
+export function summarizeKeys(keys,now=Date.now()){
+ return keys.reduce((result,key)=>{const p=keyPresentation(key,now);result.total++;if(p.status==='active')result.active++;if(p.expiring)result.expiring++;return result;},{total:0,active:0,expiring:0});
+}
+export function matchesKeyFilter(key,query='',status='all',now=Date.now()){
+ const p=keyPresentation(key,now),search=[key.name,key.preview,key.id].join(' ').toLowerCase();
+ return search.includes(query.trim().toLowerCase())&&(status==='all'||(status==='expiring'?p.expiring:p.status===status));
+}
+export function keyQuotaProgress(used,limit){
+ const amount=Math.max(0,Number(used)||0),cap=Number(limit);
+ return limit===null||limit===undefined||!Number.isFinite(cap)||cap<=0?{percent:null,remaining:null}:{percent:Math.min(100,Math.max(0,Math.round(amount/cap*100))),remaining:Math.max(0,cap-amount)};
+}
+
 export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.querySelector('#breadcrumb')?.textContent==='API Key 管理'}){
  if(!isCurrent())return;
  const container=document.querySelector('#content');
@@ -9,12 +28,21 @@ export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.queryS
  const labels={active:'生效中',scheduled:'未生效',expired:'已过期',disabled:'已停用'};
  const tone={active:'green',scheduled:'',expired:'',disabled:''};
  const formatDate=value=>value?new Date(value).toLocaleString():'不限';
- const quota=(used,limit)=>`${used.toLocaleString()} / ${limit===null?'不限':limit.toLocaleString()}`;
+ const quota=(used,limit)=>`${Number(used||0).toLocaleString()} / ${limit==null?'不限':Number(limit).toLocaleString()}`;
+ const summary=summarizeKeys(data.keys);
+ const progress=(used,limit,label)=>{const p=keyQuotaProgress(used,limit);return p.percent===null?'<small class="muted">不设上限</small>':`<progress class="key-progress" max="100" value="${p.percent}" aria-label="${label}已用 ${p.percent}%">${p.percent}%</progress><small class="muted">已用 ${p.percent}% · 剩余 ${p.remaining.toLocaleString()} 次</small>`;};
  const exampleCurl=[`curl -sS '${location.origin}/v1/chat/completions' \\`,'  -H "Authorization: Bearer $ROUTER_API_KEY" \\','  -H "Content-Type: application/json" \\','  -d \'{"model":"auto","messages":[{"role":"user","content":"你好"}],"max_tokens":128}\''].join('\n');
  container.innerHTML=`<div class="heading key-page-heading"><div><div class="eyebrow">ACCESS & USAGE</div><h1>对外 API Key 管理</h1><p>为应用签发个人密钥，控制调用次数与有效期。仅你可以查看和管理自己创建的 Key，其他成员与管理员不可见。</p></div><div class="heading-actions key-heading-actions"><input type="search" id="key-search" placeholder="搜索名称 / 预览 / ID" aria-label="搜索密钥"><button id="new-key" class="primary">＋ 创建 API Key</button></div></div>
  ${data.legacyAvailable===false?'':`<div class="panel"><h2>旧版环境令牌</h2><p>环境变量 GATEWAY_TOKEN 当前${data.legacyEnabled?'仍可调用，不受下方各 Key 配额限制':'已停止对外调用'}。该令牌仅属于默认租户；建议给业务方创建受限 Key。</p><button id="legacy-key">${data.legacyEnabled?'关闭旧版调用令牌':'启用旧版调用令牌'}</button></div>`}
- <div class="section-title"><h2>我的应用密钥 · <span id="key-count">${data.keys.length}</span></h2><button id="refresh-keys" class="subtle">↻ 刷新</button></div>
- <div class="cards key-grid" id="key-list">${data.keys.map(key=>`<article class="card key-card" data-search="${esc((key.name+' '+key.preview+' '+key.id).toLowerCase())}"><div class="card-top"><span class="key-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-2-2 2-2m-5-1 2-2"/></svg></span><h3>${esc(key.name)}</h3><span class="tag ${tone[key.status]}">${labels[key.status]}</span></div><p class="model key-preview"><span>KEY</span><code>${esc(key.preview)}</code></p><div class="key-quota"><div><small>总调用</small><strong>${quota(key.requests,key.totalLimit)}</strong></div><div><small>今日</small><strong>${quota(key.dailyUsed,key.dailyLimit)}</strong></div><div><small>每分钟</small><strong>${key.rpmLimit??'不限'}</strong></div><div><small>成功 / 失败</small><strong>${key.successes} / ${key.failures}</strong></div></div><p class="key-window muted">生效 ${formatDate(key.startsAt)}<br>到期 ${formatDate(key.expiresAt)} · 最近使用 ${key.lastUsedAt?formatDate(key.lastUsedAt):'尚未调用'}</p><div class="card-actions"><button data-edit-key="${key.id}">修改限制</button><button data-toggle-key="${key.id}" class="subtle">${key.enabled?'停用':'启用'}</button><button data-delete-key="${key.id}" class="subtle danger-text">删除</button></div></article>`).join('')||'<div class="panel empty">尚无个人密钥。点击右上角创建；其他成员的密钥不会出现在这里。</div>'}</div>
+ <div class="key-summary" aria-label="我的密钥统计"><div class="card"><small>密钥总计</small><strong>${summary.total}</strong></div><div class="card"><small>生效中</small><strong>${summary.active}</strong></div><div class="card"><small>7 天内将到期</small><strong>${summary.expiring}</strong></div></div>
+ <div class="section-title"><h2>我的应用密钥 · <span id="key-count" aria-live="polite">${data.keys.length}</span></h2><div class="card-actions"><label>状态 <select id="key-status"><option value="all">全部状态</option><option value="active">生效中</option><option value="expiring">7 天内将到期</option><option value="scheduled">未生效</option><option value="expired">已过期</option><option value="disabled">已停用</option></select></label><a href="#connect">前往接入向导</a><button id="refresh-keys" class="subtle">↻ 刷新</button></div></div>
+ <div class="cards key-grid" id="key-list">${data.keys.map(key=>{const p=keyPresentation(key);return `<article class="card key-card" data-key-id="${esc(key.id)}" data-search="${esc((key.name+' '+key.preview+' '+key.id).toLowerCase())}">
+  <div class="card-top"><span class="key-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-2-2 2-2m-5-1 2-2"/></svg></span><h3>${esc(key.name)}</h3><span class="tag ${tone[p.status]||''}">${labels[p.status]||'未知状态'}</span></div>
+  <p class="model key-preview"><span>KEY</span><code>${esc(key.preview)}</code></p>
+  <div class="key-quota"><div><small>总调用</small><strong>${quota(key.requests,key.totalLimit)}</strong>${progress(key.requests,key.totalLimit,'总调用配额')}</div><div><small>今日</small><strong>${quota(key.dailyUsed,key.dailyLimit)}</strong>${progress(key.dailyUsed,key.dailyLimit,'每日配额')}</div><div><small>每分钟</small><strong>${esc(String(key.rpmLimit??'不限'))}</strong></div><div><small>成功 / 失败</small><strong>${esc(String(key.successes))} / ${esc(String(key.failures))}</strong></div></div>
+  <p class="key-window muted">生效 ${formatDate(key.startsAt)}<br>到期 ${formatDate(key.expiresAt)} · 最近使用 ${key.lastUsedAt?formatDate(key.lastUsedAt):'尚未调用'}${p.expiring?`<br><strong class="key-expiry-warning">${p.daysLeft===1?'24 小时内':p.daysLeft+' 天内'}到期，请及时检查或续期。</strong>`:''}</p>
+  <div class="card-actions"><button data-edit-key="${esc(key.id)}">修改限制</button><button data-toggle-key="${esc(key.id)}" class="subtle">${key.enabled?'停用':'启用'}</button><button data-delete-key="${esc(key.id)}" class="subtle danger-text">删除</button></div></article>`;}).join('')||'<div class="panel empty">尚无个人密钥。点击右上角创建；其他成员的密钥不会出现在这里。<a href="#connect">前往接入向导</a></div>'}</div>
+ <div id="key-no-match" class="panel empty" role="status" hidden>没有匹配的个人密钥，请调整搜索或状态筛选。<button type="button" id="key-reset-filter">清除筛选</button> <a href="#connect">前往接入向导</a></div>
  <div class="panel section-space key-curl-panel"><div class="key-curl-title"><div><h2>用 curl 验证密钥</h2><p class="muted">先在本机终端执行 <code>export ROUTER_API_KEY='新建时复制的密钥'</code>，再复制请求；代码不会展示或复制已保存的密钥。</p></div><button type="button" id="copy-key-curl">复制 curl</button></div><pre id="key-curl-example">${esc(exampleCurl)}</pre><p class="muted">外部设备请将示例中的本机地址换成可访问的 HTTPS 地址。更多语言和协议见 <a href="#api">API 文档</a>。</p></div>
  <div class="info">HTTP、SSE、WebSocket 共用每个 Key 的配额。每日配额按 UTC 零点（北京时间 08:00）重置。通过参数与路由校验、开始执行的生成请求计为一次；上游失败或取消也计次，路由内部回退不重复计次。模型列表查询不占生成配额。Token 仅统计上游返回的用量，未返回用量时不估算、不作为配额限额。</div>
  <dialog id="key-editor"><form id="key-form"><div class="modal-title"><h2 id="key-title">创建 API Key</h2><button type="button" id="close-key" class="subtle" aria-label="关闭 Key 配置">✕</button></div><div class="key-editor-body"><label>名称<input name="name" required maxlength="80" placeholder="例如：业务系统 / 测试环境"></label><div class="form-grid"><label>开始生效（本地时间）<input name="startsAt" type="datetime-local"></label><label>过期时间（本地时间）<input name="expiresAt" type="datetime-local"></label></div><label>总调用次数上限<input name="totalLimit" type="number" min="1" max="1000000000" placeholder="留空不限"></label><label>每日调用次数上限<input name="dailyLimit" type="number" min="1" max="1000000000" placeholder="留空不限"></label><label>每分钟调用次数上限<input name="rpmLimit" type="number" min="1" max="1000000000" placeholder="留空不限"></label><label class="check"><input name="enabled" type="checkbox" checked> 启用</label><p class="muted">留空生效时间表示立即生效；留空过期时间表示不过期。修改配额不会重置已用次数。停用/到期阻止新请求，已开始的请求允许完成。</p></div><div class="key-editor-actions"><p id="key-error" role="alert"></p><button class="primary" id="save-key">创建</button></div></form></dialog>
@@ -22,7 +50,7 @@ export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.queryS
  container.querySelector('.key-curl-panel').insertAdjacentHTML('beforeend','<p class="muted">Claude Code 配置中的 <code>ANTHROPIC_AUTH_TOKEN</code> 只填完整原始 Key；不要在值中加 <code>Bearer </code>。Claude Code 会自动添加此前缀。服务商的上游密钥不能用于这里的对外调用。</p>');
  container.querySelector('.key-curl-title').insertAdjacentHTML('afterend','<label>验证客户端<select id="key-client"><option value="generic">通用客户端 · Chat Completions</option><option value="claude">Claude Code · Messages</option><option value="codex">Codex · Responses</option></select></label><p class="muted">同一把平台 Key、同一模型选择，网关自动适配上游协议。auto 使用组织路由；客户端高级功能有兼容边界，详见 <a href="#connect">接入向导</a>。</p>');
  let keyExample=exampleCurl;
- container.querySelector('#key-client').onchange=event=>{const client=event.target.value,options={origin:location.origin,token:'$ROUTER_API_KEY',model:'auto'};keyExample=client==='claude'?claudeCodeSnippets(options).verify:client==='codex'?codexSnippets(options).verify:exampleCurl;container.querySelector('#key-curl-example').textContent=keyExample;};
+ container.querySelector('#key-client').onchange=event=>{const client=event.target.value,options={origin:location.origin,token:'$ROUTER_API_KEY',model:'auto',tokenVariable:true};keyExample=client==='claude'?claudeCodeSnippets(options).verify:client==='codex'?codexSnippets(options).verify:exampleCurl;container.querySelector('#key-curl-example').textContent=keyExample;};
  container.querySelector('#key-created').insertAdjacentHTML('beforeend','<p class="muted">用于 Claude Code 时，只复制上方 Key 本身到 <code>ANTHROPIC_AUTH_TOKEN</code>；不要连同 <code>Bearer </code> 一起复制。</p>');
  const editor=container.querySelector('#key-editor'),form=container.querySelector('#key-form');let editing=null;
  const localDate=iso=>{if(!iso)return '';const d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};
@@ -32,7 +60,15 @@ export async function renderApiKeys({api,esc,toast,isCurrent=()=>document.queryS
  container.querySelector('#close-key').onclick=()=>editor.close();
  container.querySelector('#refresh-keys').onclick=reload;
  container.querySelector('#copy-key-curl').onclick=async()=>{try{await navigator.clipboard.writeText(keyExample);toast('curl 已复制；请先在终端设置 ROUTER_API_KEY');}catch{toast('剪贴板不可用，请手动复制命令');}};
- container.querySelector('#key-search').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();let n=0;container.querySelectorAll('[data-search]').forEach(card=>{const show=!q||card.dataset.search.includes(q);card.hidden=!show;if(show)n++;});container.querySelector('#key-count').textContent=String(n);});
+ const filterKeys=()=>{
+  const query=container.querySelector('#key-search').value,status=container.querySelector('#key-status').value;let count=0;
+  container.querySelectorAll('[data-search]').forEach(card=>{const key=data.keys.find(k=>k.id===card.dataset.keyId),show=!!key&&matchesKeyFilter(key,query,status);card.hidden=!show;card.style.display=show?'':'none';if(show)count++;});
+  container.querySelector('#key-count').textContent=String(count);
+  container.querySelector('#key-no-match').hidden=count>0||data.keys.length===0;
+ };
+ container.querySelector('#key-search').addEventListener('input',filterKeys);
+ container.querySelector('#key-status').addEventListener('change',filterKeys);
+ container.querySelector('#key-reset-filter').onclick=()=>{container.querySelector('#key-search').value='';container.querySelector('#key-status').value='all';filterKeys();};
  if(container.querySelector('#legacy-key'))container.querySelector('#legacy-key').onclick=async e=>{e.target.disabled=true;try{await api('/api/keys/legacy',{enabled:!data.legacyEnabled});await reload()}catch(error){toast(error.message);e.target.disabled=false}};
  container.querySelectorAll('[data-delete-key]').forEach(button=>button.onclick=()=>{const key=data.keys.find(k=>k.id===button.dataset.deleteKey);confirmAction(container,'删除 '+key.name+'？','删除后不能恢复或重新启用。已有调用日志和计数保留，已开始的请求允许完成。',async()=>{await api('/api/keys/delete',{id:key.id});await reload();},toast);});
  container.querySelectorAll('[data-edit-key]').forEach(button=>button.onclick=()=>open(data.keys.find(k=>k.id===button.dataset.editKey)));

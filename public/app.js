@@ -17,8 +17,10 @@ const stopPlayground=()=>pageLoader.peek('playground')?.stopPlayground();
 const resetPlayground=()=>pageLoader.peek('playground')?.resetPlayground();
 const stopMediaLab=()=>pageLoader.peek('media')?.stopMediaLab();
 const resetMediaLab=()=>pageLoader.peek('media')?.resetMediaLab();
+let connectCleanup=null;
+const stopConnect=()=>{connectCleanup?.();connectCleanup=null;};
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
-let token='',profile=null,state,tab=location.hash.slice(1)||'overview',toastTimer,providerPoll,labTarget=null,commandMenu;
+let token='',profile=null,state,tab=location.hash.slice(1).split('?')[0]||'overview',pageQuery=location.hash.split('?').slice(1).join('?'),toastTimer,providerPoll,labTarget=null,commandMenu;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
 const names={overview:'概览',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
 const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
@@ -74,8 +76,9 @@ function bindNavigationHint(element,label,enabled=()=>true){
 }
 async function api(url,data){const accountAtCall=profile,tenantAtCall=profile?.tenantId;const r=await fetch(url,{method:data?'POST':'GET',headers:{...(token?{authorization:`Bearer ${token}`}:{ }),'content-type':'application/json',...(profile?.tenantId?{'X-Tenant-ID':profile.tenantId}:{})},...(data?{body:JSON.stringify(data)}:{})});const b=await r.json();if(profile!==accountAtCall||profile?.tenantId!==tenantAtCall)throw Error('账户或租户已切换，请重试');if(!r.ok){if(r.status===401)showLogin();const id=r.headers.get('x-request-id');throw Error((b.error?.message||'请求失败')+(id?` · 请求 ID ${id}`:''))}return b}
 function toast(s){clearTimeout(toastTimer);$('#toast').textContent=s;$('#toast').style.display='block';toastTimer=setTimeout(()=>$('#toast').style.display='none',4500)}
-function navigate(next){if(!profile||!state||!names[next]||next===tab)return;tab=next;history.pushState(null,'','#'+tab);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
-window.addEventListener('popstate',()=>{if(!state)return;tab=names[location.hash.slice(1)]?location.hash.slice(1):'overview';render();});
+function navigate(next){if(!profile||!state)return;const [view,query='']=next.split('?');if(!names[view]||(view===tab&&query===pageQuery))return;tab=view;pageQuery=query;history.pushState(null,'','#'+next);render();window.scrollTo({top:0});$('#content').focus({preventScroll:true});}
+window.addEventListener('popstate',()=>{if(!state)return;const [view,query='']=location.hash.slice(1).split('?');tab=names[view]?view:'overview';pageQuery=names[view]?query:'';render();});
+document.addEventListener('click',event=>{const link=event.target.closest('a[href^="#"]');if(!link||event.defaultPrevented||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const next=link.hash.slice(1);if(names[next.split('?')[0]]){event.preventDefault();navigate(next);}});
 const ready=providerReady;
 const heading=(title,desc,action='')=>`<div class="heading"><div><h1>${title}</h1><p>${desc}</p></div>${action}</div>`;
 function cards(manage=false){return providerCards({state,esc,isManager:isManager(),manage})}
@@ -148,7 +151,14 @@ async function renderPage(root){
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);
  switch(tab){
-  case 'overview':void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(isCurrent())renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(isCurrent()){const chain=root.querySelector('#dashboard-route-chain'),note=root.querySelector('#dashboard-route-note');if(chain)chain.textContent='路由预览暂不可用';if(note)note.textContent=error.message;}});void api('/api/analytics?days=7').then(summary=>{if(isCurrent())renderDashboardSummary(root,summary);}).catch(()=>{const detail=isCurrent()&&root.querySelector('#dashboard-final-detail');if(detail)detail.textContent='用量数据暂不可用';});break;
+  case 'overview':{
+   if(profile.role!=='viewer')void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(isCurrent())renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(isCurrent()){root.querySelector('#dashboard-route-chain').textContent='路由预览暂不可用';root.querySelector('#dashboard-route-note').textContent=error.message;}});
+   else{root.querySelector('#dashboard-route-chain').textContent='只读账户可查看用量与日志';root.querySelector('#dashboard-route-note').textContent='路由预览需要成员或管理权限。';}
+   const period=root.querySelector('#dashboard-days'),requestedDays=new URLSearchParams(pageQuery).get('days');let version=0;
+   if(['7','30','90'].includes(requestedDays))period.value=requestedDays;
+   const load=async()=>{const current=++version;for(const id of ['requests','final-rate','tokens','average-latency','failed-attempts'])root.querySelector('#dashboard-'+id).textContent='—';root.querySelector('#dashboard-final-detail').textContent='正在读取统计…';root.querySelector('#dashboard-token-detail').textContent='仅统计上游返回的用量';root.querySelector('#dashboard-trend').textContent='正在读取趋势…';root.querySelector('#dashboard-costs').textContent='正在读取费用…';try{const [summary,charts]=await Promise.all([api('/api/analytics?days='+period.value),pageLoader.load('analytics')]);if(isCurrent()&&version===current)renderDashboardSummary(root,summary,esc,charts.renderUsageChart,charts.dailySeries);}catch{if(isCurrent()&&version===current){root.querySelector('#dashboard-final-detail').textContent='统计读取失败，请刷新重试';root.querySelector('#dashboard-trend').textContent='趋势暂不可用';root.querySelector('#dashboard-costs').textContent='费用暂不可用';}}};
+   period.onchange=()=>{pageQuery='days='+period.value;history.replaceState(null,'','#overview?'+pageQuery);void load();};void load();break;
+  }
   case 'providers':renderProviderFilter(root);if(profile?.chatgptPlan&&profile.role!=='viewer')void Promise.all([loadPersonal(),pageLoader.load('planProviders')]).then(([,personal])=>{if(isCurrent())personal.mountPlanProviders({root,state,api,esc,toast,isCurrent,onRun:(id,model)=>{labTarget=JSON.stringify([id,model]);navigate('playground');},onChange:()=>root.querySelector('#provider-search')?.dispatchEvent(new Event('input'))});}).catch(()=>{if(isCurrent())toast('订阅卡片暂时无法加载，请刷新重试');});break;
   case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;},embedded:true});break;
   case 'playground':{const personalLoading=Boolean(profile?.chatgptPlan&&profile.role!=='viewer');const lab=renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget,personalLoading,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;if(personalLoading&&lab?.updatePersonalProviders)void loadPersonal().then(providers=>{if(isCurrent())lab.updatePersonalProviders(providers);});break;}
@@ -157,12 +167,12 @@ async function renderPage(root){
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;
   case 'audit':void renderAudit({esc,profile});root.querySelector('.heading')?.insertAdjacentHTML('afterend',membersTabs);break;
   case 'account':void renderAccount({profile,esc,toast,onReady:accountReady});break;
-  case 'analytics':void renderAnalytics({api,esc,isOwner:profile?.role==='owner',toast});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
+  case 'analytics':void renderAnalytics({api,esc,isOwner:profile?.role==='owner',toast,initialFilters:Object.fromEntries(new URLSearchParams(pageQuery))});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
   case 'prices':renderPrices({state,api,esc,toast,onSaved:s=>{state=s;}});root.querySelector('.heading')?.insertAdjacentHTML('afterend',analyticsTabs);break;
-  case 'logs':void renderLogs({api,esc,state});break;
+  case 'logs':void renderLogs({api,esc,state,initialFilters:Object.fromEntries(new URLSearchParams(pageQuery))});break;
   case 'routing':{const options={state,api,esc,toast,personalAvailable:profile?.chatgptPlan&&profile.role!=='viewer',canManageShared:isManager(),updated:s=>{state=s;render();}};if(isManager())renderRouting(options);else{const own=await api('/api/account/chatgpt/routing');if(isCurrent())renderRouting({...options,state:own});}break;}
   case 'keys':{const keyUser=profile.user.id,keyTenant=profile.tenantId;void renderApiKeys({api,esc,toast,isCurrent:()=>tab==='keys'&&profile?.user?.id===keyUser&&profile?.tenantId===keyTenant});break;}
-  case 'connect':{const connUser=profile.user.id,connTenant=profile.tenantId;void renderConnect({api,esc,toast,isCurrent:()=>tab==='connect'&&profile?.user?.id===connUser&&profile?.tenantId===connTenant});break;}
+  case 'connect':{const connUser=profile.user.id,connTenant=profile.tenantId;const dispose=await renderConnect({api,esc,toast,tenantId:connTenant,isCurrent:()=>root.isConnected&&tab==='connect'&&profile?.user?.id===connUser&&profile?.tenantId===connTenant});if(isCurrent())connectCleanup=dispose;else dispose?.();break;}
   case 'subscription':void renderSubscriptions({profile,esc,toast});break;
  }
  }catch{
@@ -176,10 +186,10 @@ function render(){
  if(!profile||!state)return;
  if(tab==='connections')tab='providers'; // Old personal-connection bookmarks.
  if(providerPoll){clearInterval(providerPoll.timer);providerPoll=undefined;}
- stopPlayground();stopMediaLab();
- if(!canOpen(tab))tab='overview';
- history.replaceState(null,'','#'+tab);document.title=names[tab]+' · Switchboard';
- const root=document.createElement('section');root.id='content';root.tabIndex=-1;
+ stopPlayground();stopMediaLab();stopConnect();
+ if(!canOpen(tab)){tab='overview';pageQuery='';}
+ history.replaceState(null,'','#'+tab+(pageQuery?'?'+pageQuery:''));document.title=names[tab]+' · Switchboard';
+ const root=document.createElement('section');root.id='content';root.tabIndex=-1;root.dataset.page=tab;
  if(groups.playground.includes(tab))root.classList.add('lab-page');
  $('#content').replaceWith(root);
  syncNavigation();
@@ -240,7 +250,7 @@ $('#fetch-models').onclick=async()=>{
  }catch(e){if(epoch===modelEpoch)$('#model-status').textContent=e.message}
  finally{if(epoch===modelEpoch){b.disabled=false;b.textContent='↻ 重新获取所有模型'}}
 };
- $('#logout').onclick=async()=>{try{await accountRequest('logout',{});commandMenu?.close();clearTimeout(providerPoll?.timer);providerPoll=undefined;profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
+ $('#logout').onclick=async()=>{try{await accountRequest('logout',{});commandMenu?.close();stopConnect();clearTimeout(providerPoll?.timer);providerPoll=undefined;profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
 $('#close-edit').onclick=closeEdit;
 $('#cancel-edit').onclick=closeEdit;
 $('#edit').addEventListener('close',()=>{formDirty=false;resetModels();editingProviderId='';modelChannelAssignments={};});
@@ -260,14 +270,14 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
 document.addEventListener('change',async e=>{const id=e.target.dataset.providerModel;if(!id)return;const select=e.target;select.disabled=true;try{state=await api('/api/provider/switch-model',{id,model:select.value});render();toast('服务商模型已切换，下一次调用生效')}catch(err){select.value=state.providers.find(p=>p.id===id).model;toast(err.message)}finally{select.disabled=false}});
 
 async function accountReady(value){
- commandMenu?.close();
+ commandMenu?.close();stopConnect();
  clearTimeout(providerPoll?.timer);providerPoll=undefined;
  if(value.chatgptPlan===undefined)value=await accountRequest('me');
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
  state=undefined;
  document.body.classList.remove('app-ready');
  $('#content').innerHTML='<div class="view-loading" role="status"><span class="loading-dot"></span>正在切换工作空间…</div>';
- if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();resetMediaLab();tab='overview';}
+ if(previous&&(previous!==profile.tenantId||previousUser!==profile.user.id)){resetPlayground();resetMediaLab();tab='overview';pageQuery='';}
  renderTenantChip(profile);
  document.querySelector('#current-account').textContent=profile.user.name+' · '+(profile.platformAccess?'平台主账号':({owner:'所有者',admin:'管理员',member:'成员',viewer:'只读'}[profile.role]||profile.role));
  state=await api('/api/state');if(!canOpen(tab))tab='overview';render();document.body.classList.add('app-ready');

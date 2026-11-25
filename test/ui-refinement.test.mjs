@@ -56,6 +56,17 @@ test('工作空间加载期间导航、重新渲染和搜索均等待当前账�
  context.navigate('providers');assert.deepEqual(navigated,['#providers','render']);assert.equal(context.tab,'providers');
 });
 
+test('跨页与同页跳转保留筛选参数，未知页面不改变当前视图',()=>{
+ const navigate=read('public/app.js').match(/^function navigate\(next\).*$/m)[0],navigated=[];
+ const context={profile:{tenantId:'one'},state:{},tab:'overview',pageQuery:'',names:{overview:'概览',logs:'日志'},history:{pushState:(_a,_b,hash)=>navigated.push(hash)},window:{scrollTo(){}},$:()=>({focus(){}}),render:()=>{}};
+ runInNewContext(navigate+';this.navigate=navigate;',context);
+ context.navigate('logs?status=error&days=30');
+ assert.equal(context.tab,'logs');assert.equal(context.pageQuery,'status=error&days=30');
+ context.navigate('logs?requestId=a%26b');assert.equal(context.pageQuery,'requestId=a%26b');
+ context.navigate('logs?requestId=a%26b');context.navigate('unknown?token=never');
+ assert.deepEqual(navigated,['#logs?status=error&days=30','#logs?requestId=a%26b']);
+});
+
 test('同租户换账号后拒绝旧 API 响应，当前账号请求仍可成功',async()=>{
  const api=read('public/app.js').match(/^async function api\(url,data\).*$/m)[0];
  let finish,bodyReady;
