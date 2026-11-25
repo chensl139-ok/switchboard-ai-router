@@ -4,11 +4,12 @@ import {filterModelsForMediaKind,modelCapabilities} from './model-capability.js'
 import {buildVisionRequest,visionOutputText} from './vision-form.js';
 import {imageGenerationCapabilities,buildImageOptions,validateMossImagePayload,imageGenerationResult,imagePromptStatus} from './image-generation.js';
 import {labHistoryRequest,mountLabHistory} from './lab-history-client.js';
+import {taskReplay} from './workspace.js';
 let controller=null,objectUrl=null,pollTimer=null,viewEpoch=0;const activeRequests=new Set();
 const kinds={image:{label:'图片生成',hint:'根据文字描述生成图片',action:'生成图片'},speech:{label:'语音合成',hint:'将文字转换为自然语音',action:'生成语音'},transcription:{label:'音频转文字',hint:'上传音频并提取文本',action:'开始转录'},video:{label:'视频生成',hint:'创建文字或图片驱动的视频',action:'生成视频'},vision:{label:'视觉理解',hint:'理解图片或视频并输出文本',action:'开始理解'}};
 export function stopMediaLab(){viewEpoch++;controller=null;clearInterval(pollTimer);pollTimer=null;}
 export function resetMediaLab(){stopMediaLab();for(const request of activeRequests)request.abort();activeRequests.clear();if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null;}}
-export function renderMediaLab({state,tenantId,esc,embedded=false}){
+export function renderMediaLab({state,tenantId,esc,embedded=false,initialFilters={}}){
  const epoch=viewEpoch,root=document.querySelector('#content'),active=()=>epoch===viewEpoch&&root.isConnected;
  root.classList.add('media-workspace-page');
  const models=state.providers.filter(provider=>provider.enabled&&(provider.hasKey||provider.hasMeteredKey)&&provider.protocol!=='anthropic').flatMap(provider=>{let videoCompatible=false;try{videoCompatible=['api.siliconflow.cn','api.siliconflow.com'].includes(new URL(provider.baseUrl).hostname);}catch{/* Invalid URLs are rejected when providers are saved. */}return provider.models.map(model=>({id:provider.id+'::'+model,model,baseUrl:provider.baseUrl,provider:provider.id,name:provider.name+' / '+model,videoCompatible,modelCapabilities:modelCapabilities(model)}));});
@@ -96,6 +97,12 @@ export function renderMediaLab({state,tenantId,esc,embedded=false}){
   $('#media-form-title').textContent=kinds[kind].label;$('#media-result-title').textContent=kind==='vision'?'理解结果':kind==='transcription'?'转录结果':'生成结果';$('#media-provider-note').hidden=kind!=='video';$('#media-text-label').hidden=kind==='transcription';$('#media-text-label').firstChild.textContent=kind==='speech'?'待合成文本':kind==='video'?'视频描述':kind==='vision'?'理解指令':'提示词';$('#media-text').placeholder=kind==='vision'?'例如：描述图中的主体、文字与场景，并指出不确定之处':'描述你希望生成的内容，细节越明确，结果越稳定';$('#media-text').required=kind!=='transcription';$('#media-size-label').hidden=!['image','video'].includes(kind);$('#media-voice-label').hidden=kind!=='speech';$('#media-file-label').hidden=kind!=='transcription';$('#media-file').required=kind==='transcription';$('#media-image-label').hidden=kind!=='video';$('#media-size').value=kind==='video'?'1280x720':'1024x1024';$('#media-send').textContent=kinds[kind].action;updateVisionFields();refreshModels();
  }
  root.querySelectorAll('[data-media-kind]').forEach(button=>button.onclick=()=>selectKind(button.dataset.mediaKind));selectKind('image');
+ const applyInitial=input=>{if(!active())return;const kind=Object.hasOwn(kinds,input.kind)?input.kind:'image';selectKind(kind);if(input.model){const available=supportedModels(kind).some(model=>model.id===input.model);$('#media-model').value=available?input.model:'';$('#media-send').disabled=!available;if(!available)$('#media-error').textContent='原模型当前不可用，请明确选择其他模型后再提交。';updateVideoFields();updateImageFields();updateVisionFields();}if(typeof input.prompt==='string')$('#media-text').value=input.prompt.slice(0,$('#media-text').maxLength);if(typeof input.size==='string'&&input.size)$('#media-size').value=input.size;};
+ applyInitial(initialFilters);
+ if(typeof initialFilters.fromTask==='string'){
+  $('#media-send').disabled=true;
+  void labHistoryRequest(tenantId,'/item?id='+encodeURIComponent(initialFilters.fromTask)).then(row=>{if(!active())return;if(row.area!=='media')throw Error('这条记录不是媒体任务');const replay=taskReplay(row);applyInitial(replay);const note=document.createElement('p');note.className='info';note.textContent=replay.missing?'已回填可用参数；原素材或提示词未完整保存，请补齐并核对后再生成。':'已回填原提示词、模型与尺寸。其他参数使用当前默认值，请核对后手动生成。';$('#media-form').prepend(note);}).catch(error=>{if(active()){$('#media-error').textContent=error.message;$('#media-send').disabled=true;}});
+ }
  $('.media-kind-grid').onkeydown=event=>{const tabs=[...root.querySelectorAll('[data-media-kind]')],current=tabs.indexOf(event.target);if(current<0)return;let next;if(event.key==='ArrowRight')next=(current+1)%tabs.length;else if(event.key==='ArrowLeft')next=(current+tabs.length-1)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;event.preventDefault();selectKind(tabs[next].dataset.mediaKind);tabs[next].focus();};
  $('#media-vision-mode').onchange=()=>{clearSelection();updateVisionFields();};
  $('#media-vision-type').onchange=()=>{clearSelection();$('#media-vision-upload').value='';refreshModels();};

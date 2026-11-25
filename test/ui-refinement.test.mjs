@@ -34,7 +34,7 @@ test('搜索菜单不截获输入法确认键，正常方向键与回车仍可�
   }
   const down=key('ArrowDown');input.onkeydown(down);assert.equal(down.prevented,true);
   const enter=key('Enter');input.onkeydown(enter);assert.equal(enter.prevented,true);
-  assert.equal(dialog.open,false);assert.deepEqual(opened,['providers']);
+  assert.equal(dialog.open,false);assert.deepEqual(opened,['tasks']);
  }finally{if(previousDocument===undefined)delete globalThis.document;else globalThis.document=previousDocument;}
 });
 
@@ -220,7 +220,7 @@ test('实验室历史按需读取详情，对话增量只更新末条消息',()=
  const history=read('public/lab-history-client.js'),chat=read('public/playground.js'),media=read('public/media-lab.js'),css=read('public/interface.css');
  assert.match(history,/labHistoryRequest\(tenantId,'\/item\?id='/);assert.match(history,/document\.visibilityState==='visible'/);
  assert.match(history,/lab-history-more/);assert.match(history,/lab-history-dialog/);
- assert.match(chat,/draw\(true\)/);assert.match(chat,/list\.lastElementChild\.outerHTML=messageHtml/);
+ assert.match(chat,/activeConversation===owner&&client===conversationClient\)currentViewDraw\?\.\(true\)/);assert.match(chat,/list\.lastElementChild\.outerHTML=messageHtml/);
  assert.match(chat,/if\(m\.status==='生成中'\)return esc\(text\)/);
  assert.match(media,/刷新远程任务状态/);assert.match(css,/\.lab-history-dialog-content\{overflow:auto/);
 });
@@ -228,7 +228,7 @@ test('实验室历史按需读取详情，对话增量只更新末条消息',()=
 test('实验室不显示缓存指标，历史详情和对比保留性能与用量指标',()=>{
  const chat=read('public/playground.js'),compare=read('public/ModelCompare.vue');
  assert.doesNotMatch(chat,/本次输入缓存|cacheHitLabel/);assert.doesNotMatch(compare,/本次输入缓存|cacheHitLabel/);
- assert.match(chat,/conversationSnapshot\(conversationMessages[,)]/);assert.doesNotMatch(chat,/slice\(0,1200\)/);
+ assert.match(chat,/client\.start\(owner,\{messages:conversationMessages/);assert.match(read('public/conversations.js'),/会话超过 1 MiB/);assert.doesNotMatch(chat,/slice\(0,1200\)/);
  assert.match(chat,/TTFB/);assert.match(chat,/TTFT/);assert.match(chat,/TPOT/);
  const history=read('public/lab-history-client.js');assert.match(history,/new AbortController/);assert.match(history,/复制内容/);assert.match(history,/导出记录/);assert.match(history,/limit:'20'/);
 });
@@ -367,7 +367,7 @@ test('OpenRouter 参考价明确分开采集时间和平台复核期限',()=>{
 
 test('模型目录首次进入就渲染已配置模型，并标识鉴权失败与媒体模型',()=>{
  const source=read('public/model-catalog.js');
- assert.match(source,/list\.onclick=async[\s\S]+\r?\n draw\(\);\r?\n\}/);
+ assert.match(source,/list\.onclick=async[\s\S]+\r?\n draw\(\);/);assert.match(source,/\n draw\(\);\n if\(navigate&&canGenerate\)/);
  assert.match(source,/providerHealth\(configured,state\.logs\)/);
  assert.match(source,/媒体 \/ 非对话/);
 });

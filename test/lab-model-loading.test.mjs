@@ -15,7 +15,7 @@ function pageHarness(){
  let finish,fail;
  const pending=new Promise((resolve,reject)=>{finish=resolve;fail=reject;});
  const mounted=[],updates=[],notices=[],root={isConnected:true};
- const context={tab:'playground',profile:{tenantId:'one',role:'member',chatgptPlan:true},state:{providers:[shared],personalProviders:[personal]},
+ const context={tab:'playground',profile:{tenantId:'one',role:'member',chatgptPlan:true,user:{id:'one-user'}},pageQuery:'',URLSearchParams,state:{providers:[shared],personalProviders:[personal]},
   pageLoader:{load:async()=>({renderPlayground:options=>{mounted.push(options);return {updatePersonalProviders:value=>updates.push(value)};}})},
   api:()=>pending,toast:notice=>notices.push(notice),pageTabs:()=>'',isManager:()=>false,token:'',esc:String,
   render:()=>assert.fail('Catalog loading must not rerender the page'),navigate(){},labTarget:JSON.stringify([personal.id,'gpt-5'])};

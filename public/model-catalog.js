@@ -1,6 +1,7 @@
 import {providerHealth} from './provider-ui.js';
 import {modelCapabilities,enhancementLabel} from './model-capability.js';
 import {inferAgentProtocol} from './connect.js';
+import {modelWorkspaceTarget} from './lab-targets.js';
 
 const PAGE_SIZE=40;
 const modelList=models=>(models||[]).map(model=>typeof model==='string'?{id:model,name:model}:model).filter(model=>model&&typeof model.id==='string'&&model.id);
@@ -78,8 +79,8 @@ export function catalogPage(rows,page=1,pageSize=PAGE_SIZE){
  return {rows:rows.slice(start,start+pageSize),page:current,pages,total:rows.length,start:rows.length?start+1:0,end:Math.min(start+pageSize,rows.length)};
 }
 
-export function renderModelCatalog({state,api,esc,toast,isManager,onSaved,embedded=false}){
- const root=document.querySelector('#content'),personalProviders=state.personalProviders||[];let result=null,page=1,busy=false;
+export function renderModelCatalog({state,api,esc,toast,isManager,onSaved,embedded=false,navigate,canGenerate=false}){
+ const root=document.querySelector('#content'),personalProviders=state.personalProviders||[];let result=null,page=1,busy=false,preferences=null,savingFavorite=false;
  const shell=root;
  if(!embedded)shell.innerHTML='';
  shell.insertAdjacentHTML('beforeend',(embedded?'':`<div class="heading"><div><h1>模型目录</h1><p>查找模型，复制调用 ID，或将新模型加入组织配置。</p></div></div>`)+`<section class="catalog-workspace" aria-label="模型目录"><div class="catalog-toolbar"><input type="search" id="catalog-search" aria-label="搜索模型" placeholder="搜索模型或服务商"><select id="catalog-provider" aria-label="筛选服务商"><option value="">全部服务商</option>${[...state.providers,...personalProviders].map(p=>`<option value="${esc(p.id)}">${esc(p.name+(p.private?'（仅本人）':''))}</option>`).join('')}</select><select id="catalog-kind" aria-label="筛选模型能力"><option value="">全部类型</option><option value="chat">对话</option><option value="media">媒体</option><option value="other">其他</option></select><select id="catalog-registration" aria-label="筛选配置状态"><option value="">全部状态</option><option value="registered">已加入</option><option value="available">未加入</option></select>${isManager?'<button id="discover-all">刷新模型目录</button>':''}</div><p id="catalog-status" class="catalog-note" role="status">显示已配置模型与最近查询结果。刷新只获取模型列表，不发起生成；个人订阅仅供本人在实验室使用。</p><div id="catalog-errors" class="catalog-errors"></div><div id="catalog-list"></div></section>`);
@@ -95,8 +96,10 @@ export function renderModelCatalog({state,api,esc,toast,isManager,onSaved,embedd
   list.innerHTML=`<div class="catalog-summary" role="status"><span>匹配 <strong>${matching.length}</strong> / ${snapshot.rows.length} 个模型</span><span>已加入 ${matching.filter(row=>row.registered).length}</span><span>组织 API ${matching.filter(row=>!row.private).length} · 个人订阅 ${matching.filter(row=>row.private).length}</span><span>已记录价格 ${matching.filter(row=>row.price.known).length} · 过期 / 复核逾期 ${matching.filter(row=>row.price.expired).length}</span></div><p class="catalog-note">上游协议不等于客户端入口协议；能力标签按模型名称识别，不保证服务商已开放对应接口。未知价格不代表免费。</p><div class="catalog-table">${visible.rows.length?`<div class="table-wrap"><table><thead><tr><th scope="col">模型 / 调用 ID</th><th scope="col">服务商</th><th scope="col">能力 / 上游协议</th><th scope="col">参考价格</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${visible.rows.map(model=>{
    const status=!model.registered?'未加入':!model.enabled?'未启用':model.authFailed?'鉴权失败':'已配置';
    const tone=model.authFailed?'danger':model.registered&&model.enabled?'green':'';
+   const provider=snapshot.providers.find(item=>item.id===model.providerId),destination=modelWorkspaceTarget(provider,model.id),favoriteId=JSON.stringify([model.providerId,model.id]);
+   const workspaceActions=canGenerate&&navigate?`<div class="model-work-actions"><button type="button" data-launch-model="${esc(destination||'')}" ${destination?'':'disabled'} class="primary">${model.kind==='chat'?'开始对话':'开始创作'}</button><button type="button" data-favorite-model="${esc(favoriteId)}" aria-pressed="${Boolean(preferences?.favorites.includes(favoriteId))}" ${!preferences||savingFavorite?'disabled':''}>${preferences?.favorites.includes(favoriteId)?'已收藏':'收藏'}</button></div>`:'';
    const action=model.private?'<span class="muted">仅本人</span>':!model.registered&&isManager?`<button data-register-provider="${esc(model.providerId)}" data-register-model="${esc(model.id)}" ${busy?'disabled':''}>加入模型</button>`:model.registered?`<button data-copy-route="${esc(model.routeId)}" title="复制 ${esc(model.routeId)}">复制调用 ID</button>`:'<span class="muted">需管理员加入</span>';
-   return `<tr><td><span class="catalog-model-name">${esc(model.name)}</span><code class="catalog-model-id">${esc(model.private?model.id:model.routeId)}</code></td><td><span class="catalog-provider-name">${esc(model.providerName)}</span><span class="catalog-scope">${model.private?'个人订阅 · 仅本人':'组织 API'}</span></td><td>${model.capabilities.map(label=>`<span class="tag">${esc(label)}</span>`).join(' ')}<small class="catalog-protocol">${esc(model.protocolLabel)}</small></td><td class="catalog-price${model.price.expired?' is-overdue':''}">${model.price.lines.map(line=>`<div>${esc(line)}</div>`).join('')}<small>${esc(model.price.source)}</small><small>${esc(model.price.validity)}</small><small>${esc(model.price.notice)}</small>${isManager&&!model.private?'<a href="#prices">查看价格详情</a>':''}</td><td><span class="catalog-state"><span class="health-dot ${tone}"></span>${status}</span></td><td>${action}</td></tr>`;
+   return `<tr><td><span class="catalog-model-name">${esc(model.name)}</span><code class="catalog-model-id">${esc(model.private?model.id:model.routeId)}</code></td><td><span class="catalog-provider-name">${esc(model.providerName)}</span><span class="catalog-scope">${model.private?'个人订阅 · 仅本人':'组织 API'}</span></td><td>${model.capabilities.map(label=>`<span class="tag">${esc(label)}</span>`).join(' ')}<small class="catalog-protocol">${esc(model.protocolLabel)}</small></td><td class="catalog-price${model.price.expired?' is-overdue':''}">${model.price.lines.map(line=>`<div>${esc(line)}</div>`).join('')}<small>${esc(model.price.source)}</small><small>${esc(model.price.validity)}</small><small>${esc(model.price.notice)}</small>${isManager&&!model.private?'<a href="#prices">查看价格详情</a>':''}</td><td><span class="catalog-state"><span class="health-dot ${tone}"></span>${status}</span></td><td>${workspaceActions}${action}</td></tr>`;
   }).join('')}</tbody></table></div>`:`<div class="catalog-empty"><strong>${snapshot.rows.length?'没有匹配的模型':'还没有模型'}</strong><p>${snapshot.rows.length?'调整筛选条件，或换个关键词。':isManager?'先添加服务商和密钥，然后刷新模型目录。':'请联系组织管理员配置服务商与模型。'}</p></div>`}<div class="catalog-pagination"><span role="status">${visible.total?`${visible.start}–${visible.end} / ${visible.total} 个模型`:'0 个模型'}</span><div><button data-catalog-page="${page-1}" ${page===1?'disabled':''}>上一页</button><span>${page} / ${visible.pages}</span><button data-catalog-page="${page+1}" ${page===visible.pages?'disabled':''}>下一页</button></div></div></div>`;
  }
  const filter=()=>{page=1;draw();};
@@ -114,6 +117,8 @@ export function renderModelCatalog({state,api,esc,toast,isManager,onSaved,embedd
   finally{busy=false;if(current()){button.disabled=false;button.textContent='刷新模型目录';draw();}}
  });
  list.onclick=async event=>{
+  const launch=event.target.closest('[data-launch-model]');if(launch&&!launch.disabled&&canGenerate){navigate?.(launch.dataset.launchModel);return;}
+  const favorite=event.target.closest('[data-favorite-model]');if(favorite&&!favorite.disabled&&preferences&&canGenerate){savingFavorite=true;const id=favorite.dataset.favoriteModel;const favorites=preferences.favorites.includes(id)?preferences.favorites.filter(value=>value!==id):[...preferences.favorites,id];draw();try{const saved=await api('/api/account/workspace/preferences',{expectedRevision:preferences.revision,favorites});if(current()){preferences=saved;toast('常用模型已更新');}}catch(error){if(current()){toast(error.message);try{preferences=await api('/api/account/workspace/preferences');}catch{preferences=null;}}}finally{savingFavorite=false;if(current())draw();}return;}
   const copy=event.target.closest('[data-copy-route]');
   if(copy){try{await navigator.clipboard.writeText(copy.dataset.copyRoute);if(current())toast('调用 ID 已复制');}catch{if(current())toast('无法自动复制，请手动选择调用 ID');}return;}
   const pagination=event.target.closest('[data-catalog-page]');
@@ -127,5 +132,6 @@ export function renderModelCatalog({state,api,esc,toast,isManager,onSaved,embedd
   finally{busy=false;if(current()){if(refresh)refresh.disabled=false;draw();}}
  };
  draw();
+ if(navigate&&canGenerate)void api('/api/account/workspace/preferences').then(value=>{if(current()){preferences=value;draw();}}).catch(()=>{if(current())toast('收藏暂不可用，不影响模型使用');});
 }
 export {renderApiGuide} from './api-docs.js';

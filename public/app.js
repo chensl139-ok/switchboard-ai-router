@@ -6,6 +6,7 @@ import {modelCapabilities} from './model-capability.js';
 import {mountCommandMenu,shortcutLabel} from './command-menu.js';
 import {desktopSubscriptionNotice} from './runtime-info.js';
 const pageLoader=createPageLoader({
+ home:()=>import('./workspace.js'),tasks:()=>import('./workspace.js'),
  models:()=>import('./model-catalog.js'),api:()=>import('./api-docs.js'),
  analytics:()=>import('./analytics.js'),prices:()=>import('./prices.js'),
  playground:()=>import('./playground.js'),media:()=>import('./media-lab.js'),
@@ -20,25 +21,30 @@ const resetMediaLab=()=>pageLoader.peek('media')?.resetMediaLab();
 let connectCleanup=null;
 const stopConnect=()=>{connectCleanup?.();connectCleanup=null;};
 let modelList=[],modelSelected=new Set(),modelEpoch=0,modelChannelAssignments={},editingProviderId='';
-let token='',profile=null,state,tab=location.hash.slice(1).split('?')[0]||'overview',pageQuery=location.hash.split('?').slice(1).join('?'),toastTimer,providerPoll,labTarget=null,commandMenu;
+let token='',profile=null,state,tab=location.hash.slice(1).split('?')[0]||'home',pageQuery=location.hash.split('?').slice(1).join('?'),toastTimer,providerPoll,labTarget=null,commandMenu;
 // 导航重组：模型价格并入用量分析、组织审计并入成员与角色，均为页面内二级标签
-const names={overview:'概览',providers:'服务商与模型',playground:'模型实验室',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型目录',media:'媒体实验室',subscription:'组织订阅'};
-const groups={providers:['providers','models'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
+const names={home:'开始工作',tasks:'创作任务',overview:'运行概览',providers:'服务商与模型',playground:'我的对话',logs:'请求日志',api:'API 文档',keys:'API Key 管理',connect:'接入向导',routing:'路由策略',analytics:'用量分析',audit:'组织审计',prices:'模型价格',members:'成员与角色',account:'账户与租户',models:'模型探索',media:'媒体创作',subscription:'组织订阅'};
+const groups={providers:['providers'],playground:['playground','media'],analytics:['analytics','prices'],members:['members','audit']};
+const workViews=new Set(['home','playground','media','models','tasks']);
+let workspaceCleanup=null;
 const managerViews=new Set(['members','prices','routing','audit','subscription']);
 document.querySelector('.sidebar [data-tab="account"]')?.insertAdjacentHTML('beforebegin','<button type="button" class="nav-item" data-tab="subscription" title="组织订阅" aria-label="组织订阅"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span class="nav-name">组织订阅</span><span class="nav-indicator" aria-hidden="true"></span></button>');
 document.querySelector('#provider-form [name="protocol"]').closest('label').insertAdjacentHTML('afterend','<label>Anthropic 鉴权方式<select name="anthropicAuth"><option value="x-api-key">x-api-key（官方默认）</option><option value="bearer">Authorization: Bearer（部分网关）</option></select></label>');
 document.querySelector('[data-tab="providers"] .nav-name').textContent='服务商与模型';
-document.querySelector('[data-tab="models"]')?.remove();
-document.querySelector('[data-tab="media"]')?.remove();
-const navDetails={providers:'服务商 · 模型目录',playground:'对话 · 媒体',analytics:'用量 · 模型价格',members:'成员 · 审计'};
+const nav=document.querySelector('.sidebar nav');
+for(const [id,source] of [['home','overview'],['tasks','logs']]){const button=nav.querySelector(`[data-tab="${source}"]`).cloneNode(true);button.dataset.tab=id;button.classList.remove('selected');button.removeAttribute('aria-current');nav.append(button);}
+for(const button of nav.querySelectorAll('[data-tab]')){button.querySelector('.nav-name').textContent=names[button.dataset.tab];button.setAttribute('aria-label',names[button.dataset.tab]);}
+const navigationGroups=[['work','工作台',['home','playground','models','media','tasks']],['manage','网关运行',['overview','providers','routing','analytics','logs']],['manage','开发者',['keys','connect','api']],['manage','组织',['members','subscription']],['shared','个人',['account']]];
+const buttons=new Map([...nav.querySelectorAll('[data-tab]')].map(button=>[button.dataset.tab,button]));nav.replaceChildren();
+for(const [mode,label,items] of navigationGroups){const group=document.createElement('div');group.className='nav-group';group.dataset.workspaceMode=mode;const heading=document.createElement('div');heading.className='nav-label';heading.textContent=label;group.append(heading,...items.map(id=>buttons.get(id)));nav.append(group);}
+const modeSwitcher=document.createElement('div');modeSwitcher.className='workspace-mode-switch';modeSwitcher.setAttribute('aria-label','切换工作区');modeSwitcher.innerHTML='<button type="button" data-tab="home" data-mode="work">AI 工作台</button><button type="button" data-tab="overview" data-mode="manage">网关控制台</button>';nav.before(modeSwitcher);
+const navDetails={providers:'上游凭据与模型',playground:'会话 · 草稿 · 历史',analytics:'用量 · 模型价格',members:'成员 · 审计'};
 for(const [id,detail] of Object.entries(navDetails)){
  const button=document.querySelector(`.sidebar [data-tab="${id}"]`),name=button?.querySelector('.nav-name');if(!name)continue;
  const copy=document.createElement('span'),sub=document.createElement('small');copy.className='nav-copy';sub.className='nav-children';sub.textContent=detail;name.before(copy);copy.append(name,sub);
  button.title=`${name.textContent}：${detail}`;button.setAttribute('aria-label',button.title);
 }
-for(const [node,label] of [...document.querySelectorAll('.sidebar .nav-label')].map((node,index)=>[node,['工作空间','开发接入','组织管理'][index]]))node.textContent=label;
-document.querySelector('[data-tab="overview"] .nav-name').textContent='概览';
-document.querySelector('[data-tab="overview"]').setAttribute('aria-label','概览');
+
 document.querySelector('#provider-form [name="apiKey"]').closest('label').insertAdjacentHTML('afterend','<details class="key-advanced"><summary>备用密钥（可选）<small>同服务商配置第二把 Key 用于故障转移；只配一把时无需关心</small></summary><label>Metered API Key<input name="meteredApiKey" type="password" autocomplete="new-password" placeholder="留空保留已有备用密钥"></label></details>');
 const providerForm=document.querySelector('#provider-form'),providerTitle=providerForm.querySelector('.modal-title'),providerActions=providerForm.querySelector('.dialog-actions'),providerBody=document.createElement('div');
 providerBody.className='provider-form-body';
@@ -86,17 +92,20 @@ const pageTabs=options=>`<div class="page-tabs" role="tablist">${options.map(([i
 const canOpen=view=>Boolean(names[view])&&(isManager()||!managerViews.has(view)||view==='routing'&&profile?.chatgptPlan&&profile.role==='member')&&!(profile?.role==='viewer'&&(view==='keys'||groups.playground.includes(view)));
 
 function syncNavigation(){
+ const mode=workViews.has(tab)?'work':tab==='account'?(document.body.dataset.workspace||'work'):'manage';document.body.dataset.workspace=mode;
+ for(const group of nav.querySelectorAll('[data-workspace-mode]'))group.hidden=group.dataset.workspaceMode!=='shared'&&group.dataset.workspaceMode!==mode;
+ for(const button of modeSwitcher.querySelectorAll('[data-mode]')){const selected=button.dataset.mode===mode;button.classList.toggle('selected',selected);button.setAttribute('aria-pressed',String(selected));}
  const parent=Object.keys(groups).find(key=>key!==tab&&groups[key].includes(tab));
- $('#page-parent').textContent=parent?names[parent]:'工作空间';
+ $('#page-parent').textContent=parent?names[parent]:mode==='work'?'AI 工作台':'网关控制台';
  $('#breadcrumb').textContent=names[tab];
  for(const button of document.querySelectorAll('nav button[data-tab]')){
   const view=button.dataset.tab;
   button.hidden=!canOpen(view);
-  const active=(groups[view]||[view]).includes(tab);
+  const active=workViews.has(view)?view===tab:(groups[view]||[view]).includes(tab);
   button.classList.toggle('selected',active);
   if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
  }
- const nav=document.querySelector('.sidebar nav'),selected=nav.querySelector('[aria-current=page]');
+ const selected=nav.querySelector('[aria-current=page]');
  if(selected&&matchMedia('(max-width:720px)').matches)nav.scrollLeft+=selected.getBoundingClientRect().left-nav.getBoundingClientRect().left-(nav.clientWidth-selected.clientWidth)/2;
 }
 
@@ -131,7 +140,8 @@ function initialPageHtml(){
   if(tab==='models')return header+tabs;
   return header+tabs+`<div class="filter-bar"><label class="search-field"><span class="sr-only">搜索服务商或模型</span><input type="search" id="provider-search" placeholder="搜索服务商或模型…"></label><select id="provider-filter" aria-label="服务商状态"><option value="">全部状态</option><option value="true">已配置并启用</option><option value="false">待配置 / 未启用</option></select><span id="provider-count" class="muted"></span><span id="provider-live" class="provider-live" role="status">正在更新调用状态…</span></div>`+cards(true)+`<div id="provider-empty" class="empty" hidden>未找到匹配服务商。试试其他关键词或调整状态筛选。</div>`;
  }
- if(groups.playground.includes(tab))return heading('模型实验室','在同一工作区测试对话与媒体模型；调用设置仅影响本次实验。')+`<div class="lab-nav-row">${pageTabs([['playground','对话'],['media','媒体']])}<div id="lab-page-actions" class="lab-embedded-toolbar"></div></div>`;
+ if(tab==='models')return heading('模型探索','从已配置模型中选择能力，收藏常用模型，然后开始工作。');
+ if(groups.playground.includes(tab))return heading(names[tab],tab==='playground'?'你的对话、草稿与模型，保存在同一个工作区。':'从一个想法开始，创作图片、视频与语音。')+`<div class="lab-nav-row"><div id="lab-page-actions" class="lab-embedded-toolbar"></div>${tab==='media'?'<button type="button" data-tab="tasks">查看创作任务 →</button>':''}</div>`;
  return '<div class="view-loading" role="status"><span class="loading-dot"></span>正在加载…</div>';
 }
 
@@ -140,17 +150,19 @@ async function renderPage(root){
  const isCurrent=()=>root.isConnected&&tab===requestedTab&&profile===requestedProfile;
  try{
   const lazyTab=tab==='logs'?'analytics':tab;
-  const lazyViews=new Set(['models','api','analytics','prices','playground','media','routing','keys','audit','subscription','connect']);
+  const lazyViews=new Set(['home','tasks','models','api','analytics','prices','playground','media','routing','keys','audit','subscription','connect']);
   const module=lazyViews.has(lazyTab)?await pageLoader.load(lazyTab):{};
   // Navigation, logout or tenant changes can finish while a chunk downloads.
   if(!isCurrent())return;
-  const {renderModelCatalog,renderApiGuide,renderAnalytics,renderLogs,renderPrices,renderPlayground,renderMediaLab,renderRouting,renderApiKeys,renderAudit,renderSubscriptions,renderConnect}=module;
+  const {renderWorkspace,renderTasks,renderModelCatalog,renderApiGuide,renderAnalytics,renderLogs,renderPrices,renderPlayground,renderMediaLab,renderRouting,renderApiKeys,renderAudit,renderSubscriptions,renderConnect}=module;
   const loadPersonal=async()=>{if(!profile?.chatgptPlan||profile.role==='viewer'){state.personalProviders=[];return [];}try{const result=await api('/api/account/chatgpt/providers');if(isCurrent())state.personalProviders=result.providers;return result.providers;}catch{if(isCurrent())toast('个人订阅模型暂不可用，不影响组织 API 模型');return null;}};
   if(tab==='providers'&&!profile?.chatgptPlan&&profile.role!=='viewer')root.querySelector('.provider-grid')?.insertAdjacentHTML('afterend',desktopSubscriptionNotice());
   if(tab==='models')await loadPersonal();if(!isCurrent())return;
  const analyticsTabs=pageTabs([['analytics','用量分析'],...(isManager()?[['prices','模型价格']]:[])]);
  const membersTabs=pageTabs([['members','成员与角色'],['audit','组织审计']]);
  switch(tab){
+  case 'home':{const dispose=await renderWorkspace({state,api,esc,profile,navigate,isCurrent});if(isCurrent())workspaceCleanup=dispose;else dispose?.();break;}
+  case 'tasks':{const dispose=await renderTasks({state,api,esc,profile,navigate,isCurrent,initialFilters:Object.fromEntries(new URLSearchParams(pageQuery))});if(isCurrent())workspaceCleanup=dispose;else dispose?.();break;}
   case 'overview':{
    if(profile.role!=='viewer')void api('/api/routing/preview',{model:'auto'}).then(preview=>{if(isCurrent())renderDashboardRoutePreview(root,preview,esc);}).catch(error=>{if(isCurrent()){root.querySelector('#dashboard-route-chain').textContent='路由预览暂不可用';root.querySelector('#dashboard-route-note').textContent=error.message;}});
    else{root.querySelector('#dashboard-route-chain').textContent='只读账户可查看用量与日志';root.querySelector('#dashboard-route-note').textContent='路由预览需要成员或管理权限。';}
@@ -160,9 +172,9 @@ async function renderPage(root){
    period.onchange=()=>{pageQuery='days='+period.value;history.replaceState(null,'','#overview?'+pageQuery);void load();};void load();break;
   }
   case 'providers':renderProviderFilter(root);if(profile?.chatgptPlan&&profile.role!=='viewer')void Promise.all([loadPersonal(),pageLoader.load('planProviders')]).then(([,personal])=>{if(isCurrent())personal.mountPlanProviders({root,state,api,esc,toast,isCurrent,onRun:(id,model)=>{labTarget=JSON.stringify([id,model]);navigate('playground');},onChange:()=>root.querySelector('#provider-search')?.dispatchEvent(new Event('input'))});}).catch(()=>{if(isCurrent())toast('订阅卡片暂时无法加载，请刷新重试');});break;
-  case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),onSaved:s=>{state=s;},embedded:true});break;
-  case 'playground':{const personalLoading=Boolean(profile?.chatgptPlan&&profile.role!=='viewer');const lab=renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget,personalLoading,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;if(personalLoading&&lab?.updatePersonalProviders)void loadPersonal().then(providers=>{if(isCurrent())lab.updatePersonalProviders(providers);});break;}
-  case 'media':renderMediaLab({state,tenantId:profile?.tenantId,esc,embedded:true});break;
+  case 'models':renderModelCatalog({state,api,esc,toast,isManager:isManager(),canGenerate:profile.role!=='viewer',onSaved:s=>{state=s;},embedded:true,navigate});break;
+  case 'playground':{if(new URLSearchParams(pageQuery).get('new')==='1'){const created=await api('/api/account/conversations',{title:'新对话',messages:[],draft:'',settings:{target:'auto'}});if(!isCurrent())return;pageQuery='conversation='+encodeURIComponent(created.id);history.replaceState(null,'','#playground?'+pageQuery);}const personalLoading=Boolean(profile?.chatgptPlan&&profile.role!=='viewer');const lab=renderPlayground({state,token,tenantId:profile?.tenantId,esc,embedded:true,renderView:render,navigate,initialTarget:labTarget||new URLSearchParams(pageQuery).get('target'),initialConversationId:new URLSearchParams(pageQuery).get('conversation'),userId:profile.user.id,onConversationChange:id=>{if(isCurrent()){pageQuery=id?'conversation='+encodeURIComponent(id):'';history.replaceState(null,'','#playground'+(pageQuery?'?'+pageQuery:''));}},personalLoading,refresh:async()=>{try{state=await api('/api/state')}catch(e){toast(e.message)}}});labTarget=null;if(personalLoading&&lab?.updatePersonalProviders)void loadPersonal().then(providers=>{if(isCurrent())lab.updatePersonalProviders(providers);});break;}
+  case 'media':renderMediaLab({state,tenantId:profile?.tenantId,esc,embedded:true,initialFilters:Object.fromEntries(new URLSearchParams(pageQuery))});break;
   case 'api':renderApiGuide({esc,toast});break;
   case 'members':void renderMembers({profile,esc,toast,prefix:membersTabs});return;
   case 'audit':void renderAudit({esc,profile});root.querySelector('.heading')?.insertAdjacentHTML('afterend',membersTabs);break;
@@ -186,7 +198,7 @@ function render(){
  if(!profile||!state)return;
  if(tab==='connections')tab='providers'; // Old personal-connection bookmarks.
  if(providerPoll){clearInterval(providerPoll.timer);providerPoll=undefined;}
- stopPlayground();stopMediaLab();stopConnect();
+ stopPlayground();stopMediaLab();stopConnect();workspaceCleanup?.();workspaceCleanup=null;
  if(!canOpen(tab)){tab='overview';pageQuery='';}
  history.replaceState(null,'','#'+tab+(pageQuery?'?'+pageQuery:''));document.title=names[tab]+' · Switchboard';
  const root=document.createElement('section');root.id='content';root.tabIndex=-1;root.dataset.page=tab;
@@ -250,7 +262,7 @@ $('#fetch-models').onclick=async()=>{
  }catch(e){if(epoch===modelEpoch)$('#model-status').textContent=e.message}
  finally{if(epoch===modelEpoch){b.disabled=false;b.textContent='↻ 重新获取所有模型'}}
 };
- $('#logout').onclick=async()=>{try{await accountRequest('logout',{});commandMenu?.close();stopConnect();clearTimeout(providerPoll?.timer);providerPoll=undefined;profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
+ $('#logout').onclick=async()=>{try{await accountRequest('logout',{});commandMenu?.close();stopConnect();workspaceCleanup?.();workspaceCleanup=null;clearTimeout(providerPoll?.timer);providerPoll=undefined;profile=null;state=null;token='';resetPlayground();resetMediaLab();$('#current-account').textContent='';resetTenantChip();$('#content').innerHTML='';await refreshAccountStatus();showLogin();}catch(e){toast(e.message)}};
 $('#close-edit').onclick=closeEdit;
 $('#cancel-edit').onclick=closeEdit;
 $('#edit').addEventListener('close',()=>{formDirty=false;resetModels();editingProviderId='';modelChannelAssignments={};});
@@ -270,7 +282,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
 document.addEventListener('change',async e=>{const id=e.target.dataset.providerModel;if(!id)return;const select=e.target;select.disabled=true;try{state=await api('/api/provider/switch-model',{id,model:select.value});render();toast('服务商模型已切换，下一次调用生效')}catch(err){select.value=state.providers.find(p=>p.id===id).model;toast(err.message)}finally{select.disabled=false}});
 
 async function accountReady(value){
- commandMenu?.close();stopConnect();
+ commandMenu?.close();stopConnect();workspaceCleanup?.();workspaceCleanup=null;
  clearTimeout(providerPoll?.timer);providerPoll=undefined;
  if(value.chatgptPlan===undefined)value=await accountRequest('me');
  const previous=profile?.tenantId,previousUser=profile?.user?.id;profile=value;token='';sessionStorage.removeItem('router-token');
@@ -285,7 +297,7 @@ async function accountReady(value){
 try{await startAccountUI(accountReady);}catch(error){$('#content').textContent=error.message;}
 
 // 品牌链接拦为 SPA 内跳转，避免整页刷新
-document.querySelector('.brand')?.addEventListener('click',e=>{e.preventDefault();navigate('overview');});
+document.querySelector('.brand')?.addEventListener('click',e=>{e.preventDefault();navigate('home');});
 
 // 租户切换：头像 + 浮层
 function renderTenantChip(profile){

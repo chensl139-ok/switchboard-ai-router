@@ -230,6 +230,17 @@ export function createPlatform({dir=process.env.DATA_DIR||path.join(root,'data')
      throw fail('订阅连接接口不存在',404);
     }
     if(req.method==='GET'&&route==='me')return json(res,200,{...accounts.me(current),chatgptPlan:Boolean(plan),build:buildInfo});
+    if(route==='conversations'||route.startsWith('conversations/')||route==='workspace/preferences'){
+     if(req.method==='GET'&&route==='conversations')return json(res,200,labHistory.pageConversations(current,Object.fromEntries(url.searchParams)));
+     if(req.method==='GET'&&route==='conversations/item')return json(res,200,labHistory.getConversation(current,url.searchParams.get('id')));
+     if(req.method==='GET'&&route==='workspace/preferences')return json(res,200,labHistory.getWorkspacePreferences(current));
+     const action=new Map([['conversations','createConversation'],['conversations/update','updateConversation'],['conversations/delete','deleteConversation'],['conversations/import','importConversation'],['conversations/run/start','startConversationRun'],['conversations/run/checkpoint','checkpointConversationRun'],['conversations/run/finish','finishConversationRun'],['conversations/run/recover','recoverConversationRun'],['workspace/preferences','updateWorkspacePreferences']]).get(route);
+     if(req.method!=='POST'||!action)throw fail('接口不存在',404);
+     if(current.role==='viewer')throw fail('只读角色不可修改工作区',403);
+     if(!req.headers['content-type']?.startsWith('application/json'))throw fail('需要同源 JSON 请求',415);
+     const input=await body(req,route==='workspace/preferences'?640*1024:1024*1024+64*1024);
+     return json(res,200,labHistory[action](current,input));
+    }
     if(req.method==='GET'&&route==='lab-history')return json(res,200,labHistory.page(current,{area:url.searchParams.get('area')||undefined,status:url.searchParams.get('status')||undefined,q:url.searchParams.get('q')||'',page:url.searchParams.get('page')||1,limit:url.searchParams.get('limit')||20,order:url.searchParams.get('order')||'recent'}));
     if(req.method==='GET'&&route==='lab-history/item')return json(res,200,labHistory.get(current,url.searchParams.get('id')));
     if(req.method==='GET'&&route==='sso/feishu/bindings'){accounts.requirePlatformOwner(current);return json(res,200,{bindings:bindings.metadata()});}

@@ -2,9 +2,10 @@
 // recent activity, or tenant-specific results are stored in browser storage.
 export const shortcutLabel=(key,platform=globalThis.navigator?.userAgentData?.platform||globalThis.navigator?.platform||'')=>`${/mac|iphone|ipad/i.test(platform)?'⌘':'Ctrl'} ${key}`;
 export const pageCommands=[
- ['overview','概览','控制台 dashboard'],['providers','服务商与模型','provider 配置 订阅'],
+ ['home','开始工作','工作台 home 灵感'],['tasks','创作任务','历史 图片 视频 任务'],
+ ['overview','运行概览','控制台 dashboard'],['providers','服务商与模型','provider 配置 订阅'],
  ['models','模型目录','model 搜索'],['routing','路由策略','fallback 备用 故障转移'],
- ['playground','模型实验室 · 对话','chat 测试'],['media','模型实验室 · 媒体','图片 音频 视频 视觉'],
+ ['playground','我的对话','chat 测试 实验室 持久 会话'],['media','媒体创作','实验室 图片 音频 视频 视觉'],
  ['keys','API Key 管理','密钥 key'],['connect','接入向导','codex claude 客户端'],
  ['api','API 文档','curl 协议 openapi'],['logs','请求日志','log 调用链'],
  ['analytics','用量分析','token 成本 统计'],['prices','模型价格','price 定价'],
