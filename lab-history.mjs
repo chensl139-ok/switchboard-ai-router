@@ -10,8 +10,17 @@ const listColumns='id,area,kind,model,title,status,request_id AS requestId,error
 export const MAX_HISTORY_RESULT_BYTES=256*1024;
 
 const MiB=1024*1024,LEASE_MS=120000;
-const conversationColumns='id,title,messages,draft,settings,pinned,archived,status,revision,run_id AS runId,lease_until AS leaseUntil,bytes,source_history_id AS sourceHistoryId,created_at AS createdAt,updated_at AS updatedAt';
-const conversationListColumns='id,title,pinned,archived,status,revision,lease_until AS leaseUntil,bytes,source_history_id AS sourceHistoryId,created_at AS createdAt,updated_at AS updatedAt';
+const conversationLimits=Object.freeze({count:200,bytes:32*MiB,conversationBytes:MiB,draftBytes:64*1024});
+const conversationColumns='id,title,title_mode AS titleMode,messages,draft,settings,pinned,archived,status,revision,run_id AS runId,lease_until AS leaseUntil,bytes,source_history_id AS sourceHistoryId,created_at AS createdAt,updated_at AS updatedAt';
+const conversationListColumns='id,title,title_mode AS titleMode,pinned,archived,status,revision,lease_until AS leaseUntil,bytes,source_history_id AS sourceHistoryId,created_at AS createdAt,updated_at AS updatedAt';
+export function autoTitle(messages){
+ for(const message of messages){
+  if(message?.role!=='user'||typeof message.content!=='string')continue;
+  const title=message.content.replace(/\s+/gu,' ').trim();if(!title)continue;
+  const points=Array.from(title);return points.length>48?points.slice(0,47).join('')+'…':title;
+ }
+ return '';
+}
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 function writable(caller){if(caller.role==='viewer')throw fail('只读角色不可修改工作区',403);}
 function uuid(value){if(typeof value!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))throw fail('会话 ID 无效');return value;}
@@ -55,7 +64,7 @@ function conversationPatch(input,required=false){
  if(required&&['messages','draft','settings'].some(key=>input[key]===undefined))throw fail('运行保存需要 messages、draft 和 settings');
  if(input.title!==undefined)patch.title=text(input.title,'标题',180);
  if(input.messages!==undefined)patch.messages=safeMessages(input.messages);
- if(input.draft!==undefined){patch.draft=text(input.draft,'草稿');if(Buffer.byteLength(patch.draft)>64*1024)throw fail('草稿超过 64KiB',413);}
+ if(input.draft!==undefined){patch.draft=text(input.draft,'草稿');if(Buffer.byteLength(patch.draft)>conversationLimits.draftBytes)throw fail('草稿超过 64KiB',413);}
  if(input.settings!==undefined)patch.settings=safeSettings(input.settings);
  for(const key of ['pinned','archived'])if(input[key]!==undefined){if(typeof input[key]!=='boolean')throw fail(key+'必须是布尔值');patch[key]=input[key];}
  return patch;
@@ -86,15 +95,17 @@ export class LabHistory {
     result TEXT,error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
    CREATE INDEX IF NOT EXISTS history_owner ON history(tenant_id,user_id,updated_at DESC);
    CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-   BEGIN IMMEDIATE;
-   CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,
+   `);
+  this.#transaction(()=>{
+   this.db.exec(`CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,
     title TEXT NOT NULL,messages TEXT NOT NULL,draft TEXT NOT NULL,settings TEXT NOT NULL,pinned INTEGER NOT NULL,archived INTEGER NOT NULL,
     status TEXT NOT NULL,revision INTEGER NOT NULL,run_id TEXT,lease_until INTEGER,bytes INTEGER NOT NULL,source_history_id TEXT,
     created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(tenant_id,user_id,source_history_id));
    CREATE INDEX IF NOT EXISTS conversations_owner ON conversations(tenant_id,user_id,pinned DESC,updated_at DESC);
-   CREATE TABLE IF NOT EXISTS workspace_preferences(tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,revision INTEGER NOT NULL,favorites TEXT NOT NULL,PRIMARY KEY(tenant_id,user_id));
-   INSERT OR IGNORE INTO metadata(key,value) VALUES('workspace_schema','1');
-   COMMIT;`);
+   CREATE TABLE IF NOT EXISTS workspace_preferences(tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,revision INTEGER NOT NULL,favorites TEXT NOT NULL,PRIMARY KEY(tenant_id,user_id));`);
+   if(!this.db.prepare('PRAGMA table_info(conversations)').all().some(column=>column.name==='title_mode'))this.db.exec("ALTER TABLE conversations ADD COLUMN title_mode TEXT NOT NULL DEFAULT 'manual'");
+   this.db.prepare("INSERT INTO metadata(key,value) VALUES('workspace_schema','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
+  });
   for(const file of [databasePath,databasePath+'-wal',databasePath+'-shm'])if(existsSync(file))chmodSync(file,0o600);
   const legacy=path.join(dir,'lab-history.json');
   if(!this.db.prepare("SELECT value FROM metadata WHERE key='legacy_import'").get()){
@@ -162,30 +173,32 @@ export class LabHistory {
   const where=clauses.join(' AND '),total=this.db.prepare(`SELECT count(*) AS total FROM conversations WHERE ${where}`).get(...values).total;
   const pages=Math.max(1,Math.ceil(total/limit));page=Math.min(page,pages);
   const items=this.db.prepare(`SELECT ${conversationListColumns} FROM conversations WHERE ${where} ORDER BY pinned DESC,updated_at DESC,id DESC LIMIT ? OFFSET ?`).all(...values,limit,(page-1)*limit).map(decodeConversation);
-  return {items,total,page,limit,pages};
+  return {items,total,page,limit,pages,usage:{...this.#conversationUsage(caller),limits:{...conversationLimits}}};
  }
  getConversation(caller,id){
   const row=this.db.prepare(`SELECT ${conversationColumns} FROM conversations WHERE id=? AND tenant_id=? AND user_id=?`).get(uuid(id),caller.tenantId,caller.userId);
   if(!row)throw fail('会话不存在',404);return decodeConversation(row);
  }
+ #conversationUsage(caller){return this.db.prepare('SELECT count(*) AS count,coalesce(sum(bytes),0) AS bytes FROM conversations WHERE tenant_id=? AND user_id=?').get(caller.tenantId,caller.userId);}
  #saveConversation(caller,row,existing=null){
   row.bytes=Buffer.byteLength(JSON.stringify({title:row.title,messages:row.messages,draft:row.draft,settings:row.settings}));
-  if(row.bytes>MiB)throw fail('会话正文超过 1MiB',413);
-  const owner=this.db.prepare('SELECT count(*) AS count,coalesce(sum(bytes),0) AS bytes FROM conversations WHERE tenant_id=? AND user_id=?').get(caller.tenantId,caller.userId);
+  if(row.bytes>conversationLimits.conversationBytes)throw fail('会话正文超过 1MiB',413);
+  const owner=this.#conversationUsage(caller);
   const delta=row.bytes-(existing?.bytes||0);
-  if(owner.count+(existing?0:1)>200)throw fail('当前用户在此租户最多保存 200 条会话，请显式删除后重试',409);
-  if(owner.bytes+delta>32*MiB)throw fail('当前用户在此租户的会话容量超过 32MiB',413);
+  if(owner.count+(existing?0:1)>conversationLimits.count)throw fail('当前用户在此租户最多保存 200 条会话，请显式删除后重试',409);
+  if(owner.bytes+delta>conversationLimits.bytes)throw fail('当前用户在此租户的会话容量超过 32MiB',413);
   if(this.db.prepare('SELECT coalesce(sum(bytes),0) AS bytes FROM conversations WHERE tenant_id=?').get(caller.tenantId).bytes+delta>256*MiB)throw fail('租户会话容量超过 256MiB',413);
   if(this.db.prepare('SELECT coalesce(sum(bytes),0) AS bytes FROM conversations').get().bytes+delta>1024*MiB)throw fail('全局会话容量超过 1GiB',413);
-  this.db.prepare(`INSERT INTO conversations(id,tenant_id,user_id,title,messages,draft,settings,pinned,archived,status,revision,run_id,lease_until,bytes,source_history_id,created_at,updated_at)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,messages=excluded.messages,draft=excluded.draft,settings=excluded.settings,
+  this.db.prepare(`INSERT INTO conversations(id,tenant_id,user_id,title,messages,draft,settings,pinned,archived,status,revision,run_id,lease_until,bytes,source_history_id,created_at,updated_at,title_mode)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,title_mode=excluded.title_mode,messages=excluded.messages,draft=excluded.draft,settings=excluded.settings,
    pinned=excluded.pinned,archived=excluded.archived,status=excluded.status,revision=excluded.revision,run_id=excluded.run_id,lease_until=excluded.lease_until,bytes=excluded.bytes,updated_at=excluded.updated_at`).run(
-   row.id,caller.tenantId,caller.userId,row.title,JSON.stringify(row.messages),row.draft,JSON.stringify(row.settings),Number(row.pinned),Number(row.archived),row.status,row.revision,row.runId,row.leaseUntil,row.bytes,row.sourceHistoryId,row.createdAt,row.updatedAt);
+   row.id,caller.tenantId,caller.userId,row.title,JSON.stringify(row.messages),row.draft,JSON.stringify(row.settings),Number(row.pinned),Number(row.archived),row.status,row.revision,row.runId,row.leaseUntil,row.bytes,row.sourceHistoryId,row.createdAt,row.updatedAt,row.titleMode);
   return row;
  }
  #insertConversation(caller,input,sourceHistoryId=null){
-  const patch=conversationPatch(input),now=new Date(this.now()).toISOString();
-  return this.#saveConversation(caller,{id:randomUUID(),title:patch.title??'',messages:patch.messages??[],draft:patch.draft??'',settings:patch.settings??{},pinned:false,archived:false,status:'idle',revision:1,runId:null,leaseUntil:null,sourceHistoryId,createdAt:now,updatedAt:now});
+  const patch=conversationPatch(input),now=new Date(this.now()).toISOString(),title=patch.title??'';
+  const titleMode=sourceHistoryId!==null||title!==''&&title!=='新对话'?'manual':'auto';
+  return this.#saveConversation(caller,{id:randomUUID(),title,titleMode,messages:patch.messages??[],draft:patch.draft??'',settings:patch.settings??{},pinned:false,archived:false,status:'idle',revision:1,runId:null,leaseUntil:null,sourceHistoryId,createdAt:now,updatedAt:now});
  }
  createConversation(caller,input={}){writable(caller);return this.#transaction(()=>this.#insertConversation(caller,input));}
  #mutateConversation(caller,input,action){
@@ -198,12 +211,14 @@ export class LabHistory {
  }
  updateConversation(caller,input){return this.#mutateConversation(caller,input,row=>{
   if(row.status==='running')throw fail('运行中的会话只能通过 checkpoint 保存，请先完成或恢复',409);
-  Object.assign(row,conversationPatch(input));
+  Object.assign(row,conversationPatch(input));if(input.title!==undefined)row.titleMode='manual';
  });}
  startConversationRun(caller,input){return this.#mutateConversation(caller,input,row=>{
   if(row.status==='running')throw fail('会话仍在运行，请先完成或显式恢复',409);
   if(row.archived)throw fail('请先取消归档再运行',409);
-  const {messages,draft,settings}=conversationPatch(input,true);Object.assign(row,{messages,draft,settings,status:'running',runId:randomUUID(),leaseUntil:this.now()+LEASE_MS});
+  const {messages,draft,settings}=conversationPatch(input,true);
+  if(row.titleMode==='auto'&&(row.title===''||row.title==='新对话'))row.title=autoTitle(messages)||row.title;
+  Object.assign(row,{messages,draft,settings,status:'running',runId:randomUUID(),leaseUntil:this.now()+LEASE_MS});
  });}
  #checkRun(row,input){if(row.status!=='running'||typeof input.runId!=='string'||input.runId!==row.runId)throw fail('运行凭证已失效，请刷新会话',409);}
  checkpointConversationRun(caller,input){return this.#mutateConversation(caller,input,row=>{

@@ -4,7 +4,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {LabHistory} from '../lab-history.mjs';
+import {LabHistory,autoTitle} from '../lab-history.mjs';
 import {createPlatform} from '../platform.mjs';
 
 const alice={tenantId:'alpha',userId:'alice',role:'member'},bob={...alice,userId:'bob'},other={...alice,tenantId:'beta'};
@@ -139,7 +139,7 @@ test('原 13 列数据库增量兼容、偏好持久化和租户清理事务回�
  db.prepare('INSERT INTO history VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,'alpha','alice','chat','conversation','model','旧标题','completed','','{}','','2020','2020');db.close();
  let h=new LabHistory(dir);
  try{
-  assert.equal(h.db.prepare('PRAGMA table_info(history)').all().length,13);assert.equal(h.get(alice,id).title,'旧标题');assert.equal(h.db.prepare("SELECT value FROM metadata WHERE key='workspace_schema'").get().value,'1');
+  assert.equal(h.db.prepare('PRAGMA table_info(history)').all().length,13);assert.equal(h.get(alice,id).title,'旧标题');assert.equal(h.db.prepare("SELECT value FROM metadata WHERE key='workspace_schema'").get().value,'2');
   h.createConversation(alice,body);h.createConversation(other,body);h.updateWorkspacePreferences(alice,{expectedRevision:0,favorites:['a']});h.updateWorkspacePreferences(other,{expectedRevision:0,favorites:['b']});
   h.close();h=new LabHistory(dir);assert.deepEqual(h.getWorkspacePreferences(alice),{revision:1,favorites:['a']});
   h.db.exec("CREATE TRIGGER prevent_preferences_delete BEFORE DELETE ON workspace_preferences BEGIN SELECT RAISE(ABORT,'rollback test'); END;");
@@ -148,6 +148,122 @@ test('原 13 列数据库增量兼容、偏好持久化和租户清理事务回�
   assert.equal(h.list(alice).length,0);assert.equal(h.pageConversations(alice).total,0);assert.equal(h.getWorkspacePreferences(alice).revision,0);
   assert.equal(h.pageConversations(other).total,1);assert.equal(h.getWorkspacePreferences(other).revision,1);
  }finally{h.close();}
+});
+
+test('3.0 的 17 列会话增量迁移保留所有旧字段、历史和偏好，二次启动幂等',t=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'switchboard-conversations-v3-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const db=new DatabaseSync(path.join(dir,'lab-history.sqlite'));
+ db.exec(`CREATE TABLE conversations(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,
+  title TEXT NOT NULL,messages TEXT NOT NULL,draft TEXT NOT NULL,settings TEXT NOT NULL,pinned INTEGER NOT NULL,archived INTEGER NOT NULL,
+  status TEXT NOT NULL,revision INTEGER NOT NULL,run_id TEXT,lease_until INTEGER,bytes INTEGER NOT NULL,source_history_id TEXT,
+  created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(tenant_id,user_id,source_history_id));
+  CREATE TABLE history(id TEXT PRIMARY KEY,tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,area TEXT NOT NULL,kind TEXT,model TEXT,title TEXT,status TEXT NOT NULL,request_id TEXT,result TEXT,error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+  CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+  INSERT INTO metadata VALUES('workspace_schema','1'),('legacy_import','done');
+  CREATE TABLE workspace_preferences(tenant_id TEXT NOT NULL,user_id TEXT NOT NULL,revision INTEGER NOT NULL,favorites TEXT NOT NULL,PRIMARY KEY(tenant_id,user_id));
+  INSERT INTO workspace_preferences VALUES('alpha','alice',7,'["model-a","auto"]');`);
+ const historyId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+ db.prepare('INSERT INTO history VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(historyId,'alpha','alice','chat','conversation','model-a','历史原件','completed','request-old','{"version":2}','','2020','2021');
+ for(const [i,title] of ['原标题\n中文😀','','新对话'].entries()){
+  const id=`11111111-1111-4111-8111-11111111111${i}`,messages=JSON.stringify(body.messages),draft='原草稿',settings=JSON.stringify(body.settings);
+  const bytes=Buffer.byteLength(JSON.stringify({title,messages:body.messages,draft,settings:body.settings}));
+  db.prepare('INSERT INTO conversations VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,'alpha','alice',title,messages,draft,settings,i===0?1:0,i===1?1:0,i===0?'running':'completed',9+i,i===0?'old-run':null,i===0?123456:null,bytes,i===0?historyId:null,'2020','2021');
+ }
+ assert.equal(db.prepare('PRAGMA table_info(conversations)').all().length,17);
+ const originals=db.prepare('SELECT * FROM conversations ORDER BY id').all(),oldHistory=db.prepare('SELECT * FROM history').all(),oldPreferences=db.prepare('SELECT * FROM workspace_preferences').all();db.close();
+ let h=new LabHistory(dir),created;
+ try{
+  for(let restart=0;restart<2;restart++){
+   const columns=h.db.prepare('PRAGMA table_info(conversations)').all(),mode=columns.find(column=>column.name==='title_mode');
+   assert.equal(columns.length,18);assert.equal(mode.type,'TEXT');assert.equal(mode.notnull,1);assert.equal(mode.dflt_value,"'manual'");
+   assert.equal(h.db.prepare("SELECT value FROM metadata WHERE key='workspace_schema'").get().value,'2');
+   for(const original of originals){
+    const actual=h.db.prepare('SELECT * FROM conversations WHERE id=?').get(original.id);
+    assert.equal(actual.title_mode,'manual');delete actual.title_mode;assert.deepEqual(actual,original);
+    const detail=h.getConversation(alice,original.id);assert.equal(detail.title,original.title);assert.equal(detail.titleMode,'manual');assert.equal(detail.revision,original.revision);
+   }
+   assert.deepEqual(h.db.prepare('SELECT * FROM history').all(),oldHistory);assert.deepEqual(h.db.prepare('SELECT * FROM workspace_preferences').all(),oldPreferences);
+   assert.deepEqual(h.getWorkspacePreferences(alice),{revision:7,favorites:['model-a','auto']});
+   if(restart===0){created=h.createConversation(alice,{...body});h.close();h=new LabHistory(dir);}else assert.deepEqual(h.getConversation(alice,created.id),created);
+  }
+ }finally{h.close();}
+});
+
+test('autoTitle 只取首条非空 user 正文，折叠空白并按码点限制为 48 字符',()=>{
+ assert.equal(autoTitle([{role:'assistant',content:'忽略'},{role:'user',content:' \n\t ',attachments:[{data:'secret'}]},{role:'user',content:' \n中文😀\t\t问题\r\n第二行　 好 '},{role:'user',content:'不取后续'}]),'中文😀 问题 第二行 好');
+ assert.equal(autoTitle([]),'');assert.equal(autoTitle([{role:'assistant',content:'回答'},{role:'user',content:'',missingAttachments:true,attachments:[{data:'secret'}]}]),'');
+ for(const point of ['中','😀','a']){
+  assert.equal(autoTitle([{role:'user',content:point.repeat(48)}]),point.repeat(48));
+  const truncated=autoTitle([{role:'user',content:point.repeat(49)}]);assert.equal(truncated,point.repeat(47)+'…');assert.equal(Array.from(truncated).length,48);
+ }
+ assert.equal(autoTitle([{role:'user',content:'中'.repeat(46)+'😀后续'}]),'中'.repeat(46)+'😀…');
+});
+
+test('auto 标题仅在首次有效 run 原子保存，附件不入标题且后续运行不覆盖',t=>{
+ const {history:h}=fixture(t,{now:()=>1000});
+ const submitted={messages:[{role:'assistant',content:'不是标题'},{role:'user',content:' \n ',attachments:[{data:'secret'}]},{role:'user',content:'  中文😀\n 首次问题  ',missingAttachments:true,attachments:[{data:'secret'}]},{role:'user',content:'后续问题'}],draft:'',settings:{target:'auto'}};
+ for(const input of [{},{title:''},{title:'新对话'}]){
+  let row=h.createConversation(alice,{...body,...input,titleMode:'manual'});assert.equal(row.titleMode,'auto');assert.equal(row.title,input.title??'');
+  row=h.updateConversation(alice,{...version(row),draft:'不应成为标题',titleMode:'manual'});assert.equal(row.titleMode,'auto');
+  const before={...row};rejects(()=>h.startConversationRun(alice,{...version(row),...submitted,messages:[{role:'user',content:'中'.repeat(MiB)}]}),413);
+  assert.deepEqual(h.getConversation(alice,row.id),before);
+  row=h.startConversationRun(alice,{...version(row),...submitted,title:'不得写入',titleMode:'manual'});
+  assert.equal(row.title,'中文😀 首次问题');assert.equal(row.titleMode,'auto');assert.equal(row.revision,before.revision+1);assert.equal(row.leaseUntil,121000);assert.ok(row.runId);assert.equal(row.status,'running');
+  assert.doesNotMatch(JSON.stringify(row),/secret/);assert.deepEqual(h.getConversation(alice,row.id),row);
+  const listed=h.pageConversations(alice).items.find(item=>item.id===row.id);assert.equal(listed.titleMode,'auto');assert.equal(listed.title,row.title);
+  row=h.checkpointConversationRun(alice,run(row));assert.equal(row.title,'中文😀 首次问题');
+  row=h.finishConversationRun(alice,{...run(row),status:'completed'});assert.equal(row.title,'中文😀 首次问题');
+  row=h.startConversationRun(alice,{...version(row),...body});assert.equal(row.title,'中文😀 首次问题');
+ }
+ let empty=h.createConversation(alice,{title:'新对话'});
+ empty=h.startConversationRun(alice,{...version(empty),...body,messages:[{role:'user',content:' \n ',missingAttachments:true}]});assert.equal(empty.title,'新对话');
+ empty=h.finishConversationRun(alice,{...run(empty),status:'completed'});
+ empty=h.startConversationRun(alice,{...version(empty),...body});assert.equal(empty.title,'你好');
+});
+
+test('自定标题、分支标题、手工空标题及旧历史导入均为 manual，不接受客户端 titleMode',t=>{
+ const {history:h}=fixture(t);
+ for(const title of ['自定标题','原会话 · 分支']){
+  let row=h.createConversation(alice,{title,titleMode:'auto'});assert.equal(row.titleMode,'manual');
+  row=h.startConversationRun(alice,{...version(row),...body});assert.equal(row.title,title);assert.equal(row.titleMode,'manual');
+ }
+ for(const title of ['', '新对话','手工修改']){
+  let row=h.createConversation(alice,{});row=h.updateConversation(alice,{...version(row),title,titleMode:'auto'});assert.equal(row.titleMode,'manual');
+  row=h.startConversationRun(alice,{...version(row),...body});assert.equal(row.title,title);assert.equal(row.titleMode,'manual');
+  row=h.finishConversationRun(alice,{...run(row),status:'completed'});row=h.startConversationRun(alice,{...version(row),...body});assert.equal(row.title,title);
+ }
+ for(const title of ['', '新对话','历史自定标题']){
+  const old=h.put(alice,{area:'chat',status:'completed',title,result:JSON.stringify({version:2,messages:body.messages})});
+  let row=h.importConversation(alice,{historyId:old.id,titleMode:'auto'});assert.equal(row.title,title);assert.equal(row.titleMode,'manual');
+  row=h.startConversationRun(alice,{...version(row),...body});assert.equal(row.title,title);assert.equal(row.titleMode,'manual');
+ }
+});
+
+test('跨连接 rename CAS 先获胜时，旧 run/start 不能覆盖手工标题或取得 runId',t=>{
+ const {dir,history:h}=fixture(t),second=new LabHistory(dir);t.after(()=>second.close());
+ for(const title of ['新对话','并发自定标题']){
+  const stale=h.createConversation(alice,{}),renamed=second.updateConversation(alice,{...version(stale),title});
+  rejects(()=>h.startConversationRun(alice,{...version(stale),...body}),409);assert.deepEqual(h.getConversation(alice,stale.id),renamed);assert.equal(renamed.runId,null);
+  const started=h.startConversationRun(alice,{...version(renamed),...body});assert.equal(started.title,title);assert.equal(started.titleMode,'manual');assert.equal(started.revision,renamed.revision+1);
+  rejects(()=>second.updateConversation(alice,{...version(renamed),title:'旧页面'}),409);assert.deepEqual(second.getConversation(alice,started.id),started);
+ }
+});
+
+test('usage 含归档、隔离用户租户，不随搜索分页筛选变化，删除后下降至零',t=>{
+ const {history:h}=fixture(t),limits={count:200,bytes:33554432,conversationBytes:1048576,draftBytes:65536};
+ assert.deepEqual(h.pageConversations(alice).usage,{count:0,bytes:0,limits});
+ const visible=h.createConversation(alice,{title:'可见',...body}),second=h.createConversation(alice,{title:'第二条'});
+ let archived=h.createConversation(alice,{title:'归档',draft:'归档正文'});archived=h.updateConversation(alice,{...version(archived),archived:true});
+ const foreignUser=h.createConversation(bob,{title:'其他用户',draft:'用户'.repeat(100)}),foreignTenant=h.createConversation(other,{title:'其他租户',draft:'租户'.repeat(200)});
+ const usage={count:3,bytes:visible.bytes+second.bytes+archived.bytes,limits};
+ for(const options of [{},{q:'可见'},{q:'不存在'},{archived:'true'},{archived:'all'},{page:2,limit:1},{q:'不存在',archived:'false',page:999,limit:1}])assert.deepEqual(h.pageConversations(alice,options).usage,usage);
+ assert.equal(h.pageConversations(alice).total,2);assert.equal(h.pageConversations(alice,{archived:'true'}).total,1);assert.equal(h.pageConversations(alice,{q:'不存在'}).total,0);
+ assert.deepEqual(h.pageConversations(bob).usage,{count:1,bytes:foreignUser.bytes,limits});assert.deepEqual(h.pageConversations(other).usage,{count:1,bytes:foreignTenant.bytes,limits});
+ assert.deepEqual(h.pageConversations({...bob,tenantId:other.tenantId}).usage,{count:0,bytes:0,limits});
+ const response=h.pageConversations(alice);response.usage.limits.count=999;assert.deepEqual(h.pageConversations(alice).usage,usage);
+ h.deleteConversation(alice,version(archived));assert.deepEqual(h.pageConversations(alice).usage,{count:2,bytes:visible.bytes+second.bytes,limits});
+ h.deleteConversation(alice,version(visible));h.deleteConversation(alice,version(second));assert.deepEqual(h.pageConversations(alice).usage,{count:0,bytes:0,limits});
+ assert.deepEqual(h.pageConversations(bob).usage,{count:1,bytes:foreignUser.bytes,limits});assert.deepEqual(h.pageConversations(other).usage,{count:1,bytes:foreignTenant.bytes,limits});
 });
 
 test('HTTP 新接口沿用 session 与 X-Tenant-ID，viewer 禁写，body 限制不扩散',async t=>{
@@ -169,8 +285,10 @@ test('HTTP 新接口沿用 session 与 X-Tenant-ID，viewer 禁写，body 限制
  assert.equal((await request('conversations/item?id='+row.id,undefined,root)).status,200);
  assert.equal((await request('conversations/item?id='+row.id,undefined,member)).status,404);
  assert.equal((await request('conversations/update',version(row),member)).status,404);
- assert.equal((await request('conversations?archived=all&q=HTTP&page=1&limit=1',undefined,root)).body.total,1);
- assert.equal((await request('conversations',undefined,viewer)).status,200);
+ const listing=(await request('conversations?archived=all&q=HTTP&page=1&limit=1',undefined,root)).body;
+ assert.equal(listing.total,1);assert.equal(row.titleMode,'manual');assert.equal(listing.items[0].titleMode,'manual');
+ assert.deepEqual(listing.usage,{count:1,bytes:row.bytes,limits:{count:200,bytes:33554432,conversationBytes:1048576,draftBytes:65536}});
+ const viewerPage=await request('conversations',undefined,viewer);assert.equal(viewerPage.status,200);assert.deepEqual(viewerPage.body.usage,{...listing.usage,count:0,bytes:0});
  response=await request('conversations/update',{...version(row),title:'新标题'},root);assert.equal(response.status,200);row=response.body;
  assert.equal((await request('conversations/update',{id:row.id,expectedRevision:1},root)).status,409);
  response=await request('conversations/run/start',{...version(row),...body},root);assert.equal(response.status,200);row=response.body;

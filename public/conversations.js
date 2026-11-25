@@ -34,6 +34,34 @@ export function conversationBlockReason(entry){
  return '';
 }
 
+export function messageBranchDraft(entry,{index,kind='edit',text}={}){
+ if(!Number.isInteger(index)||index<0||index>=entry.messages.length)throw Error('消息已改变，请重新选择');
+ if(!['edit','retry'].includes(kind))throw Error('分支操作无效');
+ let userIndex=index;
+ if(kind==='retry'){if(entry.messages[index].role!=='assistant')throw Error('请选择要重试的助手回复');while(userIndex>=0&&entry.messages[userIndex].role!=='user')userIndex--;}
+ const message=entry.messages[userIndex];
+ if(!message||message.role!=='user'||typeof message.content!=='string')throw Error('这条消息包含未保存素材，不能直接编辑或重试');
+ const prefix=conversationMessages(entry.messages.slice(0,userIndex));
+ if([...prefix,message].some(row=>row.missingAttachments||row.video||row.tool_calls===true||row.tool_calls?.length||row.status==='等待工具结果'))throw Error('上下文包含缺失素材或工具，请先明确另建纯文本会话');
+ const draft=kind==='retry'?message.content:text;
+ if(typeof draft!=='string'||!draft.trim())throw Error('请输入消息内容');
+ return {title:(entry.record.title||'对话').slice(0,165).replace(/[\uD800-\uDBFF]$/,'')+' · '+(kind==='retry'?'重试':'编辑'),messages:prefix,draft,settings:clone(entry.settings)};
+}
+
+export function conversationDocument(record,format='markdown',{includeReasoning=false}={}){
+ if(!['json','markdown','text'].includes(format))throw Error('不支持的导出格式');
+ const title=String(record.title||'未命名对话'),name=title.replace(/[\\/\u0000-\u001f\u007f:*?"<>|]/g,'_').slice(0,80).replace(/[\uD800-\uDBFF]$/,'');
+ const extension={json:'json',markdown:'md',text:'txt'}[format],type={json:'application/json',markdown:'text/markdown',text:'text/plain'}[format];
+ if(format==='json')return {text:JSON.stringify(record,null,2),filename:`会话-${name}.${extension}`,type};
+ const md=format==='markdown',heading=value=>md?String(value).replace(/[\\`*_{}[\]<>#]/g,'\\$&'):String(value),parts=[md?'# '+heading(title):title];
+ if(record.localSaveError)parts.push('注意：包含尚未保存到服务器的本地内容。');
+ if(['running','interrupted','failed','stopped'].includes(record.status))parts.push('记录状态：'+record.status+'；内容可能未完成。');
+ for(const message of record.messages||[]){const label=message.role==='user'?'你':message.label||'助手';parts.push(md?'## '+heading(label):'【'+label+'】',String(message.content||''));if(includeReasoning&&message.reasoning_content)parts.push(md?'### 思考内容':'【思考内容】',String(message.reasoning_content));if(message.missingAttachments)parts.push('[素材未持久保存]');if(message.tool_calls)parts.push('[工具上下文未包含在此文档中]');}
+ if(record.draft)parts.push(md?'## 未发送草稿':'【未发送草稿】',record.draft);
+ return {text:parts.join('\n\n')+'\n',filename:`会话-${name}.${extension}`,type};
+}
+export const formatConversationBytes=value=>value>=1048576?(value/1048576).toFixed(2)+' MiB':value>=1024?(value/1024).toFixed(1)+' KiB':Math.max(0,value)+' B';
+
 export async function conversationRequest(tenantId,route='',data,{fetcher=globalThis.fetch}={}){
  const response=await fetcher('/api/account/conversations'+route,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:{'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
  let body;try{body=await response.json();}catch{body={};}
@@ -158,9 +186,21 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
   const copy=local({...entry.settings},{title:`${entry.record.title||'对话'} · ${textOnly?'纯文本':'分支'}`,messages,draft:entry.draft});
   try{await flush(copy);}catch(error){error.localEntry=copy;throw error;}return copy;
  };
+ const branchMessage=async(entry,options,{isCurrent=()=>true}={})=>{
+  if(entry.run||entry.starting||entry.record.status==='running')throw Error('请先结束当前生成');
+  const localVersion=entry.version,seed=messageBranchDraft(entry,options);
+  const current=()=>isCurrent()&&entry.version===localVersion;
+  if(!current())throw Error('操作已取消，未发送模型请求');
+  await flush(entry);
+  if(!current())throw Error('会话已切换或消息已改变，请重新操作');
+  const revision=entry.record.revision,latest=await enqueue(null,()=>request('/item?id='+encodeURIComponent(entry.id)));
+  if(latest.revision!==revision){const error=Object.assign(Error('源会话已在其他页面修改，请先重新加载'),{status:409});fail(entry,error);throw error;}
+  if(!current())throw Error('操作已取消，未发送模型请求');
+  const copy=local(seed.settings,seed);await flush(copy);return copy;
+ };
  const importHistory=historyId=>enqueue(null,async()=>{const record=await request('/import',{historyId});const cached=entries.get(record.id);if(cached)return cached;const entry=fromRecord(record);entries.set(entry.id,entry);return entry;});
  const exportEntry=entry=>({...clone(entry.record),...conversationPayload(entry,{validate:false}),...(entry.error?{localSaveError:{message:entry.error.message,status:entry.error.status}}:{})});
- return {entries,local,load,change,flush,start,output,checkpoint,finish,update,recover,remove,branch,importHistory,exportEntry,readOnly,
+ return {entries,local,load,change,flush,start,output,checkpoint,finish,update,recover,remove,branch,branchMessage,importHistory,exportEntry,readOnly,
   list:params=>enqueue(null,()=>request('?'+new URLSearchParams({q:'',archived:'false',page:'1',limit:'20',...params}))),
   subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},
   dispose(){disposed=true;for(const entry of entries.values()){timers.clearTimeout(entry.draftTimer);clearRunTimers(entry);}listeners.clear();},
@@ -178,18 +218,28 @@ export function mountConversations(root,{client,entry,initialConversationId,onSe
  const toolbar=document.createElement('div');toolbar.className='conversation-toolbar';
  toolbar.innerHTML='<strong data-title></strong><button type="button" data-export>导出</button><button type="button" data-branch>另存分支</button><details class="conversation-more"><summary>会话管理</summary><div><button type="button" data-rename>重命名</button><button type="button" data-pin>置顶</button><button type="button" data-archive>归档</button><button type="button" data-reload>重新加载</button><button type="button" data-delete class="danger-text">删除会话</button></div></details><button type="button" data-backup hidden>导出本地副本</button><button type="button" data-text hidden>另建纯文本会话</button><button type="button" data-recover hidden>恢复会话</button>';
  const saveState=document.createElement('p');saveState.className='conversation-save-state';saveState.setAttribute('role','status');
- canvas.before(layout);layout.append(toggle,rail,workspace);workspace.append(toolbar,saveState,canvas);
- let current=entry,page=1,pages=1,epoch=0,openEpoch=0,searchTimer=null,destroyed=false,lastId,refreshTimer=null;
+ const capacity=document.createElement('div');capacity.className='conversation-capacity';capacity.innerHTML='<span data-capacity-label>正在读取存储用量…</span><progress max="100" value="0" aria-label="个人会话存储使用率"></progress><small>包括已归档会话；不会自动清理。</small>';rail.append(capacity);
+ const currentSize=document.createElement('small');currentSize.className='conversation-size';currentSize.setAttribute('aria-live','polite');
+ const exportDialog=document.createElement('dialog');exportDialog.className='conversation-export-dialog';exportDialog.innerHTML='<form method="dialog"><h2>导出对话</h2><p>直接导出当前内容，不会调用模型。未保存的草稿也会包含。</p><label>文件格式<select name="format"><option value="markdown">Markdown 文档</option><option value="text">纯文本</option><option value="json">JSON 完整备份</option></select></label><label class="check"><input type="checkbox" name="reasoning"> 包含思考内容（Markdown / 文本）</label><p class="muted">JSON 保留原有完整备份信息；请妥善保存导出文件。</p><div class="dialog-actions"><button value="cancel">取消</button><button type="button" class="primary" data-download>下载文件</button></div></form>';root.append(exportDialog);
+ canvas.before(layout);layout.append(toggle,rail,workspace);workspace.append(toolbar,saveState,currentSize,canvas);
+ let current=entry,page=1,pages=1,epoch=0,openEpoch=0,searchTimer=null,destroyed=false,lastId,refreshTimer=null,usage=null,exportSource=null;
  const list=rail.querySelector('.conversation-list'),listState=rail.querySelector('.conversation-list-state'),search=rail.querySelector('input'),filter=rail.querySelector('select');
  const error=err=>{if(destroyed)return;listState.textContent=err.message;onError?.(err);};
  const action=fn=>async()=>{try{await fn();}catch(err){error(err);}};
- const download=(data,name)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`会话-${name}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+ const downloadFile=doc=>{const url=URL.createObjectURL(new Blob([doc.text],{type:doc.type+';charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=doc.filename;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+ const download=(data,name)=>downloadFile({...conversationDocument(data,'json'),filename:`会话-${name}.json`});
+ exportDialog.querySelector('[data-download]').onclick=()=>{if(!exportSource||destroyed)return;const form=exportDialog.querySelector('form');downloadFile(conversationDocument(client.exportEntry(exportSource),form.elements.format.value,{includeReasoning:form.elements.reasoning.checked}));exportDialog.close();};
+ exportDialog.onclose=()=>{exportSource=null;};
  const redraw=()=>{
   if(destroyed||!current)return;
   toolbar.querySelector('[data-title]').textContent=current.record.title||'新对话';
   const blocked=conversationBlockReason(current),dirty=current.version!==current.savedVersion;
   saveState.dataset.state=current.conflict?'conflict':current.error?'error':dirty?'unsaved':'saved';
   saveState.textContent=blocked||(current.run?'正在生成 · 检查点自动保存':dirty?'未保存 · 正在同步':'已保存');
+  const payload=conversationPayload(current,{validate:false}),localBytes=bytes(JSON.stringify({title:current.record.title||'',...payload})),draftBytes=bytes(payload.draft);
+  currentSize.textContent=`已保存 ${formatConversationBytes(current.record.bytes||0)} · 当前内容 ${formatConversationBytes(localBytes)} / 1 MiB · 草稿 ${formatConversationBytes(draftBytes)} / 64 KiB${dirty?'（待同步）':''}`;
+  currentSize.classList.toggle('capacity-warning',localBytes>=1048576*.8||draftBytes>=65536*.8);
+  if(usage){const percent=Math.min(100,usage.bytes/usage.limits.bytes*100);capacity.querySelector('[data-capacity-label]').textContent=`${usage.count} / ${usage.limits.count} 个会话 · ${formatConversationBytes(usage.bytes)} / ${formatConversationBytes(usage.limits.bytes)}`;capacity.querySelector('progress').value=percent;capacity.classList.toggle('capacity-warning',percent>=80||usage.count/usage.limits.count>=.8);}
   const running=current.record.status==='running'||!!current.starting;
   for(const key of ['rename','pin','archive','delete'])toolbar.querySelector(`[data-${key}]`).disabled=running;
   toolbar.querySelector('[data-pin]').textContent=current.record.pinned?'取消置顶':'置顶';
@@ -207,7 +257,7 @@ export function mountConversations(root,{client,entry,initialConversationId,onSe
   try{
    const result=await client.list({q:search.value.trim(),archived:filter.value,page:String(page)});
    if(destroyed||generation!==epoch)return;
-   page=result.page;pages=result.pages;list.replaceChildren();
+   page=result.page;pages=result.pages;usage=result.usage||null;list.replaceChildren();
    const localRows=[...client.entries.values()].filter(value=>(value.isNew||value.error||value.version!==value.savedVersion)&&(value===current||value.messages.length||value.draft.trim()||value.error)&&!result.items.some(row=>row.id===value.id)&&(filter.value==='all'||String(!!value.record.archived)===filter.value)&&(!search.value.trim()||`${value.record.title} ${value.draft}`.includes(search.value.trim()))).map(value=>({...value.record,id:value.id,title:`${value.record.title||'新对话'} · 本地未保存`}));
    for(const row of [...localRows,...result.items]){const article=document.createElement('div');article.className='conversation-row';article.dataset.id=row.id;article.setAttribute('role','listitem');const button=document.createElement('button');button.type='button';button.textContent=`${row.pinned?'置顶 · ':''}${row.title||'新对话'}${row.status==='running'?' · 生成中':''}`;button.onclick=action(()=>open(row.id));article.append(button);list.append(article);}
    rail.querySelector('[data-count]').textContent=`${result.total} 条 · ${page}/${pages}`;rail.querySelector('[data-prev]').disabled=page<=1;rail.querySelector('[data-next]').disabled=page>=pages;listState.textContent=result.items.length?'':'暂无会话';redraw();
@@ -220,20 +270,20 @@ export function mountConversations(root,{client,entry,initialConversationId,onSe
  rail.querySelector('[data-refresh]').onclick=()=>void refresh();
  rail.querySelector('[data-prev]').onclick=()=>{page--;void refresh();};rail.querySelector('[data-next]').onclick=()=>{page++;void refresh();};
  search.oninput=()=>{epoch++;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{page=1;void refresh();},250);};filter.onchange=()=>{page=1;void refresh();};
- const mutation=fn=>action(async()=>{await fn(current);redraw();onSelect?.(current);await refresh();});
+ const mutation=fn=>action(async()=>{await fn(current);toolbar.querySelector('.conversation-more').open=false;redraw();onSelect?.(current);await refresh();});
  toolbar.querySelector('[data-rename]').onclick=mutation(async value=>{const title=prompt('会话名称',value.record.title||'');if(title?.trim())await client.update(value,{title:title.trim()});});
  toolbar.querySelector('[data-pin]').onclick=mutation(value=>client.update(value,{pinned:!value.record.pinned}));
  toolbar.querySelector('[data-archive]').onclick=mutation(value=>client.update(value,{archived:!value.record.archived}));
  toolbar.querySelector('[data-delete]').onclick=action(async()=>{const value=current;if(!confirm(`删除“${value.record.title||'新对话'}”？此操作不可撤销。`))return;await client.remove(value);if(current===value)newConversation();await refresh();});
- toolbar.querySelector('[data-export]').onclick=()=>download(client.exportEntry(current),current.id);
+ toolbar.querySelector('[data-export]').onclick=()=>{exportSource=current;exportDialog.querySelector('form').reset();exportDialog.showModal();};
  toolbar.querySelector('[data-backup]').onclick=()=>download(current.backup,`${current.id}-本地副本`);
  const fork=textOnly=>action(async()=>{if(textOnly&&!confirm('仅保留文字，素材与工具调用上下文将丢失。新建纯文本会话？'))return;try{select(await client.branch(current,{textOnly}));}catch(err){if(err.localEntry)select(err.localEntry);throw err;}await refresh();});
  toolbar.querySelector('[data-branch]').onclick=fork(false);toolbar.querySelector('[data-text]').onclick=fork(true);
  toolbar.querySelector('[data-reload]').onclick=action(async()=>{if(!confirm('重新加载服务器版本？未保存内容将保留为可导出的本地副本。'))return;await open(current.id,{reload:true});});
  toolbar.querySelector('[data-recover]').onclick=mutation(async value=>{if(confirm('上游可能仍在执行，恢复不会停止上游，也不会重发请求。确认恢复为中断状态？'))await client.recover(value);});
  const unsubscribe=client.subscribe(value=>{if(destroyed)return;if(value===current){redraw();onStateChange?.(value);}clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),700);});
- const leaseTimer=setInterval(redraw,1000);
+ const leaseTimer=setInterval(()=>{if(current?.record.status==='running')redraw();},1000);
  const ready=initialConversationId?open(initialConversationId).catch(err=>{error(err);throw err;}):Promise.resolve(select(entry));
  void ready.catch(()=>{});void refresh();
- return {ready,open,newConversation,refresh,select,get current(){return current;},destroy(){destroyed=true;openEpoch++;epoch++;unsubscribe();clearTimeout(searchTimer);clearTimeout(refreshTimer);clearInterval(leaseTimer);}};
+ return {ready,open,newConversation,refresh,select,get current(){return current;},destroy(){destroyed=true;if(exportDialog.open)exportDialog.close();openEpoch++;epoch++;unsubscribe();clearTimeout(searchTimer);clearTimeout(refreshTimer);clearInterval(leaseTimer);}};
 }

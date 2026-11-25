@@ -459,7 +459,42 @@ body:has(#content.chat-workspace)>main>footer { display: none; }
 .conversation-more { position: relative; font-size: 11px; flex: none; }.conversation-more summary { cursor: pointer; list-style: none; padding: 7px 10px; border: 1px solid var(--ui-border); border-radius: 7px; color: var(--ui-muted); background: var(--ui-surface); }.conversation-more summary::-webkit-details-marker { display: none; }.conversation-more>div { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 150px; padding: 6px; border: 1px solid var(--ui-border); border-radius: 9px; background: var(--ui-surface); box-shadow: 0 10px 35px #0002; }.conversation-more>div>button { display: block; width: 100%; text-align: left; border: 0; padding: 9px 10px; }
 .workspace-v3 #content.chat-workspace .chat-canvas { flex: 1; min-height: 0; }.workspace-v3 #content.chat-workspace .lab-main { border-radius: 12px; }.workspace-v3 #content.chat-workspace .lab-toolbar { padding: 12px 16px; }.workspace-v3 #content.chat-workspace .lab-messages { padding: 24px; }.workspace-v3 #content.chat-workspace .lab-composer { margin: 0 16px; width: calc(100% - 32px); max-width: none; border-radius: 13px; background: var(--ui-surface-soft); }.workspace-v3 #content.chat-workspace .lab-empty { align-items: center; text-align: center; max-width: 480px; }.workspace-v3 #content.chat-workspace .lab-empty h2 { font-size: 24px; line-height: 1.4; }.workspace-v3 #content.chat-workspace .lab-prompts { justify-content: center; flex-wrap: wrap; }.workspace-v3 #content.chat-workspace .lab-prompts button { min-height: 36px; }.workspace-v3 #content.chat-workspace .lab-model-quick { flex-basis: 220px; }
 @media(max-width:1150px) { .conversation-layout { grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); gap: 8px; }.conversation-mobile-toggle { display: block; justify-self: start; padding: 5px 10px; font-size: 11px; }.conversation-rail { display: none; }.conversation-layout.is-open .conversation-rail { display: flex; position: absolute; z-index: 25; top: 43px; bottom: 0; left: 0; width: min(280px,90%); box-shadow: 8px 0 30px #0002; }.workspace-v3 #content.chat-workspace .chat-canvas.settings-open { grid-template-columns: minmax(0,1fr); }.workspace-v3 #content.chat-workspace .lab-settings:not([hidden]) { position: absolute; z-index: 24; inset: 0 0 0 auto; width: min(300px,90%); background: var(--ui-surface); box-shadow: -8px 0 30px #0002; } }
-@media(max-width:720px) { .workspace-v3 #content.chat-workspace { height: calc(100dvh - 214px); min-height: 840px; padding: 16px 12px; }.conversation-workspace>.conversation-toolbar { gap: 6px; }.conversation-toolbar>strong { min-width: 90px; }.conversation-toolbar button { padding: 5px 7px; }.workspace-v3 #content.chat-workspace .lab-messages { padding: 16px 12px; }.workspace-v3 #content.chat-workspace .lab-toolbar { padding: 10px; }.workspace-v3 #content.chat-workspace .lab-composer { margin-inline: 10px; width: calc(100% - 20px); }.workspace-v3 #content.chat-workspace .lab-empty h2 { font-size: 20px; } }
+.conversation-size { flex: none; font-size: 9px; color: var(--ui-muted); margin: 0 0 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.conversation-capacity { flex: none; display: grid; gap: 7px; border-top: 1px solid var(--ui-border); padding-top: 12px; font-size: 9px; color: var(--ui-muted); }.conversation-capacity progress { width: 100%; height: 5px; accent-color: var(--ui-accent); }.conversation-capacity small { font-size: 9px; line-height: 1.5; }.capacity-warning { color: var(--ui-danger); }
+.conversation-export-dialog,.message-edit-dialog { width: min(560px,calc(100vw - 24px)); max-height: 90dvh; padding: 24px; }.conversation-export-dialog p,.message-edit-dialog p { font-size: 12px; line-height: 1.7; }.message-edit-dialog textarea { min-height: 150px; max-height: 45dvh; }.message-edit-dialog [data-edit-error] { color: var(--ui-danger); }
+.lab-message-action { flex: none; font-size: 10px; min-height: 28px; padding: 4px 7px; margin-left: 4px; }.lab-speaker { flex-wrap: wrap; }
+@media(max-width:720px), (max-width:1000px) and (max-height:540px) {
+ body.workspace-v3:has(#content.chat-workspace) { height: 100dvh; overflow: hidden; }
+ .workspace-v3:has(#content.chat-workspace)>.sidebar { position: relative; inset: auto; display: block; width: 100%; height: 43px; min-height: 43px; padding: 4px 8px; }
+ .workspace-v3:has(#content.chat-workspace) .sidebar-heading,.workspace-v3:has(#content.chat-workspace) .workspace-chip,.workspace-v3:has(#content.chat-workspace) .workspace-mode-switch,.workspace-v3:has(#content.chat-workspace) .sidebar-footer { display: none; }
+ .workspace-v3:has(#content.chat-workspace) .sidebar nav { display: flex; flex-direction: row; height: 35px; min-height: 35px; margin: 0; overflow-x: auto; }
+ .workspace-v3:has(#content.chat-workspace) .sidebar .nav-group { display: flex; flex-direction: row; flex: none; gap: 4px; }
+ .workspace-v3:has(#content.chat-workspace) .sidebar .nav-label,.workspace-v3:has(#content.chat-workspace) .sidebar [data-workspace-mode=shared] { display: none; }
+ .workspace-v3:has(#content.chat-workspace) .sidebar .nav-item { width: auto; min-height: 33px; height: 33px; }
+ .workspace-v3:has(#content.chat-workspace)>main { display: flex; flex-direction: column; height: calc(100dvh - 43px); min-height: 0; margin-left: 0; }
+ .workspace-v3:has(#content.chat-workspace)>main>header { height: 36px; min-height: 36px; flex: none; padding: 3px 10px; }
+ .workspace-v3 #content.chat-workspace { height: auto; min-height: 0; flex: 1; padding: 6px 8px; overflow: hidden; }
+ .workspace-v3 #content.chat-workspace>.heading { display: none; }
+ .workspace-v3 #content.chat-workspace .lab-nav-row { margin-bottom: 5px; }
+ .workspace-v3 #content.chat-workspace .lab-nav-row button { min-height: 27px; padding: 3px 7px; font-size: 10px; }
+ .conversation-layout { gap: 4px; }.conversation-mobile-toggle { min-height: 26px; padding: 3px 8px; font-size: 10px; }
+ .conversation-workspace>.conversation-toolbar { gap: 4px; padding-bottom: 5px; }.conversation-toolbar>strong { min-width: 70px; font-size: 12px; }.conversation-toolbar button { min-height: 27px; padding: 4px 6px; }
+ .conversation-save-state { margin: 3px 0; font-size: 9px; }.conversation-size { margin-bottom: 4px; font-size: 8px; }
+ .workspace-v3 #content.chat-workspace .lab-messages { padding: 14px 10px; min-height: 25px; }
+ .workspace-v3 #content.chat-workspace .lab-toolbar { min-height: 42px; padding: 6px 8px; }
+ .workspace-v3 #content.chat-workspace #lab-model-search { display: none; }
+ .workspace-v3 #content.chat-workspace .lab-session-summary { display: none; }
+ .workspace-v3 #content.chat-workspace .lab-composer { margin-inline: 8px; width: calc(100% - 16px); }
+ .workspace-v3 #content.chat-workspace .lab-composer textarea { min-height: 42px; max-height: 86px; padding: 9px 10px; }
+ .workspace-v3 #content.chat-workspace #lab-compose-hint { display: none; }
+ .workspace-v3 #content.chat-workspace .lab-compose-bottom { padding: 4px 7px; }
+ .workspace-v3 #content.chat-workspace .lab-privacy { display: none; }
+ .workspace-v3 #content.chat-workspace .lab-main { position: relative; padding-bottom: max(7px,env(safe-area-inset-bottom)); }
+ .workspace-v3 #content.chat-workspace .lab-jump { position: absolute; right: 16px; bottom: 135px; z-index: 3; margin: 0; box-shadow: 0 3px 12px #0001; }
+ .workspace-v3 #content.chat-workspace .lab-empty h2 { font-size: 19px; }
+ .lab-message-action { font-size: 9px; min-height: 25px; }
+}
+@media(max-width:1000px) and (max-height:540px) { .workspace-v3 #content.chat-workspace .lab-jump { bottom: 108px; }.workspace-v3 #content.chat-workspace .lab-nav-row,.workspace-v3 #content.chat-workspace .conversation-size { display: none; }.workspace-v3 #content.chat-workspace .lab-composer textarea { min-height: 35px; max-height: 55px; }.workspace-v3 #content.chat-workspace .lab-empty { padding: 6px; }.workspace-v3 #content.chat-workspace .lab-empty p,.workspace-v3 #content.chat-workspace .lab-prompts { display: none; } }
 
 .workspace-v3 .workspace-mode-switch { display: grid; grid-template-columns: 1fr 1fr; flex: none; padding: 4px; margin: 0 0 20px; border: 1px solid var(--ui-border); border-radius: 10px; background: var(--ui-surface-soft); }
 .workspace-v3 .workspace-mode-switch button { min-width: 0; padding: 8px 4px; border: 0; background: transparent; color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
