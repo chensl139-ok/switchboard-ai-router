@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-**版本：3.1.1 · 2026-11-26。** 本版整合 AI 工作台、持久会话及可靠性修复。源码与发布镜像是独立交付物，升级前请核对版本标签；可用版本以实际 [GitHub Releases](https://github.com/chensl139-ok/switchboard-ai-router/releases) 为准。[更新记录](CHANGELOG.md) · [升级与迁移](docs/OPERATIONS.md)
+**版本：3.1.2 · 2026-11-26。** 本版为创作任务增加可靠删除，支持卡片与详情操作，并保留此前工作台和持久会话能力。源码与发布镜像是独立交付物，升级前请核对版本标签；可用版本以实际 [GitHub Releases](https://github.com/chensl139-ok/switchboard-ai-router/releases) 为准。[更新记录](CHANGELOG.md) · [升级与迁移](docs/OPERATIONS.md)
 
 ## 看一遍完整流程
 
@@ -43,7 +43,7 @@
 
 编辑用户消息会创建**新分支草稿**，不会自动发送；助手重试必须确认可能产生的费用，并创建新分支，不覆盖原回答。支持 JSON／Markdown／文本导出，Markdown 和文本默认不含思考；JSON 可能包含已保存的思考与元数据，分享前应检查。
 
-图片、视频、音频等输入素材不永久保存。刷新后缺失附件或工具上下文时，不能继续原上下文；文本存档不等于完整多模态备份。媒体任务的**查询状态**和**重新生成**分开，重新生成是新的可能计费请求，结果 URL 可能过期，应及时下载。
+图片、视频、音频等输入素材不永久保存。刷新后缺失附件或工具上下文时，不能继续原上下文；文本存档不等于完整多模态备份。媒体任务的**查询状态**和**重新生成**分开，重新生成是新的可能计费请求，结果 URL 可能过期，应及时下载。创作任务卡片和详情均可**删除记录**：仅清理本人当前租户的本地历史，不取消上游、不退款、不清除外部文件或用量日志；处理中任务仍可能继续计费。[创作任务界面](docs/demo/tasks.jpg)。
 
 保存采用 `revision` CAS（比较后写入）；生成绑定 `runId` 和 120 秒租约，客户端每 25 秒续租，输出检查点按 5 秒间隔保存。冲突要求重新加载核对，不静默覆盖。删除不会新建再保存一条替代记录：404 清除本地失效项，409 要求重新加载并再次确认，网络失败保留本地副本。创建响应丢失、无法确定是否落库时，应先导出本地内容、刷新并按 ID 核对，不按标题猜测删除。
 
@@ -94,18 +94,18 @@ Responses 是**无状态子集，不保证完整 Codex 兼容**；非 Claude 模
 
 ### 使用预构建镜像
 
-**仅在 3.1.1 已实际发布后**使用下列固定版本示例。在仓库目录初始化配置，再拉取 `linux/amd64` 或 `linux/arm64` 镜像：
+**仅在 3.1.2 已实际发布后**使用下列固定版本示例。在仓库目录初始化配置，再拉取 `linux/amd64` 或 `linux/arm64` 镜像：
 
 ```sh
 npm run setup
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.2
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
+  ghcr.io/chensl139-ok/switchboard-ai-router:3.1.2
 ```
 
 `docker run` 与 Compose **二选一**，不能同时占用端口或挂载同一数据目录。重建已有容器须保留原参数、令牌和挂载。Release 附件包括源码 ZIP／TGZ、离线 OCI 镜像包和 `SHA256SUMS`；升级与回退见 [运维说明](docs/OPERATIONS.md)。
@@ -153,7 +153,7 @@ TPS 包含首字延迟和可能的回退；TPOT 根据流式增量与上游用�
 
 | 标签 | 内容 | 更新方式 |
 | --- | --- | --- |
-| `3.1.1`、`3.1`、`latest` | 目标正式版，工作流成功发布后才可用 | `v*` 标签 → 校验测试 → 双架构 GHCR → Release 附件 |
+| `3.1.2`、`3.1`、`latest` | 目标正式版，工作流成功发布后才可用 | `v*` 标签 → 校验测试 → 双架构 GHCR → Release 附件 |
 | `main` | 最近一次手动发布的主分支构建，非正式版 | 在 main 手动触发 [Main branch image](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/image-main.yml) |
 | `sha-<完整提交 SHA>` | 可追溯的主分支构建 | 同一流程；精确固定建议使用 digest |
 

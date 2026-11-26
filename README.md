@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
-**Version 3.1.1 · 2026-11-26.** This version consolidates the AI workspace, persistent conversations and reliability fixes. Source changes and published images are separate: check the release and image tag before upgrading. See [release notes](CHANGELOG.md), [upgrade guidance](docs/OPERATIONS.md) and the actual [GitHub Releases](https://github.com/chensl139-ok/switchboard-ai-router/releases).
+**Version 3.1.2 · 2026-11-26.** This patch adds reliable deletion of creation-task records from cards and details, retaining the existing workspace and persistent conversations. Source changes and published images are separate: check the release and image tag before upgrading. See [release notes](CHANGELOG.md), [upgrade guidance](docs/OPERATIONS.md) and the actual [GitHub Releases](https://github.com/chensl139-ok/switchboard-ai-router/releases).
 
 ## See the workflow
 
@@ -43,7 +43,7 @@ Opening **New conversation** leaves a local blank draft, not a database record. 
 
 Editing a user message creates a **new branch draft**, without sending it. Retrying an assistant answer requires confirmation of possible charges and creates a new branch; it does not overwrite the original answer. Export as JSON, Markdown or text; Markdown/text omit thinking by default. Review JSON before sharing because it can include stored thinking and metadata.
 
-Image/video/audio inputs are not permanent assets. After reload, missing attachments or tool context prevent continuing the original context; text-only storage is not a lossless multimodal archive. Media task **status queries** and **regeneration** are separate actions: regeneration is a new potentially billable call, and result URLs may expire.
+Image/video/audio inputs are not permanent assets. After reload, missing attachments or tool context prevent continuing the original context; text-only storage is not a lossless multimodal archive. Media task **status queries** and **regeneration** are separate actions: regeneration is a new potentially billable call, and result URLs may expire. Cards and details offer **Delete record** for your current-tenant history only; deletion does not cancel upstream work, issue a refund, or remove external files or usage logs. Pending tasks may still incur charges. [Creation-task view](docs/demo/tasks.jpg).
 
 Writes use revision-based compare-and-swap (CAS). Runs have a `runId` and a 120-second lease, renewed every 25 seconds with output checkpoints at 5-second intervals. A conflict requires reloading and confirmation, not silent overwrite. Delete does not create a replacement conversation: 404 removes the stale local entry; 409 requires reload and confirmation; network failure retains the local copy. If creation may have succeeded but its response was lost, export the local copy and refresh to reconcile IDs—never delete by guessing a title.
 
@@ -91,18 +91,18 @@ Responses include `x-router-provider`, `x-router-model`, `x-router-protocol` and
 
 ### Prebuilt containers
 
-After **3.1.1 has actually been published**, initialize configuration once in the repository directory, then use the pinned image:
+After **3.1.2 has actually been published**, initialize configuration once in the repository directory, then use the pinned image:
 
 ```sh
 npm run setup
 mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.2
 docker run -d --name switchboard-ai-router \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3000 --env-file .env \
   -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
   -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
+  ghcr.io/chensl139-ok/switchboard-ai-router:3.1.2
 ```
 
 Choose **either** this method **or** Compose; do not run both on the same port/data. Preserve all original options when recreating an existing container. Offline Release assets contain source ZIP/TGZ, an OCI image bundle and `SHA256SUMS`. See [operations](docs/OPERATIONS.md).
@@ -148,7 +148,7 @@ Reference prices are estimates, not invoices. Manual/provider-native prices take
 
 | Tag | Content | Updated by |
 | --- | --- | --- |
-| `3.1.1`, `3.1`, `latest` | Target stable release, available only after successful publication | `v*` tag → checks/tests → multi-arch GHCR → Release assets |
+| `3.1.2`, `3.1`, `latest` | Target stable release, available only after successful publication | `v*` tag → checks/tests → multi-arch GHCR → Release assets |
 | `main` | Latest manually published main build, not a stable release | Manual [Main branch image workflow](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/image-main.yml) on main |
 | `sha-<full commit SHA>` | Traceable main build | Same workflow; use a digest for exact pinning |
 
@@ -167,7 +167,7 @@ npm run doctor -- --url http://127.0.0.1:3100
 npm run doctor -- --url http://127.0.0.1:3100 --url http://127.0.0.1:3110
 ```
 
-Doctor checks readiness and build fingerprints without credentials or model calls. Matching code does not imply shared data. The 3.1.1 validation covered 374 automated tests and browser workflows, plus one authorized bounded real text request. Simulated media tests do not establish real-provider performance, billing or complete OAuth success. See the [functional validation matrix](docs/VALIDATION.md).
+Doctor checks readiness and build fingerprints without credentials or model calls. Matching code does not imply shared data. The previous workspace release included an authorized bounded real text check; the task-deletion patch uses isolated media simulators without new paid calls. Simulated media tests do not establish real-provider performance, billing or complete OAuth success. See the [functional validation matrix](docs/VALIDATION.md).
 
 Further reading: [API](API.md) · [Tenancy & Feishu](TENANCY.md) · [Architecture](ARCHITECTURE.md) · [Operations & migration](docs/OPERATIONS.md) · [Changelog](CHANGELOG.md) · [Release maintenance](.github/RELEASING.md).
 

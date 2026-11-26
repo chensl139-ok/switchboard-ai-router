@@ -1,6 +1,6 @@
 # 升级与实例核对
 
-文档版本：**3.1.1，2026-11-26**。使用固定版本命令前，先核对对应 Release／GHCR 产物存在且标签正确。参阅 [中文首页](../README.zh-CN.md)、[English](../README.md)、[更新记录](../CHANGELOG.md) 和 [发布维护](../.github/RELEASING.md)。
+文档版本：**3.1.2，2026-11-26**。使用固定版本命令前，先核对对应 Release／GHCR 产物存在且标签正确。参阅 [中文首页](../README.zh-CN.md)、[English](../README.md)、[更新记录](../CHANGELOG.md) 和 [发布维护](../.github/RELEASING.md)。
 
 ## 先明确实例
 
@@ -34,6 +34,10 @@ Doctor 只读 `/readyz` 与 `/api/account/status`，无需模型密钥，不产�
 
 保留已有 `.env`、初始化令牌、加密凭据、业务 Key、租户／路由及飞书配置，不为升级重新初始化平台。飞书别名入口会规范到配置的回调地址；在规范地址重新登录，核对域名／端口／路径、应用可用范围与默认租户身份。**本次真实飞书扫码 OAuth 尚未验证**，详见 [飞书配置](../TENANCY.md#飞书登录详解自托管运维向)。
 
+## 创作任务删除
+
+3.1.2 未新增数据库迁移。创作任务卡片和详情的“删除记录”仅删除本人当前租户的媒体历史，不清除持久会话、请求日志、用量或外部文件；即使记录处于处理中或已提交，也不代表取消上游执行或退款。删除前按需导出，删除后无法在任务中心继续查看该记录。删除返回 404 按已不存在处理；网络失败请刷新核对后再试，不能据错误提示断定服务端未删除。
+
 ## Docker 升级顺序
 
 ### 源码与 Compose
@@ -43,7 +47,7 @@ Doctor 只读 `/readyz` 与 `/api/account/status`，无需模型密钥，不产�
 ```sh
 git status --short
 git fetch --tags
-git switch --detach v3.1.1
+git switch --detach v3.1.2
 docker compose build switchboard
 # 构建成功后停止实例，再备份：
 docker compose stop switchboard
@@ -64,7 +68,7 @@ npm run doctor -- --url http://127.0.0.1:3100
 与 Compose 二选一。在原部署目录，先拉取已发布的明确版本／digest，再停止容器和备份：
 
 ```sh
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.2
 docker stop switchboard-ai-router
 umask 077
 BACKUP_DIR="$HOME/switchboard-backup-$(date +%Y%m%d-%H%M%S)"
@@ -72,7 +76,7 @@ mkdir -m 700 "$BACKUP_DIR"
 cp -a .env data "$BACKUP_DIR/"
 ```
 
-确认备份后，可将停止的旧容器改名留存，再按 [README 的 docker run 示例](../README.zh-CN.md#使用预构建镜像) 用原名称创建新容器，镜像固定为 `3.1.1` 或已核对 digest，**保留部署原有的端口、环境文件、卷、网络与其他选项**。不要直接在仍占用原名称的旧容器旁重复执行示例，也不要让旧容器与新容器共用目录运行。检查 `/healthz`、`/readyz` 和 doctor。
+确认备份后，可将停止的旧容器改名留存，再按 [README 的 docker run 示例](../README.zh-CN.md#使用预构建镜像) 用原名称创建新容器，镜像固定为 `3.1.2` 或已核对 digest，**保留部署原有的端口、环境文件、卷、网络与其他选项**。不要直接在仍占用原名称的旧容器旁重复执行示例，也不要让旧容器与新容器共用目录运行。检查 `/healthz`、`/readyz` 和 doctor。
 
 `latest` 只在稳定发布成功后更新；main 上手动触发镜像工作流仅发布 `main` 与 `sha-<完整 SHA>`，不覆盖 `latest`／稳定版本标签、不创建 Release。`v*` Release 流程发布双架构 `X.Y.Z`／`X.Y`／`latest` 及源码 ZIP／TGZ、OCI、SHA256SUMS。离线附件先核对校验值，再使用支持 OCI 的工具导入；不要把 OCI 包当作任意 Docker save 格式。
 
