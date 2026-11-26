@@ -1,6 +1,6 @@
 # Switchboard
 
-自托管的多服务商 AI 模型路由网关。用一个 API 接入已配置的模型，在控制台管理路由、密钥、成员和用量，并在模型实验室验证调用效果。
+自托管的 **AI 工作台与模型路由网关**。在工作台保存个人会话和草稿，在网关管理服务商、路由、业务 API Key、成员与用量；用一个 OpenAI／Anthropic 兼容入口调用已配置模型，并明确协议、权限和计费边界。
 
 [English](README.md) | **中文文档**
 
@@ -9,52 +9,56 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router)
 
+**版本：3.1.1 · 2026-11-26。** 本版整合 AI 工作台、持久会话及可靠性修复。源码与发布镜像是独立交付物，升级前请核对版本标签；可用版本以实际 [GitHub Releases](https://github.com/chensl139-ok/switchboard-ai-router/releases) 为准。[更新记录](CHANGELOG.md) · [升级与迁移](docs/OPERATIONS.md)
+
 ## 看一遍完整流程
 
-以下为当前主分支的实际界面，使用隔离演示账号与模拟上游。**数字仅用于展示，不是性能基准**；点击图片可查看完整画面。
+导览使用隔离演示账号与模拟上游，不含真实租户数据。**数字不是性能基准**；截图重现与更新检查见[演示说明](docs/demo/README.md)。
+
+[![个人工作台](docs/demo/workspace.jpg)](docs/demo/workspace.jpg)
 
 | ① 连接服务商与模型 | ② 配置路由与备用 |
 | --- | --- |
 | [![服务商与模型](docs/demo/providers.jpg)](docs/demo/providers.jpg) | [![路由与容灾覆盖](docs/demo/routing.jpg)](docs/demo/routing.jpg) |
-| 启用需要的模型，凭证保存在服务端。 | 选择首选与备用，预览真实顺序，查看尝试预算能覆盖几家服务商。 |
-| **③ 在实验室测试** | **④ 从历史继续** |
+| 启用所需模型，凭据保存在服务端。 | 选择首选与备用，不调用上游即可预览尝试预算和覆盖。 |
+| **③ 在会话中工作** | **④ 查看历史快照** |
 | [![流式对话](docs/demo/playground.jpg)](docs/demo/playground.jpg) | [![历史详情](docs/demo/history.jpg)](docs/demo/history.jpg) |
-| Markdown、代码块、实际命中模型与性能指标集中展示。 | 搜索、查看、导出及恢复文本对话；新记录保留原始路由选择。 |
+| 个人持久会话、草稿、Markdown 与实际命中模型。 | 短期实验历史与持久会话分开保存，不混用保留规则。 |
 | **⑤ 接入客户端** | **⑥ 查看调用与用量** |
 | [![客户端接入向导](docs/demo/connect.jpg)](docs/demo/connect.jpg) | [![深色模式用量分析](docs/demo/analytics.jpg)](docs/demo/analytics.jpg) |
-| 复制 Claude Code、Codex 或通用客户端配置，使用自己的业务 Key。 | 区分最终请求成功与上游失败尝试，按租户分析用量和参考成本。 |
+| 使用自己的业务 Key；CLI 兼容范围见 API 文档。 | 区分最终成功、上游失败尝试与调用方输出验收。 |
 
-无需模型密钥即可体验：`npm ci && npm run demo`。只监听本机，使用临时数据和模拟上游，不产生模型费用。[演示说明](docs/demo/README.md)。
+无需模型密钥即可体验：`npm ci && npm run demo`。只监听本机，使用临时数据和模拟上游，不产生模型费用；不要输入敏感信息。
 
-[v2.2.0 Release](https://github.com/chensl139-ok/switchboard-ai-router/releases/tag/v2.2.0) · [更新记录](CHANGELOG.md) · [API 细节](API.md) · [租户与权限](TENANCY.md) · [架构](ARCHITECTURE.md)
+## 工作台与网关双区
 
-## 主要能力
+- **工作台**：个人会话与草稿、搜索／置顶／归档／删除、模型收藏、媒体任务和模型对比。会话和收藏按**当前用户 + 当前租户**隔离，不是组织共享内容。
+- **网关**：组织服务商、模型目录、路由、业务 Key、成员、日志、价格与用量；`⌘K` / `Ctrl+K` 按权限搜索页面及可用模型。
+- **自托管 BYOK**：服务商凭据 AES-256-GCM 加密落盘，业务 Key 哈希保存。请求／操作审计日志不保存提示词和回复正文，**会话、草稿与实验历史会保存文本**，宿主机和备份必须受保护。
+- **单实例**：一个 Node.js 进程，配置与账户使用文件，调用用量及工作台记录使用 SQLite；不要让多个进程或容器同时读写同一数据目录。
 
-- **密钥不出你的机器**：自托管 BYOK，服务商密钥 AES-256-GCM 加密落盘，业务 Key 哈希保存，请求日志不记录提示词与回复正文；实验历史会保存对话文本，用户可查看与删除。
-- **模型级路由**：设置首选模型和失败后的备用方式，可按价格、延迟或权重选路，带关键词例外、熔断和总超时。
-- **工作空间**：管理服务商、模型、实验历史、密钥、成员与用量；`⌘K` / `Ctrl+K` 可搜索页面和可用模型。
-- **部署**：单 Node.js 进程，运行时仅 `ws`、`marked` 两个第三方依赖；macOS 使用系统 WebKit，Windows 使用系统 WebView2，桌面 App 内置 Node，无需另外安装 Docker 或 Node。
+### 持久会话不是短期历史
 
-## 能做什么
+点击「新会话」仅打开本地空白草稿，不立即落库；普通自动保存从首次输入文字开始，明确发送、修改元数据或创建分支也可触发保存。新会话标题由首条用户文本在本地生成，不调用模型、不产生标题费用；旧标题和手动标题受保护，`titleMode` 由服务端管理。
 
-| 模块 | 能力 |
+编辑用户消息会创建**新分支草稿**，不会自动发送；助手重试必须确认可能产生的费用，并创建新分支，不覆盖原回答。支持 JSON／Markdown／文本导出，Markdown 和文本默认不含思考；JSON 可能包含已保存的思考与元数据，分享前应检查。
+
+图片、视频、音频等输入素材不永久保存。刷新后缺失附件或工具上下文时，不能继续原上下文；文本存档不等于完整多模态备份。媒体任务的**查询状态**和**重新生成**分开，重新生成是新的可能计费请求，结果 URL 可能过期，应及时下载。
+
+保存采用 `revision` CAS（比较后写入）；生成绑定 `runId` 和 120 秒租约，客户端每 25 秒续租，输出检查点按 5 秒间隔保存。冲突要求重新加载核对，不静默覆盖。删除不会新建再保存一条替代记录：404 清除本地失效项，409 要求重新加载并再次确认，网络失败保留本地副本。创建响应丢失、无法确定是否落库时，应先导出本地内容、刷新并按 ID 核对，不按标题猜测删除。
+
+| 持久会话限制 | 范围 |
 | --- | --- |
-| 模型路由 | 固定、故障转移、加权、延迟优先、关键词规则、经济优先；服务商内不同模型及跨服务商回退 |
-| 协议网关 | OpenAI Chat Completions / Responses / Legacy Completions、Anthropic Messages、SSE，以及自建 WebSocket 文本协议 |
-| 服务商与模型 | 配置上游地址和主／备密钥，获取并选择可调用模型，按模型自动匹配协议 |
-| 模型实验室 | 对话、同题多模型对比、图片／音频／视频任务、视觉理解；显示实际命中模型、失败原因和可测得的延迟指标 |
-| 团队管理 | 邮箱密码或飞书 OAuth 登录、邀请、角色、租户隔离、操作审计、密码重置 |
-| 组织订阅 | 按租户查看 BYOK 订阅状态；平台主账号可准备套餐草案、手动分配内部试用订阅 |
-| 任务追踪 | 同一业务任务关联多次请求和回退；区分调用失败与输出验收失败，按任务汇总耗时、用量及分币种费用，见 [API 文档](API.md#任务关联输出验收与成本追踪) |
-| 运营观测 | 业务 API Key 配额、请求日志、最终成功率、用量、费用估算与模型价格 |
+| 单会话 1 MiB，含草稿和设置 | 序列化文本载荷 |
+| 单草稿 64 KiB | UTF-8 字节 |
+| 200 条／32 MiB | 每个用户在当前租户内，包含已归档会话 |
+| 256 MiB／1 GiB | 单租户／全局会话载荷合计 |
 
-这是**单实例部署**：配置和账户使用本地文件，请求用量与 API Key 调用计数使用 SQLite，限流和部分状态在进程内。不要让多个进程或容器同时读写同一个 `data/` 目录。对外服务请置于 HTTPS 反向代理之后，做好数据备份和访问控制。
-
-当前发布版本为 v2.2.0。主分支包含 [尚未发布的界面与工作流改进](CHANGELOG.md#unreleased)，已发布的 GHCR `2.2.0`、`2.2` 和 `latest` 不自动包含主分支提交。体验主分支可从源码构建，或使用下方说明的 `main` 镜像；升级前备份数据。
+达到限制会拒绝保存，**不会静默裁剪会话**。旧 `history` 仍是短期实验快照：每用户／租户最近 100 条，全局 5000 条，与 `conversations` 无关。仅完整、已结束且没有缺失素材／工具的文本快照可显式导入为会话，原记录保留；不是全量自动迁移。详见[会话 API](API.md#工作台会话与偏好接口)及[首次工作台迁移](docs/OPERATIONS.md#首次工作台升级与数据迁移)。
 
 ## 五分钟部署
 
-需要 Docker + Compose，以及用于生成初始配置的 Node.js **>= 22.18**。
+需要 Docker + Compose，以及用于生成初始配置的 Node.js **≥ 22.18**。以下构建当前检出的源码，不会自动选择最新正式版本。
 
 ```sh
 git clone https://github.com/chensl139-ok/switchboard-ai-router.git
@@ -64,85 +68,12 @@ docker compose up -d --build
 docker compose ps
 ```
 
-`npm run setup` 仅在 `.env` 不存在时生成两个随机令牌，不会覆盖已有配置。控制台默认只监听本机：[http://127.0.0.1:3100](http://127.0.0.1:3100)；就绪检查为 `/readyz`。首次打开页面，用本机 `.env` 中的 `ADMIN_TOKEN` 初始化所有者账户，然后设置邮箱和密码。**不要把令牌发给其他人，也不要把 `.env` 提交到仓库。**
+`npm run setup` 仅在 `.env` 不存在时生成初始令牌，不覆盖已有配置。默认访问 [http://127.0.0.1:3100](http://127.0.0.1:3100)，就绪检查 `/readyz`。首次用本机 `ADMIN_TOKEN` 初始化所有者，再设置邮箱和密码。**不要分享令牌或把 `.env` 提交到仓库。** Compose 挂载当前目录 `data/`，容器内部监听 3000。
 
-Compose 将数据挂载到当前目录的 `data/`，容器内部监听 3000。配置了服务商和模型后，可在「模型实验室」先试一次，再创建供业务系统使用的 API Key。初始化令牌不是业务 API Key。
-
-控制台非首页功能采用按需加载，访问实验室、文档、日志等页面时才加载相应代码；切页或更换账户后，旧页面的异步加载结果不会重新覆盖当前视图。
-
-### macOS 桌面 App
-
-希望直接安装到电脑时，可使用内置运行环境的桌面版，无需 Docker 或 Node。打开 DMG，将 Switchboard 拖入“应用程序”后启动；可从 App 菜单导入已有部署的独立数据副本。菜单栏可查看服务状态、打开实验室与路由，或复制本机 API 地址。桌面使用、数据目录和打包方式见 [桌面版说明](desktop/README.md)。
-
-当前安装包面向 macOS 13+ 的 Apple Silicon Mac（M 系列），尚未完成 Apple Developer ID 签名与公证，其他电脑可能出现安全拦截。DMG 不含个人账号、密钥或历史；分享给同事后各自运行独立平台，不会自动共享你的组织数据。详见[安装步骤](desktop/README.md#安装与使用)和[分享说明](desktop/README.md#分享安装包)。
-
-本机开发版另提供个人 ChatGPT 订阅 OAuth 连接预览，无需 API Key，账户与租户隔离；不等同于组织订阅号池，不向业务 API 或其他成员共享。已在本机验收官方授权、模型获取和实际文本调用；其他账户仍以官方授权结果为准，详见 [订阅连接说明](desktop/README.md#个人订阅连接本机预览)。
-
-订阅模型可在「个人路由（含订阅）」与组织 API 模型共同选路，仅影响本人当前租户的实验室调用。支持模型内及跨服务商故障转移，正文开始后不切换；未知价格的订阅不参与经济优先。Claude 订阅暂未取得官方第三方接入授权，不等同于已支持的 Anthropic API。
-
-### Windows 桌面 App
-
-Windows 用户可使用独立的 [Windows x64 桌面安装包](desktop/windows/README.md)：解压分享 ZIP 后运行 Setup.exe，安装后从开始菜单启动。无需 Docker 或 Node，使用系统 WebView2；当前安装包尚未进行 Windows 代码签名。Windows 构建从主分支工作流生成，不等同于已发布的 v2.2.0 Release 附件。
-
-### 使用已发布镜像
-
-不想在本机构建镜像时，可从 [GHCR](https://github.com/chensl139-ok/switchboard-ai-router/pkgs/container/switchboard-ai-router) 拉取 `linux/amd64` 或 `linux/arm64` 版本。先在仓库目录运行一次 `npm run setup`，再执行：
-
-```sh
-mkdir -p data
-docker pull ghcr.io/chensl139-ok/switchboard-ai-router:2.2.0
-docker run -d --name switchboard-ai-router \
-  --restart unless-stopped \
-  -p 127.0.0.1:3100:3000 \
-  --env-file .env \
-  -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
-  -v "$PWD/data:/app/data" \
-  ghcr.io/chensl139-ok/switchboard-ai-router:2.2.0
-```
-
-上述 `docker run` 与 Compose 是**两种部署方式，二选一**，不要同时启动占用 3100 端口的实例。Release 另提供源码包、离线 OCI 镜像包和 `SHA256SUMS`。
-
-镜像分为正式版与主分支构建，不混用版本标签：
-
-| 标签 | 内容 | 更新方式 |
-| --- | --- | --- |
-| `2.2.0`、`2.2`、`latest` | 已发布正式版 | 版本标签触发 Release 流程 |
-| `main` | 最近一次验证通过的主分支构建，非正式版 | 手动运行 [Main branch image](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/image-main.yml) |
-| `sha-<完整提交 SHA>` | 对应提交的主分支构建 | 同一流程生成；精确固定版本建议使用镜像 digest |
-
-主分支镜像先执行测试和隔离容器启动验证，再发布 `linux/amd64`、`linux/arm64`，不覆盖正式版标签、不新建 Release。仅推送 Git 会运行 CI，不会自动发布镜像。Windows 安装包则由独立 [Windows desktop](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/windows-desktop.yml) 工作流生成；构建附件保留 14 天，需要长期保存请及时下载。
-
-不用 Docker 时运行 `npm ci && npm run setup && npm start`；默认端口为 3000，可在 `.env` 设置 `HOST=127.0.0.1`、`PORT=3100`。
-
-## 工作原理
-
-```
-  Cherry Studio · Claude Code · curl · 你的应用 · 你的 Agent
-                    │   一个 base_url + 一把业务 Key
-                    ▼
-  ┌──────────────────────── Switchboard ────────────────────────┐
-  │  鉴权 · 租户 · API Key 配额 · 限流 · 审计                    │
-  │  ─────────────────────────────────────────────────────────  │
-  │  路由 · 固定 / 故障转移 / 加权 / 延迟优先 / 关键词 / 经济优先  │
-  │        （含熔断、超时、尝试预算）                             │
-  │  ─────────────────────────────────────────────────────────  │
-  │  协议 · OpenAI Chat / Responses / Completions                │
-  │         Anthropic Messages · SSE · WebSocket                 │
-  │         媒体：图片 · 音频 · 视频 · 嵌入 · 重排               │
-  └────┬──────────┬──────────┬──────────┬───────────┬───────────┘
-       ▼          ▼          ▼          ▼           ▼
-   DeepSeek    OpenAI    Anthropic    Gemini     阿里百炼 · OpenRouter
-                                        · 任意 OpenAI/Anthropic 兼容上游
-```
-
-## 首次配置与调用
-
-1. 在「服务商与模型」添加上游 Base URL 和 API Key；获取模型列表，勾选需要开放的模型并保存。支持自定义兼容服务商，同一服务商可添加备用密钥。
-2. 在「路由策略」选首选模型，再选择失败后自动挑选备用、手动指定备用顺序或不换模型。右侧会检查当前草稿的真实调用顺序；确认后点「保存并生效」。进阶设置默认收起，修改草稿和检查顺序都不会请求上游。
-3. 在「模型实验室」调用模型，确认实际命中、协议、输出和错误信息。媒体任务应选择对应的图片、音频、视频或视觉理解入口。
-4. 所有者、管理员和普通成员均可在「API Key 管理」为自己的应用创建 Key、设置有效期和配额；只展示和管理本人创建的 Key。明文仅在创建时显示一次，成员移除或降为只读后，其个人 Key 不再允许新调用。
-
-最小 API 调用示例；将 `YOUR_API_KEY` 换成平台签发的**业务 Key**，不要使用服务商密钥：
+1. **服务商与模型**：添加上游 Base URL 和 API Key，获取目录，勾选需要开放的模型；支持备用密钥。
+2. **路由策略**：选择首选、自动备用／指定顺序／不换模型。草稿预览不保存、不调用上游；确认后保存生效。
+3. **工作台**：测试对话、查看实际命中与错误，或选择对应的媒体任务入口。
+4. **API Key 管理**：所有者、管理员和成员均可创建并管理自己的 Key，设置有效期和配额；明文仅创建时显示一次。初始化令牌不是业务 Key，只读角色不能调用。
 
 ```sh
 curl -i http://127.0.0.1:3100/v1/chat/completions \
@@ -153,123 +84,116 @@ curl -i http://127.0.0.1:3100/v1/chat/completions \
 
 | `model` 写法 | 含义 |
 | --- | --- |
-| `auto` | 跟随当前租户的路由策略，可尝试兼容的其他服务商／模型 |
-| `provider-id` | 使用该服务商的当前模型 |
-| `provider-id::model-id` | 固定服务商和模型；可使用同模型备用密钥，不跨模型回退 |
+| `auto` | 跟随本租户路由策略，可回退到兼容候选 |
+| `provider-id` | 使用该服务商当前模型 |
+| `provider-id::model-id` | 固定服务商及模型，仅同模型备用密钥容灾 |
 
-成功响应包含 `x-router-provider`、`x-router-model`、`x-router-protocol`、`x-router-attempt`、`x-router-fallback` 等头，方便确认真正命中的模型；文本头使用 URL 编码。实验室选择具体模型时，会把它作为起始模型并允许实验室的回退流程；这与 API 中固定的 `provider-id::model-id` 语义不同。
+成功响应含 `x-router-provider`、`x-router-model`、`x-router-protocol`、`x-router-attempt` 等头，文本值使用 URL 编码。实验室具体模型可作为回退起点，与 API 固定 `provider::model` 不同。OpenAI 兼容客户端使用 `http://127.0.0.1:3100/v1` 与业务 Key。
 
-故障转移按“服务商 + 模型”组织候选，支持服务商内和跨服务商切换，并受协议／能力兼容性、熔断、超时和尝试预算约束。已经开始输出的流不会拼接另一个模型的回答。**最终成功率按一次用户请求的最终结果统计**：失败后回退成功计为成功；失败的上游尝试仍保留在日志里。这个成功率衡量网关调用完成，不代表输出通过调用方的业务验收；后者通过独立反馈记录。
+Responses 是**无状态子集，不保证完整 Codex 兼容**；非 Claude 模型的协议转换不等于 Anthropic 官方支持 Claude Code。SDK、CLI 和工具边界见 [API.md](API.md#sdk)，需鉴权的 OpenAPI 位于 `/v1/openapi.json`。
 
-完整接口、SDK 与参数示例见 [API.md](API.md) 和控制台「API 文档」。OpenAPI 3.1 JSON 位于需鉴权的 `/v1/openapi.json`。Cherry Studio 等 OpenAI 兼容客户端将 Base URL 设为 `http://127.0.0.1:3100/v1`，Key 使用平台签发的业务 Key。
+### 使用预构建镜像
 
-## 看得懂的路由
-
-先选首选模型，再选备用方式；有需要时再启用优化目标。草稿预览不保存配置，也不调用上游。
-
-| 目标或保护 | 实际作用 |
-| --- | --- |
-| 优先级 | 首选优先，自动容灾为其他服务商保留候选位置 |
-| 延迟 | 比较模型级近期成功耗时，包括同服务商内模型；至少 3 条成功样本才参与排名 |
-| 经济 | 比较同币种、有效参考价格；未知价格不当成免费 |
-| 权重 | 按服务商权重轮转，并支持模型级回退 |
-| 指定备用 | 按明确的候选列表顺序尝试 |
-| 尝试上限 | 统计真实尝试，包括主备密钥；预览展示有效容灾覆盖 |
-| 总超时 | 按剩余可尝试候选分配剩余时间，不为空候选预留预算 |
-
-## 模型实验室与媒体
-
-对话页支持 SSE 输出、Markdown、代码复制、图片输入、函数工具和 2–4 个模型的同题对比。生成期间可继续编辑下一条草稿，但当前生成结束或停止前不会发送第二个请求。函数工具由调用方定义、执行并回传，网关不执行模型生成的代码。
-
-实验室显示总耗时、输出 Token、TTFB（首个响应数据）、TTFT（首个可见内容或思考增量）、端到端 TPS 和**估算** TPOT。TPS 包含首字延迟及可能的故障转移；TPOT 根据多个流式增量的时间跨度和上游输出 Token 用量估算，并非供应商精确的逐 Token 解码耗时。缺少可靠数据时显示「—」，非流式完整响应不能测量 TTFT／TPOT。
-
-媒体实验室按任务筛选模型：图片生成、语音合成、音频转文字、视频生成和视觉理解。媒体调用需指定已配置的模型，不使用对话的 `auto` 路由；视频任务当前仅适配硅基流动。更多媒体 API（包括图片编辑、音频翻译、嵌入和重排）见 [API.md](API.md#媒体与专用模型接口)，不一定都有实验室表单。
-
-`moss-vl-1.0` 在当前上游接口属于**单轮视觉理解任务**，不进入普通文本对话或自动对话路由。使用媒体实验室「视觉理解」或同步 `/v1/responses`：一条文字指令搭配 1–5 张图片，或搭配 1 个视频；不能混用、不能仅发文字、不能设置 `stream=true`。
-
-## 团队、价格和审计
-
-「组织订阅」目前是**不启用付费墙的 BYOK 订阅框架**：现有租户继续使用自己的服务商密钥，模型费用由上游服务商收取。平台主账号可保存套餐草案，配置 API Key 数量、成员数量及对话／媒体／模型对比实验室权益，并手动分配内部试用套餐；租户所有者／管理员可查看本组织的规划权益。**所有权益限制目前仅展示、不执行**。
-
-成员通过邀请加入租户；所有者、管理员、成员、只读角色具有不同权限，详见 [TENANCY.md](TENANCY.md)。忘记密码时，所有者／管理员可为成员签发一次性重置码，通过安全渠道交付；系统不会自动发邮件。唯一所有者失去登录能力时，部署管理员需停机后使用 `scripts/reset-admin-password.mjs` 本地恢复。
-
-首次初始化的账户是平台主账号：只有该账号的邮箱密码登录，或该账号已连接的**默认租户的飞书身份**登录，才可查看、切换和管理全部租户。
-
-飞书登录为可选功能。一个飞书企业自建应用仅服务其所在企业；多个独立企业可各自提供一枚企业自建应用，映射到平台中各自独立的租户。配置步骤、安全注意事项与跨企业单入口迁移方案参见 [TENANCY.md](TENANCY.md) 与[飞书开放平台文档](https://open.feishu.cn/document/home/app-types-introduction/robots-web-applications-and-mini-programs)。如果没有自有域名，可用 [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) 把本机控制台以固定 HTTPS 地址开放给同事；注意这会把登录页公开到互联网，应保持强密码并严格管理飞书应用可用范围。
-
-「请求日志」记录请求与上游尝试的元数据，不保存提示词或回复正文；「用量分析」展示成员、模型和 Key 用量及估算费用；「组织审计 → 租户操作」记录配置和成员操作，每个租户最多保留最近 2000 条。仅平台主账号可清空所有租户操作审计；租户所有者可重置统计起点或清除本租户请求日志与用量。
-
-「模型实验室 → 历史记录」按当前账号和租户保存最近 100 条对话与媒体任务记录，支持服务端搜索、状态筛选、排序与分页；存储在 `data/lab-history.sqlite`。
-
-经济优先使用已配置且有效的同币种价格做**预估**，不是结算系统。可以把 OpenRouter 模型报价导入其他服务商作为参考；手动价格和服务商自身报价优先。实际采购价、缓存命中、时段和多模态收费应以服务商账单为准。
-
-## 运行、安全与升级
-
-| 配置 | 用途 |
-| --- | --- |
-| `ADMIN_TOKEN`、`GATEWAY_TOKEN` | `npm run setup` 生成的独立令牌；不要公开 |
-| `HOST`、`PORT`、`DATA_DIR` | 监听地址、端口和持久化目录；Compose 覆盖容器内监听设置 |
-| `COOKIE_SECURE=true` | 公网 HTTPS 反向代理部署时启用 Secure Cookie |
-| `GLOBAL_MAX_CONCURRENCY` | 全局并发上限，默认 20 |
-| `UPSTREAM_ALLOWED_PRIVATE_HOSTS` | 精确授权需要访问的私有推理服务地址 |
-| `ALLOW_HTTP_UPSTREAM=true` | 仅在受信任的本地推理服务必须使用 HTTP 时启用 |
-| `UPSTREAM_PROXY_FAKE_IP=true` | 本机使用 Fake-IP 代理导致官方上游被 SSRF 防护拦截时启用 |
-
-其余选项和注释见 [.env.example](.env.example)。默认拒绝非安全上游和私网／保留地址访问；仅在了解风险时精确放行。上游密钥在服务端以 AES-256-GCM 加密保存，业务 Key 哈希保存。公网暴露时必须配置 HTTPS、可信反向代理和访问控制。密钥相关接口不回显秘密，审计不记录正文。
-
-**备份整个 `data/` 目录，包括 `master.key`。** 只备份配置而丢失主密钥，已保存的服务商密钥将无法解密；备份也包含敏感数据。建议停止容器后备份，以保持 SQLite 文件一致。不要让第二个实例挂载同一目录。
-
-从源码升级前先备份数据，再更新代码并重建：
+**仅在 3.1.1 已实际发布后**使用下列固定版本示例。在仓库目录初始化配置，再拉取 `linux/amd64` 或 `linux/arm64` 镜像：
 
 ```sh
-docker compose stop switchboard
-cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
-git pull --ff-only
-docker compose up -d --build
-docker compose ps
+npm run setup
+mkdir -p data
+docker pull ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
+docker run -d --name switchboard-ai-router \
+  --restart unless-stopped \
+  -p 127.0.0.1:3100:3000 --env-file .env \
+  -e HOST=0.0.0.0 -e PORT=3000 -e DATA_DIR=/app/data \
+  -v "$PWD/data:/app/data" \
+  ghcr.io/chensl139-ok/switchboard-ai-router:3.1.1
 ```
 
-若使用 GHCR 的 `docker run` 方式，请拉取新版本镜像，并按原参数重建容器，继续挂载原 `data/`；不要直接删除数据卷。健康检查可访问 `/healthz` 和 `/readyz`。
+`docker run` 与 Compose **二选一**，不能同时占用端口或挂载同一数据目录。重建已有容器须保留原参数、令牌和挂载。Release 附件包括源码 ZIP／TGZ、离线 OCI 镜像包和 `SHA256SUMS`；升级与回退见 [运维说明](docs/OPERATIONS.md)。
 
-## 核对部署是否一致
+不用 Docker 时运行 `npm ci && npm run setup && npm start`；源码默认端口 3000，可在本地配置 `HOST=127.0.0.1`、`PORT=3100`。
 
-App 与 Docker 共用核心代码，各自保存数据。更新本机不等于更新公网服务器；相同版本号也不一定是同一次构建。详见[升级、备份与实例核对](docs/OPERATIONS.md)。
+### Docker 网关与桌面个人订阅的边界
 
-```sh
-npm run doctor -- --url http://127.0.0.1:3100
-# 对比运行中的 App；默认端口占用时使用 App 菜单显示的实际地址：
-npm run doctor -- --url http://127.0.0.1:3100 --url http://127.0.0.1:3110
-```
+Docker 提供组织 BYOK API 网关与浏览器工作台，**不是个人订阅账号池**，不会把个人订阅通过共享服务商或业务 Key 对外开放。
 
-Doctor 无需登录，只读检查就绪状态与构建指纹，不读取密钥或调用模型。指纹也显示在「账户与租户 → 版本与运行环境」。代码一致不代表数据已同步。
+[macOS 桌面 App](desktop/README.md) 内置 Node、使用系统 WebKit，面向 macOS 13+ Apple Silicon；目前未完成 Apple Developer ID 签名与公证，其他电脑可能出现安全拦截。DMG 不含个人账号、密钥或历史；每台安装都是独立平台，不自动共享组织数据。Windows 用户可使用 [Windows x64 桌面包](desktop/windows/README.md)，解压后运行 Setup.exe，使用系统 WebView2；未代码签名，由主分支手动工作流生成，不自动附加到已有 Release。
 
-## 开发、验证与发布
+本机桌面个人 ChatGPT 订阅连接预览使用官方 OAuth，连接仅属授权用户及当前租户。个人路由可组合本人授权的订阅模型与组织 API 模型，仅影响个人实验室调用，不修改共享路由、不向业务 Key 或其他成员开放。正文开始后不切换模型，未知订阅价格不按免费处理。早期本机验收不代表每个账号或本次发布均已通过；本次文档不宣称新的真实 OAuth／上游调用结果。Claude 订阅未取得官方第三方授权，不等同于已支持的 Anthropic API。
+
+## 路由、媒体与团队能力
+
+| 模块 | 能力与边界 |
+| --- | --- |
+| 模型路由 | 固定、故障转移、加权、延迟优先、关键词、经济优先；服务商内与跨服务商候选、主备密钥 |
+| 协议网关 | OpenAI Chat／无状态 Responses／Legacy Completions、Anthropic Messages、SSE、自建 WebSocket 文本协议；不是官方 Realtime |
+| 对话与对比 | Markdown、图片、调用方执行的函数工具、2–4 模型同题对比；实际模型及 TTFB／TTFT／TPS／估算 TPOT |
+| 媒体 | 图片、音频、视频和视觉理解；API 另有编辑、翻译、嵌入、重排，取决于上游能力 |
+| 团队 | 邮箱密码、可选飞书 OAuth、邀请、四种角色、租户隔离、审计和密码重置码 |
+| 任务追踪 | 普通 HTTP／SSE 对话的 `X-Task-ID`、独立输出验收、任务耗时与分币种估算费用；[接口说明](API.md#任务关联输出验收与成本追踪) |
+| 观测 | 个人业务 Key 配额、调用元数据、最终请求成功率、成员／模型／Key 用量及参考价格 |
+
+路由预览展示有效覆盖和排除原因。延迟排名至少需要 3 条近期模型级成功样本；经济优先仅比较有效同币种价格，未知不当成免费。尝试预算包含备用凭据，总超时仅分配给真实剩余候选。已输出的流不拼接另一模型回答。最终成功率衡量网关调用完成，不代表通过调用方业务验收。
+
+TPS 包含首字延迟和可能的回退；TPOT 根据流式增量与上游用量估算，并非供应商精确逐 Token 解码耗时。缺少可靠数据时显示「—」，非流式完整响应不能测量 TTFT／TPOT。工具由调用方验证、执行并回传，网关不执行模型生成的代码。
+
+**媒体边界**：指定已配置的媒体模型，不使用对话 `auto`；视频生成当前适配硅基流动异步接口。MOSS-VL 是同步单轮视觉任务，不进入普通文本对话；MOSS 图片支持水印、提示词增强、种子等参数，仍受具体上游能力约束。本说明不代表本次已通过真实供应商调用。
+
+**Kimi K3 视频理解**：对话支持带时间戳抽帧及素材仍在时的追问；媒体视觉理解支持 MP4／WebM／MOV，最多 6 MB／10 分钟、12 帧，不含音轨，可能遗漏短暂事件。原生 `video_url` 是否支持由上游决定；`ms://` 必须来自同上游账户并使用固定 `provider::kimi-k3`、`allow_fallback: false`。平台不代理上游上传接口，详见 [API 文档](API.md#kimi-k3-视频理解)。
+
+「组织订阅」仍是**不启用付费墙的 BYOK 框架**：支持套餐草案与内部试用分配，规划权益仅展示、不执行，无支付、充值或自动续费。参考价格不是结算账单；OpenRouter 导入价格低于手动价和服务商自身价的优先级。
+
+首次初始化账号为平台主账号，跨租户权限按登录来源核验；普通成员只能使用所属租户。飞书企业自建应用各自映射独立租户，已有账号须主动连接，不按同邮箱自动合并。**升级保留飞书绑定和凭据配置，本次未验证真实飞书扫码 OAuth。** 回调域名、应用可用范围和默认租户身份需单独验收，详见 [TENANCY.md](TENANCY.md)。忘记密码由管理员签发一次性重置码，系统不自动发邮件。
+
+## 安全、升级与镜像渠道
+
+- 公网部署放在 HTTPS 反向代理后并启用 `COOKIE_SECURE=true`。Compose 默认只绑定本机，含只读根文件系统、tmpfs、健康检查等设置。
+- 默认拒绝非 HTTPS、私网及保留地址上游；仅通过精确白名单放行受信任服务。Fake-IP 例外不等于放开所有私网，详见 [安全设置](TENANCY.md#部署与安全设置)。
+- **停机备份完整 `data/`，尤其是 `master.key` 和 SQLite 文件，并保护 `.env`。** 备份含敏感内容；丢失主密钥无法解密上游凭据。不要多个实例共用目录。
+- 现有配置说明见 [.env.example](.env.example)；升级不要重新生成已有令牌或覆盖飞书配置。回退必须恢复配套旧备份，不让旧代码直接打开新结构。
+
+| 标签 | 内容 | 更新方式 |
+| --- | --- | --- |
+| `3.1.1`、`3.1`、`latest` | 目标正式版，工作流成功发布后才可用 | `v*` 标签 → 校验测试 → 双架构 GHCR → Release 附件 |
+| `main` | 最近一次手动发布的主分支构建，非正式版 | 在 main 手动触发 [Main branch image](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/image-main.yml) |
+| `sha-<完整提交 SHA>` | 可追溯的主分支构建 | 同一流程；精确固定建议使用 digest |
+
+仓库统一为 `ghcr.io/chensl139-ok/switchboard-ai-router`，支持 `linux/amd64`、`linux/arm64`。主分支镜像不覆盖 `latest` 或版本标签、不创建 Release；仅推送 main 运行 CI，不发布镜像。Windows 安装包是独立[工作流附件](https://github.com/chensl139-ok/switchboard-ai-router/actions/workflows/windows-desktop.yml)，保留 14 天。
+
+## 核对实例与可重复验证
+
+App 与 Docker 共用核心代码、独立保存数据；更新本机不等于更新公网实例。版本号相同也不一定是同一构建，详见[运维与迁移](docs/OPERATIONS.md)。
 
 ```sh
 npm ci
 npm run check          # 语法、TypeScript/Vue 类型与前端构建
-npm test               # 170+ 项自动化测试
+npm test               # 自动化测试，结果以实际运行输出为准
 npm start              # 构建并启动本地服务
+npm run demo           # 独立模拟环境
+npm run doctor -- --url http://127.0.0.1:3100
+# 使用 App 菜单显示的实际端口：
+npm run doctor -- --url http://127.0.0.1:3100 --url http://127.0.0.1:3110
 ```
 
-`scripts/smoke.mjs` 默认只检查就绪状态和可调用模型列表；`--live` 会发起一次可能计费的真实对话调用：
+Doctor 无需登录，只读就绪状态与构建指纹，不调用模型。指纹一致不代表数据同步或具备桌面专属能力。
+
+`scripts/smoke.mjs` 默认检查就绪和模型目录，`--live` 会发起可能计费的真实调用；仅在授权后运行：
 
 ```sh
 SWITCHBOARD_TOKEN=YOUR_API_KEY node scripts/smoke.mjs
 SWITCHBOARD_TOKEN=YOUR_API_KEY node scripts/smoke.mjs --live
 ```
 
-推送 `v*` 标签会触发 [Release 工作流](.github/workflows/release.yml)：运行检查和测试、构建并推送 GHCR 的 amd64／arm64 镜像、从对应 [CHANGELOG.md](CHANGELOG.md) 条目生成 Release 说明和归档附件。普通提交由 [CI 工作流](.github/workflows/ci.yml) 验证，**不会**自动发布新版本。发布步骤见 [发布维护说明](.github/RELEASING.md)，维护脚本用途见 [脚本索引](scripts/README.md)。
+本版通过 374 项自动化测试和浏览器流程，并完成一次经授权的受限真实文本调用；模拟媒体测试不等于真实供应商性能、计费或完整 OAuth 验证，详见[功能验收矩阵](docs/VALIDATION.md)。发布步骤见 [.github/RELEASING.md](.github/RELEASING.md)，普通提交不会自动发布新版本。
 
-项目架构和模块边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。问题反馈请提交 [GitHub Issue](https://github.com/chensl139-ok/switchboard-ai-router/issues)。
+相关文档：[API](API.md) · [租户与飞书](TENANCY.md) · [架构](ARCHITECTURE.md) · [运维](docs/OPERATIONS.md) · [更新记录](CHANGELOG.md) · [GitHub Issues](https://github.com/chensl139-ok/switchboard-ai-router/issues)。
 
 ## 合规声明
 
-Switchboard 是中立的自托管路由工具。请确保你的使用方式符合各模型服务商的服务条款与所在地区的法律法规；未经授权，不要基于本项目向公众提供生成式人工智能服务，也不要用于任何违法违规用途。
+Switchboard 是中立的自托管路由工具。请遵守模型服务商条款及适用法律法规；未经授权，不要基于本项目向公众提供生成式人工智能服务。界面可配置不代表供应商官方背书或完整客户端兼容。
 
 ## Star History
 
-如果 Switchboard 帮你省下了一次部署排障或一张意外账单，欢迎 ⭐ Star 支持——这是下一个版本最好的燃料。
+如果 Switchboard 帮助了你，欢迎 Star 支持。
 
 [![Star History Chart](https://api.star-history.com/svg?repos=chensl139-ok/switchboard-ai-router&type=Date)](https://star-history.com/#chensl139-ok/switchboard-ai-router&Date)
 

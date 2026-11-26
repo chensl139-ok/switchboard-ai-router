@@ -46,6 +46,11 @@ test('个人目录失败不清空缓存或阻断组织实验室',{timeout:1000},
  assert.deepEqual(h.updates,[null]);assert.match(h.notices[0],/不影响组织 API 模型/);
 });
 
+test('持久会话地址不会把已选择的模型对比页强制重置为聊天',()=>{
+ const guard=playground.split('\n').find(line=>line.includes("initialConversationId!==activeConversation?.id")&&line.includes("view='chat'"));assert.ok(guard);
+ for(const initialConversationId of ['current','other']){const context={initialConversationId,activeConversation:{id:'current'},initialTarget:undefined,settings:{target:'auto'},initialNewConversation:false,view:'compare'};runInNewContext(guard,context);assert.equal(context.view,initialConversationId==='current'?'compare':'chat');}
+});
+
 function updateHarness(){
  const target=JSON.stringify([personal.id,'gpt-5']),state={providers:[shared],personalProviders:[]},choices=labChoices(state);
  const status={hidden:false},select={value:target,selectedIndex:0,options:[{value:target,textContent:'个人订阅模型加载中…'}],replaceChildren(...options){this.options=options;}};

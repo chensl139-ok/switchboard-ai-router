@@ -23,8 +23,11 @@ export function conversationPayload(entry,{validate=true,settings=entry.settings
  }
  return payload;
 }
+export const emptyConversation=entry=>!entry.messages.length&&!entry.draft.trim()&&(!entry.record.title||entry.record.title==='新对话');
 export function conversationBlockReason(entry){
  if(!entry)return '正在加载会话';
+ if(entry.deleted)return '会话已删除';
+ if(entry.deleting)return '正在删除会话，请稍候';
  if(entry.error)return `${entry.conflict?'会话冲突':'尚未保存'}：${entry.error.message}。请导出、重新加载或另存分支。`;
  if(entry.starting)return '正在保存并取得运行权限，请稍候';
  if(entry.record.archived)return '此会话已归档，请取消归档或另存分支。';
@@ -64,7 +67,7 @@ export const formatConversationBytes=value=>value>=1048576?(value/1048576).toFix
 
 export async function conversationRequest(tenantId,route='',data,{fetcher=globalThis.fetch}={}){
  const response=await fetcher('/api/account/conversations'+route,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:{'content-type':'application/json',...(tenantId?{'X-Tenant-ID':tenantId}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
- let body;try{body=await response.json();}catch{body={};}
+ let body;try{body=await response.json();}catch{throw Object.assign(Error('会话响应无法解析，请刷新确认保存状态'),{status:response.ok?undefined:response.status});}
  if(!response.ok){const error=Error(body.error?.message||`会话操作失败（HTTP ${response.status}）`);error.status=response.status;throw error;}
  return body;
 }
@@ -76,12 +79,13 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
  const clearRunTimers=entry=>{if(!entry.run)return;timers.clearInterval(entry.run.renewTimer);timers.clearTimeout(entry.run.outputTimer);};
  const fail=(entry,error)=>{entry.error=error;entry.conflict=error.status===409;clearRunTimers(entry);entry.run?.onFailure?.(error);notify(entry);};
  const enqueue=(entry,task,{allowError=false}={})=>{
-  const work=chain.then(async()=>{if(disposed)throw Error('账户会话已关闭');if(entry?.error&&!allowError)throw entry.error;return task();});
+  const work=chain.then(async()=>{if(disposed)throw Error('账户会话已关闭');if(entry?.deleted)throw Error('会话已删除');if(entry?.error&&!allowError)throw entry.error;return task();});
   chain=work.catch(()=>{});
-  return work.catch(error=>{if(entry&&!disposed)fail(entry,error);throw error;});
+  return work.catch(error=>{if(entry&&!disposed&&!entry.deleted)fail(entry,error);throw error;});
  };
  const restoredStatuses=(messages,status)=>{if(status!=='running')for(const message of messages)if(message.status==='生成中')message.status='已停止';return messages;};
  const adopt=(entry,record,version)=>{
+  if(entry.deleted)return entry;
   if(entry.id!==record.id){entries.delete(entry.id);entry.id=record.id;entries.set(entry.id,entry);}
   entry.record=record;restoredStatuses(entry.messages,record.status);entry.isNew=false;entry.savedVersion=version;notify(entry);return entry;
  };
@@ -91,7 +95,7 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
   const entry=fromRecord({id,title:seed.title||'新对话',status:'idle',revision:0,pinned:false,archived:false,messages:seed.messages||[],draft:seed.draft||'',settings:{...settings}});
   entry.isNew=true;entry.version=1;entries.set(id,entry);notify(entry);return entry;
  };
- const readOnly=entry=>entry.starting||entry.record.archived||(entry.record.status==='running'&&!entry.run);
+ const readOnly=entry=>entry.deleting||entry.deleted||entry.starting||entry.record.archived||(entry.record.status==='running'&&!entry.run);
  const checkpoint=entry=>{
   if(!entry.run||entry.run.finishing)return Promise.resolve(entry);
   if(entry.run.checkpoint)return entry.run.checkpoint;
@@ -105,15 +109,21 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
   });
   run.checkpoint=work.finally(()=>{run.checkpoint=null;});return run.checkpoint;
  };
- const flush=entry=>{
+ const flush=(entry,{force=false}={})=>{
   timers.clearTimeout(entry.draftTimer);entry.draftTimer=null;
+  if(entry.deleted||entry.deleting)return Promise.resolve(entry);
   if(entry.run)return checkpoint(entry);
   return enqueue(entry,async()=>{
+   if(entry.deleting)return entry;
+   if(entry.isNew&&!force&&emptyConversation(entry))return entry;
    if(entry.version===entry.savedVersion&&!entry.isNew)return entry;
    if(entry.record.archived||(entry.record.status==='running'&&!entry.run))throw Error('此会话只读，未保存的内容可以导出或另存分支');
-   const version=entry.version,payload=conversationPayload(entry);
-   const record=await request(entry.isNew?'':'/update',entry.isNew?{title:entry.record.title,...payload}:{id:entry.id,expectedRevision:entry.record.revision,...payload});
-   return adopt(entry,record,version);
+   const version=entry.version,payload=conversationPayload(entry),creating=entry.isNew;
+   try{
+    const record=await request(creating?'':'/update',creating?{title:entry.record.title,...payload}:{id:entry.id,expectedRevision:entry.record.revision,...payload});
+    if(!record?.id||!Number.isInteger(record.revision))throw Error('保存响应不完整，请刷新确认');
+    entry.createUncertain=false;return adopt(entry,record,version);
+   }catch(error){if(creating&&(!error.status||error.status>=500))entry.createUncertain=true;throw error;}
   });
  };
  const change=(entry,patch)=>{
@@ -137,7 +147,7 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
   if(entry.run||entry.starting)throw Error('本会话正在生成');
   if(conversationBlockReason(entry))throw Error(conversationBlockReason(entry));
   // Flush before setting starting: ordinary update must still be allowed here.
-  const pending=flush(entry);entry.starting=true;notify(entry);
+  const pending=flush(entry,{force:true});entry.starting=true;notify(entry);
   try{
    await pending;
    return await enqueue(entry,async()=>{
@@ -166,25 +176,32 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
   });}finally{entry.run=null;notify(entry);if(!disposed&&!entry.error&&entry.version!==entry.savedVersion)void flush(entry).catch(()=>{});}
  };
  const update=async(entry,patch)=>{
+  if(entry.deleting||entry.deleted)throw Error('会话正在删除或已删除');
   if(entry.run||entry.record.status==='running')throw Error('运行中的会话不能修改，请先停止或恢复');
-  await flush(entry);
+  await flush(entry,{force:true});
   return enqueue(entry,async()=>adopt(entry,await request('/update',{id:entry.id,expectedRevision:entry.record.revision,...patch}),entry.savedVersion));
  };
  const recover=entry=>enqueue(entry,async()=>{
   if(entry.run||entry.record.status!=='running'||entry.record.leaseUntil>now())throw Error('仅可恢复租约已过期的运行');
   return adopt(entry,await request('/run/recover',{id:entry.id,expectedRevision:entry.record.revision}),entry.savedVersion);
  });
- const remove=entry=>enqueue(entry,async()=>{
-  if(entry.run||entry.starting)throw Error('请先停止本页生成');
-  timers.clearTimeout(entry.draftTimer);
-  if(!entry.isNew)await request('/delete',{id:entry.id,expectedRevision:entry.record.revision});
-  entries.delete(entry.id);notify(entry);
- });
+ const remove=entry=>{
+  if(entry.deleted)return Promise.resolve();
+  if(entry.deletePromise)return entry.deletePromise;
+  if(entry.run||entry.starting||entry.record.status==='running')return Promise.reject(Error('请先停止生成或恢复过期会话'));
+  entry.deleting=true;timers.clearTimeout(entry.draftTimer);entry.draftTimer=null;notify(entry);
+  const work=enqueue(entry,async()=>{
+   if(entry.isNew&&entry.createUncertain)throw Error('创建结果尚未确认。请先导出本地副本并刷新列表核对；不能确认服务器记录已删除。');
+   if(!entry.isNew)try{await request('/delete',{id:entry.id,expectedRevision:entry.record.revision});}catch(error){if(error.status!==404)throw error;}
+   entry.deleted=true;entry.error=null;entries.delete(entry.id);notify(entry);
+  },{allowError:true});
+  entry.deletePromise=work.finally(()=>{entry.deleting=false;entry.deletePromise=null;notify(entry);});return entry.deletePromise;
+ };
  const branch=async(entry,{textOnly=false}={})=>{
   let messages=conversationMessages(entry.messages);
   if(textOnly)messages=messages.filter(message=>['user','assistant'].includes(message.role)).map(({missingAttachments,tool_calls,...message})=>({...message,...(message.status==='等待工具结果'?{status:'完成'}:{})}));
   const copy=local({...entry.settings},{title:`${entry.record.title||'对话'} · ${textOnly?'纯文本':'分支'}`,messages,draft:entry.draft});
-  try{await flush(copy);}catch(error){error.localEntry=copy;throw error;}return copy;
+  try{await flush(copy,{force:true});}catch(error){error.localEntry=copy;throw error;}return copy;
  };
  const branchMessage=async(entry,options,{isCurrent=()=>true}={})=>{
   if(entry.run||entry.starting||entry.record.status==='running')throw Error('请先结束当前生成');
@@ -196,7 +213,7 @@ export function createConversationClient({tenantId,userId,fetcher=globalThis.fet
   const revision=entry.record.revision,latest=await enqueue(null,()=>request('/item?id='+encodeURIComponent(entry.id)));
   if(latest.revision!==revision){const error=Object.assign(Error('源会话已在其他页面修改，请先重新加载'),{status:409});fail(entry,error);throw error;}
   if(!current())throw Error('操作已取消，未发送模型请求');
-  const copy=local(seed.settings,seed);await flush(copy);return copy;
+  const copy=local(seed.settings,seed);await flush(copy,{force:true});return copy;
  };
  const importHistory=historyId=>enqueue(null,async()=>{const record=await request('/import',{historyId});const cached=entries.get(record.id);if(cached)return cached;const entry=fromRecord(record);entries.set(entry.id,entry);return entry;});
  const exportEntry=entry=>({...clone(entry.record),...conversationPayload(entry,{validate:false}),...(entry.error?{localSaveError:{message:entry.error.message,status:entry.error.status}}:{})});
@@ -235,12 +252,13 @@ export function mountConversations(root,{client,entry,initialConversationId,onSe
   toolbar.querySelector('[data-title]').textContent=current.record.title||'新对话';
   const blocked=conversationBlockReason(current),dirty=current.version!==current.savedVersion;
   saveState.dataset.state=current.conflict?'conflict':current.error?'error':dirty?'unsaved':'saved';
-  saveState.textContent=blocked||(current.run?'正在生成 · 检查点自动保存':dirty?'未保存 · 正在同步':'已保存');
+  saveState.textContent=blocked||(current.isNew&&emptyConversation(current)?'尚未开始 · 输入消息后自动保存':current.run?'正在生成 · 检查点自动保存':dirty?'未保存 · 正在同步':'已保存');
   const payload=conversationPayload(current,{validate:false}),localBytes=bytes(JSON.stringify({title:current.record.title||'',...payload})),draftBytes=bytes(payload.draft);
   currentSize.textContent=`已保存 ${formatConversationBytes(current.record.bytes||0)} · 当前内容 ${formatConversationBytes(localBytes)} / 1 MiB · 草稿 ${formatConversationBytes(draftBytes)} / 64 KiB${dirty?'（待同步）':''}`;
   currentSize.classList.toggle('capacity-warning',localBytes>=1048576*.8||draftBytes>=65536*.8);
   if(usage){const percent=Math.min(100,usage.bytes/usage.limits.bytes*100);capacity.querySelector('[data-capacity-label]').textContent=`${usage.count} / ${usage.limits.count} 个会话 · ${formatConversationBytes(usage.bytes)} / ${formatConversationBytes(usage.limits.bytes)}`;capacity.querySelector('progress').value=percent;capacity.classList.toggle('capacity-warning',percent>=80||usage.count/usage.limits.count>=.8);}
-  const running=current.record.status==='running'||!!current.starting;
+  const running=current.record.status==='running'||!!current.starting||current.deleting||current.deleted;
+  toolbar.querySelector('[data-delete]').textContent=current.deleting?'正在删除…':current.isNew?'丢弃草稿':'删除会话';
   for(const key of ['rename','pin','archive','delete'])toolbar.querySelector(`[data-${key}]`).disabled=running;
   toolbar.querySelector('[data-pin]').textContent=current.record.pinned?'取消置顶':'置顶';
   toolbar.querySelector('[data-archive]').textContent=current.record.archived?'取消归档':'归档';
@@ -258,13 +276,13 @@ export function mountConversations(root,{client,entry,initialConversationId,onSe
    const result=await client.list({q:search.value.trim(),archived:filter.value,page:String(page)});
    if(destroyed||generation!==epoch)return;
    page=result.page;pages=result.pages;usage=result.usage||null;list.replaceChildren();
-   const localRows=[...client.entries.values()].filter(value=>(value.isNew||value.error||value.version!==value.savedVersion)&&(value===current||value.messages.length||value.draft.trim()||value.error)&&!result.items.some(row=>row.id===value.id)&&(filter.value==='all'||String(!!value.record.archived)===filter.value)&&(!search.value.trim()||`${value.record.title} ${value.draft}`.includes(search.value.trim()))).map(value=>({...value.record,id:value.id,title:`${value.record.title||'新对话'} · 本地未保存`}));
+   const localRows=[...client.entries.values()].filter(value=>!value.deleted&&(value.isNew||value.error||value.version!==value.savedVersion)&&(!emptyConversation(value)||value.error)&&!result.items.some(row=>row.id===value.id)&&(filter.value==='all'||String(!!value.record.archived)===filter.value)&&(!search.value.trim()||`${value.record.title} ${value.draft}`.includes(search.value.trim()))).map(value=>({...value.record,id:value.id,title:`${value.record.title||'新对话'} · 本地未保存`}));
    for(const row of [...localRows,...result.items]){const article=document.createElement('div');article.className='conversation-row';article.dataset.id=row.id;article.setAttribute('role','listitem');const button=document.createElement('button');button.type='button';button.textContent=`${row.pinned?'置顶 · ':''}${row.title||'新对话'}${row.status==='running'?' · 生成中':''}`;button.onclick=action(()=>open(row.id));article.append(button);list.append(article);}
    rail.querySelector('[data-count]').textContent=`${result.total} 条 · ${page}/${pages}`;rail.querySelector('[data-prev]').disabled=page<=1;rail.querySelector('[data-next]').disabled=page>=pages;listState.textContent=result.items.length?'':'暂无会话';redraw();
   }catch(err){if(generation===epoch)error(err);}
  };
  const open=async(id,{reload=false}={})=>{const generation=++openEpoch;onLoading?.(true);try{const value=await client.load(id,{reload});if(!destroyed&&generation===openEpoch)select(value);return value;}finally{if(!destroyed&&generation===openEpoch)onLoading?.(false);}};
- const newConversation=()=>{openEpoch++;onLoading?.(false);select(client.local({...current.settings}));void client.flush(current).catch(error);};
+ const newConversation=()=>{openEpoch++;onLoading?.(false);if(current.isNew&&emptyConversation(current)&&!current.error&&!current.deleting)return;select(client.local({...current.settings}));};
  toggle.onclick=()=>{const expanded=layout.classList.toggle('is-open');toggle.setAttribute('aria-expanded',String(expanded));};
  rail.querySelector('[data-new]').onclick=newConversation;
  rail.querySelector('[data-refresh]').onclick=()=>void refresh();
@@ -274,7 +292,13 @@ export function mountConversations(root,{client,entry,initialConversationId,onSe
  toolbar.querySelector('[data-rename]').onclick=mutation(async value=>{const title=prompt('会话名称',value.record.title||'');if(title?.trim())await client.update(value,{title:title.trim()});});
  toolbar.querySelector('[data-pin]').onclick=mutation(value=>client.update(value,{pinned:!value.record.pinned}));
  toolbar.querySelector('[data-archive]').onclick=mutation(value=>client.update(value,{archived:!value.record.archived}));
- toolbar.querySelector('[data-delete]').onclick=action(async()=>{const value=current;if(!confirm(`删除“${value.record.title||'新对话'}”？此操作不可撤销。`))return;await client.remove(value);if(current===value)newConversation();await refresh();});
+ toolbar.querySelector('[data-delete]').onclick=action(async()=>{
+  const value=current;if(value.deleting||value.deleted)return;
+  if(!confirm(`${value.isNew?'丢弃草稿':'删除'}“${value.record.title||'新对话'}”？此操作不可撤销。`))return;
+  await client.remove(value);if(destroyed)return;
+  if(current===value){select(client.local({...value.settings}));const empty=current;try{const rows=await client.list({archived:filter.value,q:search.value.trim(),limit:'1'});if(!destroyed&&current===empty&&emptyConversation(empty)&&rows.items.length)await open(rows.items[0].id);}catch(err){error(err);}}
+  toolbar.querySelector('.conversation-more').open=false;await refresh();
+ });
  toolbar.querySelector('[data-export]').onclick=()=>{exportSource=current;exportDialog.querySelector('form').reset();exportDialog.showModal();};
  toolbar.querySelector('[data-backup]').onclick=()=>download(current.backup,`${current.id}-本地副本`);
  const fork=textOnly=>action(async()=>{if(textOnly&&!confirm('仅保留文字，素材与工具调用上下文将丢失。新建纯文本会话？'))return;try{select(await client.branch(current,{textOnly}));}catch(err){if(err.localEntry)select(err.localEntry);throw err;}await refresh();});

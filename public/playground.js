@@ -22,14 +22,14 @@ const headerValue=(response,name)=>{const value=response.headers.get(name);if(!v
 const responseRoute=response=>{const model=headerValue(response,'x-router-model');if(!model)return null;return {providerId:headerValue(response,'x-router-provider'),provider:headerValue(response,'x-router-provider-name'),model,protocol:headerValue(response,'x-router-protocol'),reason:headerValue(response,'x-router-reason'),attempt:Number(headerValue(response,'x-router-attempt'))||1,fallback:headerValue(response,'x-router-fallback')==='true'}};
 export function stopPlayground(){stopCompare();contextVersion++;videoPreparation?.abort();stashConversation();conversationMount?.destroy();conversationMount=null;currentViewDraw=null;if(activeConversation&&!activeConversation.starting)void conversationClient?.flush(activeConversation).catch(()=>{});}
 export function resetPlayground(){stopPlayground();controller?.abort();conversationClient?.dispose();conversationClient=null;conversationScope='';activeConversation=null;pendingVideo=null;history=[];conversationId=null;pendingImages=[];draft='';settings={...conversationDefaults};view='chat';}
-export function renderPlayground({state,token,tenantId,userId,esc,refresh,embedded=false,renderView,navigate,initialTarget,initialConversationId,onConversationChange,personalLoading=false}){
+export function renderPlayground({state,token,tenantId,userId,esc,refresh,embedded=false,renderView,navigate,initialTarget,initialConversationId,initialNewConversation=false,onConversationChange,personalLoading=false}){
  const root=document.querySelector('#content');
  stopCompare();stashConversation();conversationMount?.destroy();
  const scope=JSON.stringify([userId??null,tenantId??null]);
  if(!conversationClient||conversationScope!==scope){resetPlayground();conversationScope=scope;conversationClient=createConversationClient({tenantId,userId});}
  const client=conversationClient;
- if(!activeConversation)bindConversation(client.local({...conversationDefaults,...(initialTarget?{target:initialTarget}:{})}));
- if(initialConversationId||initialTarget)view='chat';
+ if(!activeConversation||activeConversation.deleted||initialNewConversation)bindConversation(client.local({...conversationDefaults,...(initialTarget?{target:initialTarget}:{})}));
+ if(initialConversationId&&initialConversationId!==activeConversation?.id||initialTarget&&initialTarget!==settings.target||initialNewConversation)view='chat';
  if(initialTarget&&!initialConversationId){
   if(!activeConversation.isNew&&(settings.target!==initialTarget||activeConversation.run))bindConversation(client.local({...settings,target:initialTarget}));
   if(activeConversation.isNew){settings.target=initialTarget;client.change(activeConversation,{settings});}

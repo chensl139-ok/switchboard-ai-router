@@ -18,6 +18,17 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Check stable release metadata
+        run: |
+          node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            import assert from "node:assert/strict";
+            const version=JSON.parse(readFileSync("package.json","utf8")).version;
+            assert.match(version,/^\d+\.\d+\.\d+$/);
+            assert.equal(process.env.GITHUB_REF_NAME,"v"+version);
+            const changelog=readFileSync("CHANGELOG.md","utf8");
+            assert.ok(changelog.split("\n").some(line=>line.startsWith("## ["+version+"]")),"Missing release notes");
+          '
       - run: npm ci
       - run: npm run check
       - run: npm test

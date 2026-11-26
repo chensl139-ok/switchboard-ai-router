@@ -56,7 +56,7 @@ test('500ms 草稿保存、发送前 flush 和 CAS start 串行，不携带 user
 });
 
 test('并行保存只以最新 revision 写入，旧响应不覆盖较新草稿',async t=>{
- const h=harness(t),entry=h.client.local();await h.client.flush(entry);
+ const h=harness(t),entry=h.client.local();await h.client.flush(entry,{force:true});
  h.client.change(entry,{draft:'第一版'});const first=h.client.flush(entry);await Promise.resolve();
  h.client.change(entry,{draft:'第二版'});const second=h.client.flush(entry);await Promise.all([first,second]);
  assert.equal(entry.draft,'第二版');assert.equal(h.records.get(entry.id).draft,'第二版');assert.equal(entry.version,entry.savedVersion);
@@ -64,7 +64,7 @@ test('并行保存只以最新 revision 写入，旧响应不覆盖较新草稿'
 });
 
 test('409 不启动上游、不自动重试，保留可导出的本地副本并可分支或重新加载',async t=>{
- const h=harness(t),entry=h.client.local();await h.client.flush(entry);
+ const h=harness(t),entry=h.client.local();await h.client.flush(entry,{force:true});
  h.client.change(entry,{draft:'不能丢失的本地草稿'});h.fail();
  await assert.rejects(h.client.start(entry,{messages:[{role:'user',content:'不能丢失的本地草稿'}]}),error=>error.status===409);
  assert.equal(entry.conflict,true);assert.equal(entry.run,null);assert.equal(entry.draft,'不能丢失的本地草稿');assert.equal(h.calls.some(call=>call.route==='/run/start'),false);

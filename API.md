@@ -249,11 +249,13 @@ Cherry Studio 若能聊天但无法获取模型列表，请先检查客户端代
 }
 ```
 
-必须显式指定已注册模型，例如 `siliconflow::Kwai-Kolors/Kolors`，不支持 auto。JSON 上限 10 MB；multipart 上限 52 MB；单音频文件上限 50 MB；单次上游超时 180 秒，音频响应上限 64 MB。不自动回退或重试，避免重复生成。生成使用共同 Key 配额；视频轮询不扣生成次数，但受频率和并发限制。
+必须显式指定已注册模型，例如 `siliconflow::Kwai-Kolors/Kolors`，不支持 auto。JSON 上限 10 MB；multipart 上限 52 MB；单音频文件上限 50 MB；一般媒体上游超时 180 秒，MOSS 图片生成等待上限为 15 分钟；音频响应上限 64 MB。不自动回退或重试，避免重复生成。生成使用共同 Key 配额；视频轮询不扣生成次数，但受频率和并发限制。
+
+MOSS 图片表单支持水印、同请求内提示词增强、种子、推理步数、引导系数与反向提示词，参数按具体上游校验，保留显式 0／false；历史保存提交参数，不把增强失败当成生成成功。提示词增强不是独立的对话／生图候选模型。
 
 硅基流动图片请求将 n / size 转换为 batch_size / image_size，支持 URL；请求 response_format=b64_json 时，网关从 HTTPS 结果地址读取图片并转为 Base64（不向图片地址转发上游密钥，总图片大小限制 24 MB）。链接有效期由服务商决定，请及时保存。
 
-视频仅适配硅基流动异步协议，不等同于 OpenAI Videos API。任务在网关持久化 24 小时，仅提交 Key / 账户及当前租户管理员可查询；上游链接可能提前过期。提交后的任务可能继续在上游执行，取消本地等待不保证取消视频生成。
+视频仅适配硅基流动异步协议，不等同于 OpenAI Videos API。任务在网关持久化 24 小时，仅提交 Key / 账户及当前租户管理员可查询；上游链接可能提前过期。提交后的任务可能继续在上游执行，取消本地等待不保证取消视频生成。**查询已有任务与重新生成是不同操作**，重新生成会提交新请求、可能再次计费；查询成功不保证结果 URL 仍有效。
 
 ```sh
 curl 'http://127.0.0.1:3100/v1/audio/transcriptions' \
@@ -296,3 +298,83 @@ curl -sS 'http://127.0.0.1:3100/v1/tasks/extraction-001' \
 - **边界**：任务 ID 不是幂等键，不自动重试、去重或排除之前模型；每次生成都可能计费。一个任务最多 1000 次请求，超过返回 409。保留期 90 天，清除日志同时清除任务记录；旧日志不推断补齐。媒体生成、专用视觉理解以及 WebSocket 的自定义任务关联尚不支持；媒体入口携带此头会返回 400，避免产生“已关联”的误解。
 
 请求日志新增“输出验收”筛选，搜索支持任务 ID；展开详情可进入任务汇总，汇总不受分页和当前筛选限制。OpenAPI 包含反馈与查询接口；完整交互说明见控制台“API 文档 → 任务追踪与验收”。
+
+## 工作台会话与偏好接口
+
+本节对应 **3.1.1 文档（2026-11-26）**。这是账户管理 API，不是 `/v1/responses` 服务端会话，也不会使 `previous_response_id`、`store=true` 或 Codex 完整会话能力变为可用。
+
+使用同源账户 session Cookie，并发送 `X-Tenant-ID` 核对当前租户；Header 不能切换或扩大授权范围，业务 API Key 不能代替 session。POST 使用 `Content-Type: application/json`。所有会话、来源历史与收藏都限定为**本人 + 当前租户**，管理员不因此获得他人的会话访问权。viewer 可读本人记录，但所有写入（包括删除、导入、运行与收藏）返回 403。
+
+以下会话路径均以 `/api/account/conversations` 为前缀：
+
+| 方法与后缀 | 输入 | 响应／语义 |
+| --- | --- | --- |
+| GET 根路径 | `q`、`archived=false\|true\|all`、`page`、`limit` | 分页摘要与本人容量 |
+| GET `/item?id=<UUID>` | 会话 ID | 完整记录；不存在或非本人返回 404 |
+| POST 根路径 | 可选 `title`、`messages`、`draft`、`settings` | 显式创建，返回完整记录，`revision=1` |
+| POST `/update` | `id`、`expectedRevision`，及待修改字段 | 更新标题／正文／草稿／设置／`pinned`／`archived`，返回新 revision |
+| POST `/delete` | `id`、`expectedRevision` | 删除非运行记录，返回 `{ "ok": true }` |
+| POST `/import` | `{ "historyId": "<UUID>" }` | 将符合条件的旧历史导入，返回会话 |
+| POST `/run/start` | `id`、`expectedRevision`、`messages`、`draft`、`settings` | 设置 running，返回 `runId` 与 `leaseUntil` |
+| POST `/run/checkpoint` | start 字段 + `runId` | 保存当前文本并续租，返回新 revision |
+| POST `/run/finish` | checkpoint 字段 + `status` | `completed`／`failed`／`stopped`，清除运行凭证与租约 |
+| POST `/run/recover` | `id`、`expectedRevision` | 仅已过期的 running 可恢复为 interrupted，不发起模型调用 |
+
+列表默认 `page=1`、`limit=20`、`archived=false`，limit 为 1–100，q 最多 200 字符，搜索标题、草稿及消息；置顶优先，再按最近更新时间排序。返回结构如下（空列表示例，不代表实际使用量）：
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "limit": 20,
+  "pages": 1,
+  "usage": {
+    "count": 0,
+    "bytes": 0,
+    "limits": {
+      "count": 200,
+      "bytes": 33554432,
+      "conversationBytes": 1048576,
+      "draftBytes": 65536
+    }
+  }
+}
+```
+
+`usage` 统计本人在当前租户的全部会话，不随搜索或归档过滤变化。列表仅含摘要；`/item` 和创建／更新／运行响应是记录本身，不额外包在 `item` 内。完整记录包括 `id`、`title`、`titleMode`、`messages`、`draft`、`settings`、`pinned`、`archived`、`status`、`revision`、`runId`、`leaseUntil`、`bytes`、`sourceHistoryId`、`createdAt`、`updatedAt`。时间戳字段 createdAt／updatedAt 为 ISO 文本，leaseUntil 为毫秒时间戳或 null。
+
+### 保存、标题和运行约束
+
+- 可创建的文本消息为 `user`／`assistant` + 字符串 `content`，可保留思考及受限路由／统计元数据。缺失附件使用 `missingAttachments` 标记；工具调用只保存标记，不是可恢复的完整工具执行链。不要提交二进制、Data URL 或 blob 素材作为会话存储。
+- `settings` 支持 `target`、`transport`（sse／ws／http）、`thinking`（auto／enabled／disabled）、`showThinking`、`maxTokens`（1–131072）和最多 16 KiB 的 JSON 数组字符串 `tools`。保存工具定义不等于恢复工具结果。
+- `title` 最多 180 字符；`titleMode` 由服务端管理，客户端赋值不生效。空标题／默认“新对话”新记录使用 auto，start 时可从首条用户文本生成标题，不调用上游；显式改标题、导入与旧记录使用 manual，不自动改名。
+- 服务端 POST 根路径是**显式创建**，可以创建空记录；“打开空白新会话不落库”是工作台的客户端保存策略，不是服务端禁止空记录。普通 autosave 等到文字输入；明确 metadata／branch／start 可强制持久化。客户端 `force` 不构成服务端越过 CAS 的参数。
+- 对已有记录的写入必须带最新 `expectedRevision`，每次成功更新递增 revision；不得拿旧值重试覆盖。start／checkpoint／finish 都要求完整的 messages、draft、settings。运行接口只管理持久化状态，实际模型生成是独立网关调用。
+- start 不能用于已运行或已归档会话；归档需先取消。运行中只能通过带同一 `runId` 的 checkpoint／finish 保存，不能普通 update 或 delete。租约 120 秒，客户端 25 秒续租、输出按 5 秒间隔做检查点；这不是逐 Token 同步或后台继续生成保证。
+- checkpoint 必须持有效租约；过期需显式 recover，旧 runId 失效。finish 校验 revision 与 runId 并清理租约。刷新／恢复不自动重发生成请求。
+
+### 限额、冲突与删除
+
+单会话序列化 `{title,messages,draft,settings}` 最多 1 MiB；draft 最多 64 KiB（UTF-8）。本人在当前租户最多 200 条／32 MiB，包含归档；租户合计 256 MiB、全局 1 GiB。这些是载荷限额，不是 SQLite 文件大小承诺。条数上限返回 409，容量超限返回 413；不会静默删除旧会话。
+
+- 404：不存在或无权访问；删除时清除本地失效记录即可，不建立替代项。
+- 409：可能是 revision／租户上下文冲突、运行状态或条数上限，需按错误信息重新加载核对；删除冲突必须再次确认，不自动采用新版 revision 删除。
+- 网络／响应解析失败：保留本地内容，不当成服务端已删除或已保存。创建没有自动幂等保证，结果不确定时先导出本地副本并刷新列表核对 ID，不盲目重建、不按标题猜删。
+- 客户端以 deleting／deleted 保护队列竞态；删除不调用 new + flush 保存替代记录。服务端运行状态或 CAS 检查仍是最终约束。
+
+### 历史导入、分支、导出与收藏
+
+旧 history 仍保留每用户／租户最近 100 条、全局 5000 条快照，清理它不会裁剪 conversations。import 只接受本人当前租户的完整已结束聊天快照，拒绝截断、缺失附件、工具链或未完成记录；保留原历史，保存 `sourceHistoryId`，同一来源已有会话时返回该会话，不重复创建。它是旧 history 导入接口，不是任意 JSON 文件上传接口。
+
+用户消息编辑在客户端创建新分支草稿，不自动发送；助手重试确认费用后新建分支并调用模型，不覆盖旧回答。导出为客户端 JSON／Markdown／文本操作，不是额外服务端导出路由；Markdown／文本默认不含思考，JSON 分享前须检查敏感内容。刷新后缺素材或工具上下文不能继续原上下文，工作台不是永久媒体仓库。
+
+`GET /api/account/workspace/preferences` 返回 `{ "revision": 0, "favorites": [] }`（尚无偏好时）。`POST` 同路径以 CAS **替换完整收藏列表**：
+
+```json
+{ "expectedRevision": 0, "favorites": ["provider-id::model-id"] }
+```
+
+成功返回递增后的 `{revision,favorites}`；冲突 409，先重新读取再确认合并。最多 200 个字符串，每个不超过 512 字符。收藏属于本人当前租户，不会启用模型、改变路由或取得模型调用权限。
+
+验证命令与升级顺序见 [OPERATIONS](docs/OPERATIONS.md)，权限见 [TENANCY](TENANCY.md)。本次文档不新增测试数量、真实上游或 OAuth 成功结论；文中历史渠道观察也不保证当前供应商状态。
